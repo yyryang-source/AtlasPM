@@ -23,6 +23,26 @@ allocation, no execution, no automated alpha gate approval.
 A historical backtest on today's current listings is survivor biased.
 Do not interpret this work as 2000–2026 unbiased full-US coverage.
 
+## One-command Windows entrypoint (after installing dependencies)
+
+The optional script `scripts/selection/Invoke-USMarketDataExpansion.ps1`
+orchestrates listing discovery, price sync, and the independent NYSE
+quality audit. It does not train models or connect brokers. You still
+need to install `.[market,calendar,ml]` and select the branch first.
+
+```powershell
+# First trial: up to 50 missing names
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\selection\Invoke-USMarketDataExpansion.ps1 -AsOf 2026-11-20 -MaxSymbols 50
+
+# Resume all remaining names with the SAME Start and as-of / exclusive end.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\selection\Invoke-USMarketDataExpansion.ps1 -AsOf 2026-11-20 -MaxSymbols 0 -SkipUniverseRefresh
+```
+
+The audit runs after each batch. The first 50-name batch should report
+`REVIEW_REQUIRED` for incomplete full-US coverage; this is expected.
+The script does not register scheduled tasks or automatically start work
+in the background.
+
 ## Run locally on Windows PowerShell
 
 Use your existing AtlasPM Windows repo; do not create a new repo.
