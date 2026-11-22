@@ -72,6 +72,14 @@ def _validate_mapping_record(record: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("units_confirmed must be true or false")
     # Reviewed JSON is still just user input. These booleans cannot grant
     # trading, collateral, or brokerage margin privileges.
+    if kind == "treasury":
+        # IBKR BOND also covers non-Treasury bonds. The mapping cannot
+        # infer US sovereign issuer from the BOND asset-class alone.
+        issuer = record.get("issuer_confirmed")
+        if not isinstance(issuer, bool):
+            raise ValueError("Treasury issuer_confirmed must be boolean")
+        if len(identifier) != 9 or not identifier.isalnum():
+            raise ValueError("Treasury identifier must have nine CUSIP characters")
     if kind == "option":
         for field in REQUIRED_OPTION:
             if field not in record:
@@ -89,6 +97,7 @@ def _validate_mapping_record(record: dict[str, Any]) -> dict[str, Any]:
         "identifier": identifier, "ibkr_asset_class": asset_class,
         "quantity_units": TYPE_UNITS[kind],
         "manually_reviewed": verified, "units_confirmed": units_confirmed,
+        **({"issuer_confirmed": record["issuer_confirmed"]} if kind == "treasury" else {}),
         **({key: record[key] for key in REQUIRED_OPTION} if kind == "option" else {}),
     }
 
@@ -186,6 +195,8 @@ def diagnose_ibkr_contract_mapping(
             record_blockers.append("CONTRACT_IDENTITY_NOT_REVIEWED")
         if not mapped["units_confirmed"]:
             record_blockers.append("IBKR_POSITION_UNITS_NOT_CONFIRMED")
+        if kind == "treasury" and not mapped["issuer_confirmed"]:
+            record_blockers.append("US_TREASURY_ISSUER_NOT_CONFIRMED")
         # IBKR BOND position has historically varied unit and quote
         # conventions. FACE_USD is explicitly declared but *never* inferred.
         value = _market_value(p, conid)
@@ -209,6 +220,7 @@ def diagnose_ibkr_contract_mapping(
             "signed_market_value_usd": value,
             "manual_identity_reviewed_claim": mapped["manually_reviewed"],
             "unit_confirmation_claim": mapped["units_confirmed"],
+            **({"issuer_confirmed_claim": mapped["issuer_confirmed"]} if kind == "treasury" else {}),
             "mapping_issues": sorted(set(record_blockers)),
             **({k: mapped[k] for k in REQUIRED_OPTION} if kind == "option" else {}),
         })
@@ -257,6 +269,7 @@ def diagnose_ibkr_contract_mapping(
         "mapping_block_reasons": sorted(set(blockers)),
         "warnings": sorted(set(warnings + [
             "Mappings and source labels are user-supplied, not independent broker identity proof.",
+            "IBKR BOND may be corporate or sovereign: U.S. Treasury issuer and CUSIP must be independently checked before any identity mapping is trusted.",
             "IBKR BOND position units must be checked against the actual contract: no automatic face-value conversion.",
             "This diagnostic does not convert signed settledcash into margin debt, map collateral availability, or authorize trading.",
             "All financial values and full identifiers are private; keep this report inside local_data/.",
