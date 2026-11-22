@@ -116,6 +116,10 @@ def build_parser() -> argparse.ArgumentParser:
     managed.add_argument("--apr", type=float, default=0.065)
     managed.add_argument("--max-financing-cost", type=float, default=0.08)
     managed.add_argument("--fee-bps", type=float, default=5.0)
+    managed.add_argument("--max-daily-tail-loss", type=float, default=None,
+                         help="Optional maximum historical one-day ES as fraction of equity")
+    managed.add_argument("--tail-fraction", type=float, default=0.05,
+                         help="Worst historical tail share, >0 and <=0.25")
 
     return parser
 
@@ -164,6 +168,8 @@ def main(argv: list[str] | None = None) -> int:
                 annual_financing_rate=args.apr,
                 max_annual_financing_cost=args.max_financing_cost,
                 fee_bps=args.fee_bps,
+                max_daily_tail_loss=args.max_daily_tail_loss,
+                tail_fraction=args.tail_fraction,
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
