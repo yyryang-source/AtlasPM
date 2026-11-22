@@ -157,3 +157,9 @@ jobs:
         run: python -m unittest discover -s tests -p "test_atlas_robustness_audit.py" -v
       - name: Execute independent native RiskNet 0-1x cash allocation
         run: python -m atlaspm.cli atlas-native-backtest --architecture risknet --return-head-strength 0 --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_risknet_v2.json
+      - name: Validate original Atlas FusionNet multiscale and downside risk research
+        run: python -m unittest discover -s tests -p "test_atlas_fusionnet*.py" -v
+      - name: Train original FusionNet and exercise shrinkage correlation risk allocation
+        run: python -m atlaspm.cli atlas-native-backtest --architecture fusion --return-head-strength 0 --fusion-allocator-mode shrinkage --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_fusionnet.json
+      - name: Exercise alternate FusionNet inverse-risk ablation mode
+        run: python -m atlaspm.cli atlas-native-backtest --architecture fusion --return-head-strength 0 --fusion-allocator-mode inverse_risk --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_fusion_inverse.json
