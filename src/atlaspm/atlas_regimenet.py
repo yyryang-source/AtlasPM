@@ -339,6 +339,7 @@ def backtest_atlas_native(
     no_trade_band: float = 0.0,
     return_head_strength: float = 1.0,
     architecture: str = "dual",
+    fusion_allocator_mode: str = "shrinkage",
 ) -> dict[str, Any]:
     """Train our own network and simulate each next-close rebalance.
 
@@ -367,6 +368,10 @@ def backtest_atlas_native(
     return_head_strength = _real(
         return_head_strength, "return_head_strength", 0, 1
     )
+    if fusion_allocator_mode not in ("inverse_risk","downside","shrinkage"):
+        raise ValueError("Unknown fusion allocator ablation")
+    if architecture != "fusion" and fusion_allocator_mode != "shrinkage":
+        raise ValueError("Fusion-specific allocator ablations require fusion architecture")
     if architecture not in ("dual","risknet","fusion"):
         raise ValueError("Atlas native architecture must be dual, risknet, or fusion")
     if architecture in ("risknet","fusion") and return_head_strength != 0:
@@ -493,6 +498,7 @@ def backtest_atlas_native(
                 fusion_allocator = allocate_fusion_sleeve(
                     symbols, vol, downside, trailing,
                     max_weight=maximum_name_weight,
+                    mode=fusion_allocator_mode,
                 )
                 native_sleeve = fusion_allocator["weights"]
                 weights = [native_sleeve[s] for s in symbols]
@@ -700,6 +706,9 @@ def backtest_atlas_native(
             "no_trade_band_l1_account_weight": no_trade_band,
             "return_head_strength": return_head_strength,
             "architecture": architecture,
+            "fusion_allocator_mode": (
+                fusion_allocator_mode if architecture == "fusion" else None
+            ),
         },
         "execution_summary": {
             name: {
