@@ -61,6 +61,8 @@ class StockWalkforwardTest(unittest.TestCase):
         self.assertEqual(r["executed_rebalances"], 5)
         self.assertEqual(r["equity_curve"][0]["equity_index"], 1.0)
         self.assertEqual(r["equity_curve"][0]["spy_index"], 1.0)
+        self.assertEqual(r["equity_curve"][0]["universe_index"], 1.0)
+        self.assertEqual(r["equal_weight_universe"]["return_observations"], 95)
         self.assertGreater(r["benchmark"]["total_return"], 0)
         self.assertLessEqual(r["portfolio"]["max_drawdown"], 0)
         self.assertFalse(r["live_execution_enabled"])
@@ -74,6 +76,7 @@ class StockWalkforwardTest(unittest.TestCase):
                          self.dates[261].isoformat())
         self.assertEqual(result["equity_curve"][0]["equity_index"], 1)
         self.assertAlmostEqual(result["equity_curve"][1]["equity_index"], 1)
+        self.assertAlmostEqual(result["equity_curve"][1]["universe_index"], 1)
         self.assertGreater(result["equity_curve"][2]["equity_index"], 1)
 
     def test_turnover_costs_reduce_performance(self):
@@ -83,6 +86,9 @@ class StockWalkforwardTest(unittest.TestCase):
                            paid["portfolio"]["total_return"])
         self.assertGreater(paid["execution_summary"]["total_modeled_transaction_cost_as_fraction_of_initial_equity"], 0)
         self.assertEqual(free["execution_summary"]["total_modeled_transaction_cost_as_fraction_of_initial_equity"], 0)
+        self.assertGreater(free["equal_weight_universe"]["total_return"],
+                           paid["equal_weight_universe"]["total_return"])
+        self.assertGreater(paid["equal_weight_universe_execution_summary"]["sum_of_costs_in_normalized_initial_equity_units"], 0)
 
     def test_future_rows_cannot_change_past_backtest(self):
         previous = self._run()
@@ -97,6 +103,7 @@ class StockWalkforwardTest(unittest.TestCase):
         self.assertEqual(previous["equity_curve"], after["equity_curve"])
         self.assertEqual(previous["decisions"], after["decisions"])
         self.assertEqual(previous["portfolio"], after["portfolio"])
+        self.assertEqual(previous["equal_weight_universe"], after["equal_weight_universe"])
 
     def test_missing_execution_price_fails_closed(self):
         self._write_prices(missing=("A", self.dates[261]))
@@ -107,6 +114,27 @@ class StockWalkforwardTest(unittest.TestCase):
         self._write_prices(missing=("A", self.dates[263]))
         with self.assertRaisesRegex(ValueError, "MISSING_HELD_PRICE"):
             self._run()
+
+    def test_equal_weight_universe_independent_of_top_n(self):
+        one = self._run(top=1)
+        two = self._run(top=2)
+        self.assertEqual(one["equal_weight_universe"], two["equal_weight_universe"])
+        self.assertEqual(one["equal_weight_universe_executions"],
+                         two["equal_weight_universe_executions"])
+        self.assertNotEqual(one["portfolio"]["total_return"], two["portfolio"]["total_return"])
+        self.assertEqual(one["equal_weight_universe_executions"][0]["holdings_count"], 3)
+        self.assertAlmostEqual(one["relative"]["cagr_minus_equal_weight_universe_percentage_points"],
+                               100 * (one["portfolio"]["cagr"] - one["equal_weight_universe"]["cagr"]))
+
+    def test_missing_universe_execution_price_fails_closed(self):
+        self._write_prices(missing=("C", self.dates[261]))
+        with self.assertRaisesRegex(ValueError, "MISSING_UNIVERSE_EXECUTION_PRICE"):
+            self._run(top=1)
+
+    def test_missing_universe_held_price_fails_closed(self):
+        self._write_prices(missing=("C", self.dates[263]))
+        with self.assertRaisesRegex(ValueError, "MISSING_UNIVERSE_HELD_PRICE"):
+            self._run(top=1)
 
     def test_input_validation(self):
         with self.assertRaisesRegex(ValueError, "end must be later"):
@@ -133,6 +161,8 @@ class StockWalkforwardTest(unittest.TestCase):
             self.assertEqual(summary["decision_count"], saved["decision_count"])
             self.assertEqual(summary["portfolio"]["cagr"], saved["portfolio"]["cagr"])
             self.assertFalse(saved["live_execution_enabled"])
+            self.assertEqual(summary["equal_weight_universe"]["cagr"],
+                             saved["equal_weight_universe"]["cagr"])
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 status = main(["stock-backtest", "--prices", str(self.stocks),
