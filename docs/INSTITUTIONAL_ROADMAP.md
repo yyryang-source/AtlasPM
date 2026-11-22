@@ -56,6 +56,8 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 
 ## Phase E — Broker adapter + safe order management (v0.8)
 
+- [x] Local normalized broker-export vs ledger reconciliation (USD account/position/collateral, stale-data and mismatch rejection); imports remain unauthenticated
+- [ ] Genuine authenticated IBKR read-only account synchronization and security-contract mapping
 - [ ] IBKR read-only account sync first, then official order-preview/What-If.
 - [ ] Paper account only: target rebalancing, cancel/replace, partial fills, duplicate protection, reconnection recovery.
 - [ ] Signed approval/event audit, kill switch, stale data and order ambiguity fail-closed modes.
