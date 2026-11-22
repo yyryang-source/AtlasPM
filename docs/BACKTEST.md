@@ -33,7 +33,7 @@ At the close of session `t-1`, the system produces a signal using strictly known
 
 This one-session execution delay avoids the unrealistic assumption that a strategy can observe the same closing price and retroactively fill its resulting order at that exact close. Actual market-on-close order execution, spreads and price impact are **still not modeled**.
 
-At the next rebalance, previous asset quantities drift with returns, so there is **no hidden daily rebalancing**. Each rebalance resets the borrowed amount to the requested target gross leverage. Annual borrowing APR is accrued to debt each trading day (`APR / 252`), including between rebalances. There is no cash interest or daily maintenance liquidation model.
+At the next rebalance, previous asset quantities drift with returns, so there is **no hidden daily rebalancing**. Each rebalance resets the borrowed amount to the requested target gross leverage. Annual borrowing APR is accrued to debt each trading day (`APR / 252`), including between rebalances. There is no cash interest. Maintenance-related forced selling is OFF by default; an optional next-close full-deleveraging stress mode is documented in [MARGIN_SIM.md](MARGIN_SIM.md). It is not an actual broker liquidation model.
 
 ## Reported performance
 
@@ -50,6 +50,6 @@ Costs and interest are expressed in **equity-index units**, not USD. Multiply by
 
 The downloaded Yahoo-adjusted series can be revised, and the selected stocks were chosen with hindsight; **this is not point-in-time data**. Survivorship and asset-selection bias remain. Dividends/splits are represented only through provider adjustment conventions, not independent corporate-action verification. Trades are assumed possible at the signal close, with no spread, slippage, price impact, taxes, market restrictions or funding friction.
 
-A fixed APR ignores historical interest rates and tiered margin schedules. Maintenance fraction is user-specified and identical across all assets; real broker house requirements are security-specific and can change unexpectedly. The simulator **does not liquidate** even when maintenance is breached. If simulated equity is exhausted it stops with an error, rather than modeling negative equity or broker recovery.
+A fixed APR ignores historical interest rates and tiered margin schedules. Maintenance fraction is user-specified and identical across all assets; real broker house requirements are security-specific and can change unexpectedly. By default, the simulator **does not liquidate** even when maintenance is breached. With the optional stress policy, it sells proportionally at the *next* close and then stays unlevered. If simulated equity is exhausted it stops with an error, rather than modeling negative equity or broker recovery.
 
 **Never use these results as a live-trading approval or a claim of achievable returns.** Next work: point-in-time universe, realistic rate curves, out-of-sample parameter selection, independent SPY/QQQ benchmark, slippage and corporate-action audit.
