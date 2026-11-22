@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.14 local five-stage risk evidence-chain audit and unsigned SHA-256 drift diagnostics, layered on v0.4.9–v0.4.13 offline IBKR research features. Optional Gateway is read-only GET; no trained AI, authenticated financing-debt proof, live order submission or real IBKR liquidation forecasting. Not investment advice.
+> **Status:** v0.4.15 offline audit-to-audit change detection and hypothetical risk alert comparisons, layered on v0.4.14 five-stage local evidence audits. All source data and local hashes are unsigned; no authenticated financing debt proof, validated broker margin controls, live orders or automated execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -39,6 +39,12 @@ See [v0.4.13 PowerShell commands and modeling boundaries](docs/IBKR_REVERSE_STRE
 The new `ibkr-risk-audit` command reviews five saved offline reports (margin monitor, financing claims, static stress, multiasset budget and reverse stress), checks account identity, cross-stage amounts and scenario arithmetic, counts hypothetical warnings, and optionally compares unsigned SHA-256 local-file digests against a previous audit. It never independently authenticates broker provenance or grants order permission; even a mathematically consistent result remains a hypothetical report.
 
 See [v0.4.14 PowerShell walkthrough and evidence caveats](docs/IBKR_RISK_CHAIN_AUDIT.md).
+
+## v0.4.15: Offline risk audit differences
+
+The `ibkr-audit-diff` command compares two private v0.4.14 audit JSON files for the same account, detects SHA-256 local source-fingerprint changes and hypothetical alert-count shifts, and reports review-required states for inconsistent or changed inputs. A decline in simulated alerts is **not** verification of risk reduction. All inputs/output remain in `local_data/` and the CLI displays a redacted summary.
+
+See [v0.4.15 PowerShell audit comparison workflow](docs/IBKR_RISK_AUDIT_DIFF.md).
 
 ## What works today
 

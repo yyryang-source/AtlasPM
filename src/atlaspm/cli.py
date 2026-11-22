@@ -34,6 +34,7 @@ from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_consol
 from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget, redacted_multiasset_summary
 from atlaspm.ibkr_reverse_stress import reverse_margin_stress, redacted_reverse_summary
 from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain, redacted_audit_summary
+from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits, redacted_audit_diff_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -292,6 +293,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_risk_audit.json")
     )
 
+    audit_diff = sub.add_parser(
+        "ibkr-audit-diff",
+        help="Compare two private unsigned risk-audit files; no broker provenance claim",
+    )
+    audit_diff.add_argument("--previous", type=Path, required=True)
+    audit_diff.add_argument("--current", type=Path, required=True)
+    audit_diff.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_risk_audit_diff.json")
+    )
+
     return parser
 
 
@@ -299,7 +310,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-risk-audit":
+        if args.command == "ibkr-audit-diff":
+            destination = require_private_output(args.output)
+            previous_path = require_private_output(args.previous)
+            current_path = require_private_output(args.current)
+            if destination in {previous_path, current_path}:
+                raise ValueError("Refusing to overwrite an audit comparison input")
+            try:
+                previous = json.loads(previous_path.read_text(encoding="utf-8"))
+                current = json.loads(current_path.read_text(encoding="utf-8"))
+                result = compare_ibkr_risk_audits(previous, current)
+            except (ValueError, TypeError, KeyError, OSError):
+                raise ValueError(
+                    "Private audit comparison failed validation; inspect local files only"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_audit_diff_summary(result, str(args.output))
+        elif args.command == "ibkr-risk-audit":
             destination = require_private_output(args.output)
             source_paths = {
                 "monitor": require_private_output(args.monitor),

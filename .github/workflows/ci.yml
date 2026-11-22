@@ -65,3 +65,5 @@ jobs:
         run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --output local_data/ci_ibkr_risk_audit.json
       - name: Smoke test v0.4.14 audit baseline SHA-256 comparison
         run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --compare local_data/ci_ibkr_risk_audit.json --output local_data/ci_ibkr_risk_audit_second.json
+      - name: Smoke test v0.4.15 comparison of two local unsigned risk audits
+        run: python -m atlaspm.cli ibkr-audit-diff --previous local_data/ci_ibkr_risk_audit.json --current local_data/ci_ibkr_risk_audit_second.json --output local_data/ci_ibkr_risk_audit_diff.json
