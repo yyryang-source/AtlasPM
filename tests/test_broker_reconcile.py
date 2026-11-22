@@ -58,6 +58,48 @@ class BrokerExportReconcileTests(unittest.TestCase):
         self.assertIn("BROKER_EXPORT_MISSING_LOCAL_POSITIONS", r["block_reasons"])
         self.assertIn("BROKER_EXPORT_HAS_UNKNOWN_POSITIONS", r["block_reasons"])
 
+    def test_treasury_collateral_credit_mismatch_blocks_without_adding_cash(self):
+        self.broker["broker_recognized_treasury_collateral_value"] = 95000
+        result = self.reconcile()
+        self.assertEqual(result["decision"], "BLOCK_RECONCILIATION")
+        self.assertTrue(any(
+            d["field"] == "broker_recognized_treasury_collateral_value"
+            for d in result["differences"]
+        ))
+        self.assertAlmostEqual(result["local_net_liquidation"], 123950)
+
+    def test_option_multiplier_and_contract_terms_comparison(self):
+        self.broker["account_id"] = "DEMO-CASH"
+        self.broker["account_type"] = "cash"
+        self.broker.update({
+            "settled_cash": 25000,
+            "unsettled_receivable": 125,
+            "unsettled_payable": 100,
+            "margin_debt": 0,
+            "accrued_financing_interest": 0,
+            "net_liquidation": 45525,
+            "available_funds": 25000,
+            "excess_liquidity": 25000,
+            "broker_recognized_treasury_collateral_value": 0,
+            "positions": [
+                {"type": "equity", "identifier": "XYZ",
+                 "shares": 100, "market_value": 20000},
+                {"type": "option", "identifier": "XYZ-2027-01-15-P-180",
+                 "contracts": 1, "multiplier": 100,
+                 "market_value": 500, "underlying": "XYZ",
+                 "right": "put", "strike": 180,
+                 "expiration_date": "2027-01-15"},
+            ],
+        })
+        self.assertEqual(self.reconcile()["decision"], "MATCHED_UNVERIFIED_EXPORT")
+        self.broker["positions"][1]["multiplier"] = 50
+        self.broker["positions"][1]["strike"] = 190
+        result = self.reconcile()
+        self.assertEqual(result["decision"], "BLOCK_RECONCILIATION")
+        fields = [d["field"] for d in result["differences"]]
+        self.assertIn("option:XYZ-2027-01-15-P-180:multiplier", fields)
+        self.assertIn("option:XYZ-2027-01-15-P-180:strike", fields)
+
     def test_broker_cash_and_debt_diverge(self):
         self.broker["settled_cash"] += 500
         self.broker["margin_debt"] += 500
