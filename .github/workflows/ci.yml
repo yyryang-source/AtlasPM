@@ -153,5 +153,7 @@ jobs:
         run: python -m atlaspm.cli atlas-native-backtest --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --max-exposure 1 --output local_data/ci_atlas_native.json
       - name: Test independent Atlas RiskNet v2 single-head scratch training and future leakage
         run: python -m unittest discover -s tests -p "test_atlas_risknet*.py" -v
+      - name: Verify offline paired native audit with no unmatched-data/leverage loopholes
+        run: python -m unittest discover -s tests -p "test_atlas_robustness_audit.py" -v
       - name: Execute independent native RiskNet 0-1x cash allocation
         run: python -m atlaspm.cli atlas-native-backtest --architecture risknet --return-head-strength 0 --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_risknet_v2.json
