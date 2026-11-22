@@ -322,6 +322,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Train supervised volatility risk models and simulate autonomous cash-only rebalances",
     )
     ml.add_argument("--file", type=Path, required=True)
+    ml.add_argument("--model", choices=["ridge", "lightgbm"], default="ridge",
+                    help="Trained supervised risk model; LightGBM requires optional [ml] extra")
     ml.add_argument("--output", type=Path, default=Path("local_data/ml_rebalance_backtest.json"))
     ml.add_argument("--feature-days", type=int, default=20)
     ml.add_argument("--forecast-days", type=int, default=5)
@@ -354,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = backtest_ml_dynamic_rebalance(
                     args.file,
+                    model_family=args.model,
                     feature_days=args.feature_days,
                     forecast_days=args.forecast_days,
                     minimum_training_samples=args.min_train,
