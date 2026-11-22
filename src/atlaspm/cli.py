@@ -22,6 +22,11 @@ from atlaspm.institutional_rebalance import plan_equity_trade
 from atlaspm.institutional_batch import propose_multi_asset_batch
 from atlaspm.paper_oms import replay_paper_orders
 from atlaspm.broker_reconcile import reconcile_imported_broker_snapshot
+from atlaspm.ibkr_gateway import (
+    LocalGatewayTransport, FixtureGatewayTransport,
+    collect_ibkr_readonly_account, redacted_console_summary,
+    require_private_output,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -186,6 +191,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("local_data/broker_reconciliation.json"),
     )
 
+    ibkr = sub.add_parser(
+        "ibkr-readonly",
+        help="Explicit-opt-in local IBKR Client Portal Gateway GET-only account capture",
+    )
+    ibkr.add_argument("--account", required=True)
+    ibkr.add_argument("--fixture", type=Path, default=None)
+    ibkr.add_argument("--allow-local-gateway", action="store_true")
+    ibkr.add_argument("--url", default="https://localhost:5000/v1/api")
+    ibkr.add_argument("--ca-file", type=Path, default=None)
+    ibkr.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_private_raw.json")
+    )
+
     return parser
 
 
@@ -193,7 +211,33 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "broker-reconcile":
+        if args.command == "ibkr-readonly":
+            if (args.fixture is None) == (not args.allow_local_gateway):
+                raise ValueError(
+                    "Choose exactly one: --fixture for no-network test OR --allow-local-gateway"
+                )
+            if args.fixture is not None:
+                fixture_data = json.loads(args.fixture.read_text(encoding="utf-8"))
+                transport = FixtureGatewayTransport(fixture_data)
+                fixture_mode = True
+            else:
+                transport = LocalGatewayTransport(
+                    args.url,
+                    ca_file=str(args.ca_file) if args.ca_file else None,
+                )
+                fixture_mode = False
+            destination = require_private_output(args.output)
+            captured = collect_ibkr_readonly_account(
+                transport, account_id=args.account,
+                fixture_mode=fixture_mode,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(captured, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_console_summary(captured, args.output)
+        elif args.command == "broker-reconcile":
             ledger_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
             broker_payload = json.loads(args.snapshot.read_text(encoding="utf-8"))
             report = reconcile_imported_broker_snapshot(
