@@ -13,6 +13,7 @@ from datetime import date
 from math import isfinite
 import json
 import os
+import sys
 from pathlib import Path
 import time
 from typing import Any, Callable
@@ -154,12 +155,19 @@ def sync_us_market_prices(
     if selected:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(worker, symbol) for symbol in selected]
-            for future in as_completed(futures):
+            for done, future in enumerate(as_completed(futures), 1):
                 symbol, rows, error = future.result()
                 if error:
                     failures[symbol] = error
                 else:
                     succeeded += 1
+                if done % 25 == 0 or done == len(selected):
+                    print(
+                        f"[stock-sync-market] {done}/{len(selected)} requested, "
+                        f"{succeeded} successful, {len(failures)} failed; "
+                        "successful quotes will be cached",
+                        file=sys.stderr, flush=True,
+                    )
 
     # Assembly is streaming and may generate a large file for a 26-year
     # full exchange history; no 30-million-row in-memory dataframe.
