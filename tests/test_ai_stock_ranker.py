@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 from atlaspm.ai_stock_ranker import (
-    FEATURE_NAMES, _features, _spearman, chronological_splits,
+    FEATURE_NAMES, _features, _spearman, _rank_predictions_with_ties, chronological_splits,
     create_training_rows, evaluate_ranker, rank_with_ai, train_ai_stock_ranker,
 )
 
@@ -124,6 +124,33 @@ class AIStockRankerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Prediction length mismatch"):
             evaluate_ranker(rows, [])
 
+    def test_tie_rank_is_not_fabricated_alphabetical_preference(self):
+        rows = [{"symbol": s} for s in "ABCDE"]
+        preds = [0.02, 0.01, 0.005, 0.005, 0.005]
+        ranked, d = _rank_predictions_with_ties(rows, preds, top=3)
+        self.assertEqual([r["rank"] for r in ranked], [1, 2, 3, 3, 3])
+        self.assertEqual([r["display_position"] for r in ranked], [1, 2, 3, 4, 5])
+        self.assertEqual(d["distinct_displayed_score_levels"], 3)
+        self.assertEqual(d["largest_tied_group"], 3)
+        self.assertEqual(d["stocks_with_tied_scores"], 3)
+        self.assertTrue(d["ties_cross_top_n_cutoff"])
+        self.assertFalse(d["top_n_is_unambiguous"])
+        self.assertEqual(d["rank_quality"], "REVIEW_REQUIRED")
+        self.assertTrue(all(r["tie_count"] == 3 for r in ranked[2:]))
+        _, all_names = _rank_predictions_with_ties(rows, preds, top=5)
+        self.assertFalse(all_names["ties_cross_top_n_cutoff"])
+
+    def test_visible_precision_ties_are_communicated(self):
+        rows = [{"symbol": s} for s in "ABC"]
+        # Not exactly the same float, but identical to displayed 4 decimals %.
+        ranked, d = _rank_predictions_with_ties(
+            rows, [0.01, 0.01000000003, 0.005], top=1
+        )
+        self.assertEqual(ranked[0]["rank"], ranked[1]["rank"])
+        self.assertTrue(d["ties_cross_top_n_cutoff"])
+        with self.assertRaisesRegex(ValueError, "Non-finite"):
+            _rank_predictions_with_ties(rows, [0.1, float("nan"), 0.03], top=2)
+
     def test_invalid_splits_rejected(self):
         rows, _ = self._dataset()
         with self.assertRaisesRegex(ValueError, "train-end < validation-end"):
@@ -183,6 +210,12 @@ class AIStockRankerTest(unittest.TestCase):
         self.assertEqual(len(scored["selected"]), 4)
         self.assertEqual(scored["selected"][0]["rank"], 1)
         self.assertFalse(scored["live_execution_enabled"])
+        self.assertEqual(scored["ranking_diagnostics"]["scored_stocks"], 6)
+        self.assertEqual(scored["ranking_diagnostics"]["requested_top_n"], 4)
+        self.assertIn("rank_quality", scored["ranking_diagnostics"])
+        self.assertIn("number_of_trees_saved", scored["model_diagnostics"])
+        self.assertEqual(len(scored["model_diagnostics"]["feature_importance"]),
+                         len(FEATURE_NAMES))
         with self.assertRaisesRegex(ValueError, "knowledge cutoff"):
             rank_with_ai(
                 self.prices, self.benchmark, self.model,
