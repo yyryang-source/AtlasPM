@@ -379,6 +379,10 @@ def build_parser() -> argparse.ArgumentParser:
     native.add_argument("--train-window", type=int, default=504)
     native.add_argument("--sample-stride", type=int, default=2)
     native.add_argument("--epochs", type=int, default=40)
+    native.add_argument("--return-head-strength", type=float, default=1.0,
+                        help="0 disables return forecasts in allocation; 1 is v0.6.0 setting")
+    native.add_argument("--no-trade-band", type=float, default=0.0,
+                        help="L1 account-weight gap below which trading may be skipped only if all risk caps still pass")
     native.add_argument("--rebalance-days", type=int, default=21)
     native.add_argument("--target-volatility", type=float, default=0.18)
     native.add_argument("--max-weight", type=float, default=0.70)
@@ -413,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
                     training_window=args.train_window,
                     sample_stride=args.sample_stride,
                     training_epochs=args.epochs,
+                    return_head_strength=args.return_head_strength,
+                    no_trade_band=args.no_trade_band,
                     rebalance_days=args.rebalance_days,
                     target_annual_volatility=args.target_volatility,
                     maximum_name_weight=args.max_weight,
