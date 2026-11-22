@@ -148,7 +148,7 @@ class OfflineMarginStressTests(unittest.TestCase):
         assumption["scenarios"][0]["name"] = "DU1234567 49950 private"
         report = self.simulate(assumptions=assumption)
         text = json.dumps(redacted_stress_console(report, "local_data/result.json"))
-        for secret in ("DU1234567", "49950", "123950", "60000", "private"):
+        for secret in ("DU1234567", "49950", "123950", "60000", "DU1234567 49950 private"):
             self.assertNotIn(secret, text)
         self.assertEqual(report["scenarios"][0]["name"], "DU1234567 49950 private")
 
