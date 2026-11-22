@@ -1,0 +1,117 @@
+{
+  "_synthetic_fixture": "Paper replay only: invented order acknowledgement and fills; no connectivity to any broker.",
+  "account_id": "DEMO-MARGIN",
+  "batch_id": "SYN-BASKET-0001",
+  "events": [
+    {
+      "sequence": 1,
+      "event_id": "SYN-EVENT-001",
+      "timestamp": "2026-11-20T21:01:00Z",
+      "type": "SUBMIT",
+      "leg_id": "SELL-QQQ-10"
+    },
+    {
+      "sequence": 2,
+      "event_id": "SYN-EVENT-002",
+      "timestamp": "2026-11-20T21:02:00Z",
+      "type": "ACK",
+      "leg_id": "SELL-QQQ-10"
+    },
+    {
+      "sequence": 3,
+      "event_id": "SYN-EVENT-003",
+      "timestamp": "2026-11-20T21:03:00Z",
+      "type": "FILL",
+      "leg_id": "SELL-QQQ-10",
+      "execution_id": "SYN-FILL-SELL-1",
+      "quantity": 4,
+      "price": 300,
+      "fee": 0.4
+    },
+    {
+      "sequence": 4,
+      "event_id": "SYN-EVENT-004",
+      "timestamp": "2026-11-20T21:04:00Z",
+      "type": "FILL",
+      "leg_id": "SELL-QQQ-10",
+      "execution_id": "SYN-FILL-SELL-2",
+      "quantity": 6,
+      "price": 300,
+      "fee": 0.6
+    },
+    {
+      "sequence": 5,
+      "event_id": "SYN-EVENT-005",
+      "timestamp": "2026-11-20T21:05:00Z",
+      "type": "SUBMIT",
+      "leg_id": "BUY-UST-10K"
+    },
+    {
+      "sequence": 6,
+      "event_id": "SYN-EVENT-006",
+      "timestamp": "2026-11-20T21:06:00Z",
+      "type": "ACK",
+      "leg_id": "BUY-UST-10K"
+    },
+    {
+      "sequence": 7,
+      "event_id": "SYN-EVENT-007",
+      "timestamp": "2026-11-20T21:07:00Z",
+      "type": "FILL",
+      "leg_id": "BUY-UST-10K",
+      "execution_id": "SYN-FILL-UST-1",
+      "quantity": 10000,
+      "price": 97.9,
+      "fee": 2
+    },
+    {
+      "sequence": 8,
+      "event_id": "SYN-EVENT-008",
+      "timestamp": "2026-11-20T21:08:00Z",
+      "type": "SUBMIT",
+      "leg_id": "BUY-QQQ-PUT"
+    },
+    {
+      "sequence": 9,
+      "event_id": "SYN-EVENT-009",
+      "timestamp": "2026-11-20T21:09:00Z",
+      "type": "ACK",
+      "leg_id": "BUY-QQQ-PUT"
+    },
+    {
+      "sequence": 10,
+      "event_id": "SYN-EVENT-010",
+      "timestamp": "2026-11-20T21:10:00Z",
+      "type": "FILL",
+      "leg_id": "BUY-QQQ-PUT",
+      "execution_id": "SYN-FILL-PUT-1",
+      "quantity": 1,
+      "price": 5,
+      "fee": 2
+    },
+    {
+      "sequence": 11,
+      "event_id": "SYN-EVENT-011",
+      "timestamp": "2026-11-20T21:11:00Z",
+      "type": "SUBMIT",
+      "leg_id": "REPAY-2000"
+    },
+    {
+      "sequence": 12,
+      "event_id": "SYN-EVENT-012",
+      "timestamp": "2026-11-20T21:12:00Z",
+      "type": "ACK",
+      "leg_id": "REPAY-2000"
+    },
+    {
+      "sequence": 13,
+      "event_id": "SYN-EVENT-013",
+      "timestamp": "2026-11-20T21:13:00Z",
+      "type": "FILL",
+      "leg_id": "REPAY-2000",
+      "execution_id": "SYN-FILL-REPAY-1",
+      "quantity": 2000,
+      "fee": 0
+    }
+  ]
+}
