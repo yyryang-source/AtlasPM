@@ -50,7 +50,6 @@ class ResearchIntegrityTests(unittest.TestCase):
         self.assertAlmostEqual(cor[0][0],1)
         self.assertAlmostEqual(cor[0][1],.65)
         self.assertAlmostEqual(cor[0][2],-.65)
-        self.assertEqual(cor[1],cor[0][:1]+cor[1][1:]) if False else None
         self.assertAlmostEqual(cor[1][0],cor[0][1])
         sleeve=allocate_fusion_sleeve(
             ["AAA","BBB","CCC"],[.16,.16,.06],
