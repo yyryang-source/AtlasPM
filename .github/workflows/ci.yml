@@ -124,3 +124,9 @@ jobs:
         run: python -m unittest discover -s tests -p "test_ml_lightgbm*.py" -v
       - name: Train actual LightGBM model and run autonomous offline simulation
         run: python -m atlaspm.cli ml-rebalance-backtest --model lightgbm --file examples/synthetic_prices.csv --min-train 30 --rebalance-days 10 --max-exposure 1 --output local_data/ci_lightgbm_rebalance.json
+      - name: Test mature-only risk model tournament selection, no hindsight and risk gates
+        run: python -m unittest discover -s tests -p "test_ml_model_tournament*.py" -v
+      - name: Smoke test automatic champion portfolio allocation
+        run: python -m atlaspm.cli ml-model-tournament --file examples/synthetic_prices.csv --mode champion --min-train 30 --rebalance-days 10 --min-validated-rebalances 2 --max-exposure 1 --output local_data/ci_champion_tournament.json
+      - name: Smoke test ensemble portfolio allocation
+        run: python -m atlaspm.cli ml-model-tournament --file examples/synthetic_prices.csv --mode ensemble --min-train 30 --rebalance-days 10 --min-validated-rebalances 2 --max-exposure 1 --output local_data/ci_ensemble_tournament.json
