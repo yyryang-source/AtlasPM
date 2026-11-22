@@ -45,6 +45,7 @@ from atlaspm.stock_walkforward import backtest_stock_screener
 from atlaspm.us_market_universe import build_us_listed_universe
 from atlaspm.us_market_prices import sync_us_market_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
+from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -417,6 +418,39 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    ai_train_v2 = sub.add_parser(
+        "stock-ai-train-v2",
+        help="Train a pure stock learning-to-rank LightGBM rank_xendcg model",
+    )
+    ai_train_v2.add_argument("--prices", type=Path, required=True)
+    ai_train_v2.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_train_v2.add_argument("--start", default="2000-01-01")
+    ai_train_v2.add_argument("--train-end", default="2018-12-31")
+    ai_train_v2.add_argument("--validation-end", default="2022-12-30")
+    ai_train_v2.add_argument("--test-end", default="2026-11-20")
+    ai_train_v2.add_argument("--benchmark-symbol", default="SPY")
+    ai_train_v2.add_argument("--horizon-sessions", type=int, default=21)
+    ai_train_v2.add_argument("--sample-every-sessions", type=int, default=21)
+    ai_train_v2.add_argument("--num-boost-round", type=int, default=300)
+    ai_train_v2.add_argument("--top", type=int, default=10)
+    ai_train_v2.add_argument("--model-output", type=Path,
+                             default=Path("local_data/atlas_stock_ranker_v2.txt"))
+    ai_train_v2.add_argument("--report", type=Path,
+                             default=Path("local_data/atlas_stock_ranker_v2_report.json"))
+
+    ai_rank_v2 = sub.add_parser(
+        "stock-ai-rank-v2",
+        help="Rank stocks with an ordinal learning-to-rank model, no orders",
+    )
+    ai_rank_v2.add_argument("--prices", type=Path, required=True)
+    ai_rank_v2.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_rank_v2.add_argument("--model", type=Path, required=True)
+    ai_rank_v2.add_argument("--as-of", required=True)
+    ai_rank_v2.add_argument("--top", type=int, default=20)
+    ai_rank_v2.add_argument("--benchmark-symbol", default="SPY")
+    ai_rank_v2.add_argument("--output", type=Path,
+                            default=Path("local_data/atlas_stock_ranker_v2_rankings.json"))
+
     ai_train = sub.add_parser(
         "stock-ai-train",
         help="Train a price-based LightGBM alpha ranker on purged chronological market splits",
@@ -537,7 +571,70 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-ai-train":
+        if args.command == "stock-ai-train-v2":
+            destination = require_private_output(args.model_output)
+            report_path = require_private_output(args.report)
+            if destination.suffix.lower() != ".txt" or report_path.suffix.lower() != ".json":
+                raise ValueError("V2 ranker model must be private .txt and report private .json")
+            metadata = destination.with_suffix(destination.suffix + ".meta.json")
+            inputs = {args.prices.expanduser().resolve(), args.benchmark_prices.expanduser().resolve()}
+            if len({destination, metadata, report_path}) != 3 or any(
+                item in inputs for item in (destination, metadata, report_path)
+            ):
+                raise ValueError("Ranker outputs must not overwrite model metadata or input data")
+            result = train_stock_learning_to_rank(
+                args.prices, args.benchmark_prices, destination,
+                start=args.start, train_end=args.train_end,
+                validation_end=args.validation_end, test_end=args.test_end,
+                benchmark_symbol=args.benchmark_symbol,
+                horizon_sessions=args.horizon_sessions,
+                sample_every_sessions=args.sample_every_sessions,
+                num_boost_round=args.num_boost_round, top=args.top,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "status": result["status"],
+                "model": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "split_counts": result["split_counts"],
+                "group_counts": result["group_counts"],
+                "validation": result["validation"],
+                "test": result["test"],
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-rank-v2":
+            destination = require_private_output(args.output)
+            model_path = require_private_output(args.model)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Ranker V2 output must be private .json")
+            if destination in {
+                args.prices.expanduser().resolve(), args.benchmark_prices.expanduser().resolve(),
+                model_path, model_path.with_suffix(model_path.suffix + ".meta.json"),
+            }:
+                raise ValueError("Ranker output cannot overwrite input data")
+            result = rank_stocks_v2(
+                args.prices, args.benchmark_prices, model_path,
+                as_of=args.as_of, top=args.top, benchmark_symbol=args.benchmark_symbol,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "as_of": result["as_of"],
+                "scored_count": result["scored_count"],
+                "selected": result["selected"],
+                "ranking_diagnostics": result["ranking_diagnostics"],
+                "model_diagnostics": result["model_diagnostics"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-train":
             model_path = require_private_output(args.model_output)
             report_path = require_private_output(args.report)
             if model_path.suffix.lower() != ".txt" or report_path.suffix.lower() != ".json":
