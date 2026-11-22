@@ -115,6 +115,17 @@
 - [ ] Multi-order portfolio target rebalancer with held-out cost data and trade event journal
 - [ ] Broker-authenticated account and What-If adapters; live orders remain disabled
 
+## v0.4.3 — combined multi-asset basket proposals (committed; pending Windows test run)
+
+- [x] One-account stock BUY/SELL, existing Treasury face purchases, new long protective puts and debt repayments
+- [x] T+1-style settlement-aware receivables: stock-sale cash is not available inside the same basket
+- [x] No automatic increment to broker Treasury collateral credit
+- [x] Independent cash/debt/position mark-to-market reconciliation including modeled fees and limit/mark differences
+- [x] Per-leg fail-closed central RMS reviews and exact ordered-leg mock preview matching
+- [x] Protective puts limited to held long underlying share coverage; no assumed stress profit credited for hedges
+- [x] Local example and CLI, regression tests and network-free GitHub Actions smoke run
+- [ ] Broker-authenticated What-If requests, order journal/partial fills and real options/UST data
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
