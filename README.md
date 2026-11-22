@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.0 architecture and paper-only risk-control prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.1 architecture, read-only multi-asset ledger and paper-only risk-control prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -140,12 +140,26 @@ git pull origin main
 
 The example is **entirely synthetic**, including its mock broker margin preview and recognized Treasury credit. A local paper-intent approval is *not* broker authorization or investment advice. Real-world trading remains disabled.
 
+## Institutional Multi-Asset Ledger (v0.4.1)
+
+The new read-only institutional ledger supports **separate cash and margin accounts**, long stock/ETF positions, **US Treasury clean + accrued-interest dirty valuation**, signed option positions, financing debt and broker-net-liquidation reconciliation. It records whether Treasury collateral has broker-confirmed informational credit without double counting that credit as cash.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli ledger-report --file examples\institutional_ledger.json --output local_data\institutional_ledger_report.json
+~~~
+
+The sample is **100% synthetic**. No broker API is connected. Even a reconciled example ledger is not authorization for actual margin borrowing or options. See [Ledger methodology](docs/INSTITUTIONAL_LEDGER.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── INSTITUTIONAL_LEDGER.md
 │   ├── INSTITUTIONAL_ROADMAP.md
 │   ├── INSTITUTIONAL_ARCHITECTURE.md
 │   ├── TAIL_RISK.md
@@ -164,6 +178,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── institutional_ledger.py
 │   ├── institutional_gate.py
 │   ├── tail_risk.py
 │   ├── risk_backtest.py
