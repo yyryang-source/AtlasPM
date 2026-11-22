@@ -4,6 +4,18 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Alpha candidate eligibility threshold (research, not broker permission)
+
+The optional `stock-alpha-gate` CLI converts a month-end V2 AI stock
+ranking into a **strict top-percentile research candidate allowlist** for
+the quant platform's hypothetical **new / increased exposure** checks.
+Default: top 10% of scoreable US stocks, cap Top 50; refuse incomplete
+coverage, stale models, or ambiguous score-tie boundaries. The companion
+`stock-alpha-check` examines `OPEN`, `INCREASE`, `HOLD`, `REDUCE`,
+`CLOSE` without placing an order. Reductions and closures remain outside
+this alpha filter. No real optimizer or brokerage integration is connected.
+See [Alpha Eligibility Gate documentation](docs/ALPHA_ELIGIBILITY_GATE.md).
+
 ## Monthly AI stock-selection engine (research only)
 
 `stock-ai-monthly` converts the stock-only V2 LightGBM ranked shortlist
