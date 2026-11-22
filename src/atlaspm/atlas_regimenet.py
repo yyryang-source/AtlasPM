@@ -697,6 +697,13 @@ def redacted_atlas_native_console(result: dict[str, Any], output: str) -> dict[s
         "held_out_trading_sessions":
             result["data"]["held_out_trading_sessions"],
         "automatic_simulated_rebalances": len(result["rebalances"]),
+        "no_trade_band_l1_account_weight":
+            result["policy"]["no_trade_band_l1_account_weight"],
+        "return_head_strength": result["policy"]["return_head_strength"],
+        "native_skipped_rebalance_decisions":
+            result["execution_summary"]["atlas_native"]["skipped_rebalance_decisions"],
+        "return_forecast_better_than_zero_baseline":
+            result["forecast_validation"]["return_forecast_better_than_zero_baseline"],
         "last_training_asset_rows":
             result["rebalances"][-1]["training_asset_rows"],
         "model_validated_for_live_trading": False,
