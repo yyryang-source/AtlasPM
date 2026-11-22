@@ -42,10 +42,12 @@ To replace fictional input assumptions with **observed historical sample statist
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[market]"
-.\.venv\Scripts\python.exe -m atlaspm.cli download-prices --symbols QQQ NVDA JPM KO --start 2021-01-01 --end 2026-11-22 --output local_data\prices.csv
+.\.venv\Scripts\python.exe -m atlaspm.cli download-prices --symbols QQQ NVDA JPM KO --start 2000-01-01 --end 2026-11-23 --output local_data\prices.csv --overwrite
 .\.venv\Scripts\python.exe -m atlaspm.cli estimate --file local_data\prices.csv --output local_data\estimates.json
 .\.venv\Scripts\python.exe -m atlaspm.cli optimize --file local_data\estimates.json --risk-aversion 4 --max-weight 0.6 --leverage 1
 ```
+
+The default example requests 2000–2026 prices, including the dot-com bust, financial crisis and later market cycles, when historical data is available. It is important to compare recent and rolling windows rather than assuming all historical regimes predict the future.
 
 This uses Yahoo Finance via optional yfinance as a **research data source**, saves data **locally** (ignored by Git), aligns common price dates without forward-filling, and computes annualized historical sample means and covariance. Historical sample means are **not forecasts**. See [data methodology and limitations](docs/DATA.md).
 
