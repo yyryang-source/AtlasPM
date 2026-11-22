@@ -87,6 +87,18 @@ class InstitutionalRebalanceTests(unittest.TestCase):
         self.assertIn("CASH_ACCOUNT_INSUFFICIENT_SETTLED_CASH", result["block_reasons"])
         self.assertEqual(result["pro_forma_after_unexecuted_trade"]["settled_cash"], 100)
 
+    def test_unsettled_payables_above_settled_cash_block_trade(self):
+        # Regression for the early blocker path: reserve obligations and
+        # append the blocker after the list has been initialized.
+        self.ledger["accounts"][0]["settled_cash"] = 50
+        self.ledger["accounts"][0]["broker_reported_net_liquidation"] = 20575
+        self.plan["broker_snapshot"]["net_liquidation"] = 20575
+        result = plan_equity_trade(self.ledger, self.plan)
+        self.assertEqual(result["decision"], "BLOCK")
+        self.assertIn(
+            "SETTLED_CASH_BELOW_UNSETTLED_PAYABLE", result["block_reasons"]
+        )
+
     def test_old_mark_blocks_add(self):
         self.ledger["accounts"][0]["positions"][0]["mark_age_seconds"] = 300
         result = plan_equity_trade(self.ledger, self.plan)
