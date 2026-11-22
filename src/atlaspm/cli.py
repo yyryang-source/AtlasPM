@@ -381,7 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     native.add_argument("--sample-stride", type=int, default=2)
     native.add_argument("--epochs", type=int, default=40)
     native.add_argument("--architecture", choices=["dual", "risknet", "fusion"], default="dual",
-                        help="dual trains risk+return, risknet trains risk-only, fusion learns multi-scale overall+downside risk and cross-asset diversification")
+                        help="dual trains risk+return; risknet learns total risk; fusion learns multi-scale total and downside risk")
+    native.add_argument("--fusion-allocator-mode",
+                        choices=["inverse_risk", "downside", "shrinkage"],
+                        default="shrinkage",
+                        help="In fusion, isolate plain risk, downside and correlation-aware allocation")
     native.add_argument("--return-head-strength", type=float, default=1.0,
                         help="0 disables return forecasts in allocation; 1 is v0.6.0 setting")
     native.add_argument("--no-trade-band", type=float, default=0.0,
@@ -452,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
                     sample_stride=args.sample_stride,
                     training_epochs=args.epochs,
                     architecture=args.architecture,
+                    fusion_allocator_mode=args.fusion_allocator_mode,
                     return_head_strength=args.return_head_strength,
                     no_trade_band=args.no_trade_band,
                     rebalance_days=args.rebalance_days,
