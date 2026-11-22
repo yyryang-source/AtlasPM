@@ -1,0 +1,58 @@
+{
+  "_synthetic_fixture": "All account, preview and quote values are invented; planner cannot place orders.",
+  "account_id": "DEMO-CASH",
+  "trade": {
+    "side": "BUY",
+    "symbol": "XYZ",
+    "shares": 10,
+    "limit_price": 200,
+    "estimated_fee": 2,
+    "client_order_id": "SYN-XYZ-BUY-001",
+    "allow_margin_borrowing": false
+  },
+  "broker_snapshot": {
+    "account_id": "DEMO-CASH",
+    "net_liquidation": 45525,
+    "margin_debt": 0,
+    "available_funds": 25000,
+    "excess_liquidity": 25000,
+    "data_age_seconds": 30
+  },
+  "broker_preview": {
+    "account_id": "DEMO-CASH",
+    "client_order_id": "SYN-XYZ-BUY-001",
+    "symbol": "XYZ",
+    "side": "BUY",
+    "shares": 10,
+    "limit_price": 200,
+    "accepted": true,
+    "age_seconds": 10,
+    "available_funds_after": 22998,
+    "excess_liquidity_after": 22998,
+    "margin_debt_after": 0
+  },
+  "market": {
+    "oldest_quote_age_seconds": 10
+  },
+  "risk_observation": {
+    "current_drawdown_fraction": 0.04,
+    "pro_forma_stress_loss_fraction": 0.18,
+    "pro_forma_gross_leverage": 0.52
+  },
+  "stress_assumptions": {
+    "equity_decline_fraction": 0.3,
+    "treasury_decline_fraction": 0.06
+  },
+  "policy": {
+    "max_data_age_seconds": 60,
+    "max_gross_leverage": 1.75,
+    "max_stress_loss_fraction": 0.4,
+    "min_excess_liquidity_fraction": 0.1,
+    "max_single_order_fraction": 0.1,
+    "max_option_premium_fraction": 0.015,
+    "watch_drawdown_fraction": 0.1,
+    "reduce_drawdown_fraction": 0.2,
+    "critical_drawdown_fraction": 0.3,
+    "max_limit_mark_deviation_bps": 20
+  }
+}
