@@ -35,6 +35,7 @@ from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget, redac
 from atlaspm.ibkr_reverse_stress import reverse_margin_stress, redacted_reverse_summary
 from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain, redacted_audit_summary
 from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits, redacted_audit_diff_summary
+from atlaspm.ibkr_dashboard import build_dashboard_view, render_dashboard_html, redacted_dashboard_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -303,6 +304,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_risk_audit_diff.json")
     )
 
+    dashboard = sub.add_parser(
+        "ibkr-dashboard",
+        help="Generate local offline redacted HTML dashboard from existing private reports",
+    )
+    dashboard.add_argument(
+        "--folder", type=Path, default=Path("local_data"),
+        help="Private local_data folder containing v0.4.10–v0.4.15 reports",
+    )
+    dashboard.add_argument(
+        "--output", type=Path, default=Path("local_data/atlaspm_dashboard.html"),
+    )
+
     return parser
 
 
@@ -310,7 +323,52 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-audit-diff":
+        if args.command == "ibkr-dashboard":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".html":
+                raise ValueError("Local dashboard output must be an .html file")
+            base = args.folder.expanduser().resolve()
+            project_local_data = (Path.cwd().resolve() / "local_data").resolve()
+            if base != project_local_data:
+                raise ValueError("Dashboard inputs must come from the project local_data/ folder")
+            names = {
+                "monitor": "margin_monitor_fixture.json",
+                "financing": "ibkr_financing_check.json",
+                "stress": "ibkr_margin_stress.json",
+                "multiasset": "ibkr_multiasset_budget.json",
+                "reverse": "ibkr_reverse_stress.json",
+                "previous_audit": "ibkr_risk_audit.json",
+                "latest_audit": "ibkr_risk_audit_second.json",
+                "audit_diff": "ibkr_risk_audit_diff.json",
+            }
+            sources = {
+                name: require_private_output(base / filename)
+                for name, filename in names.items()
+            }
+            if destination in set(sources.values()):
+                raise ValueError("Refusing to overwrite a private dashboard input")
+            try:
+                loaded = {
+                    name: json.loads(path.read_text(encoding="utf-8"))
+                    for name, path in sources.items()
+                }
+                reports = {
+                    name: loaded[name]
+                    for name in ("monitor", "financing", "stress", "multiasset", "reverse")
+                }
+                view = build_dashboard_view(
+                    reports, loaded["previous_audit"], loaded["latest_audit"],
+                    loaded["audit_diff"],
+                )
+                page = render_dashboard_html(view)
+            except (OSError, ValueError, TypeError, KeyError):
+                raise ValueError(
+                    "Local dashboard inputs failed validation; inspect private files"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(page, encoding="utf-8")
+            report = redacted_dashboard_console(view, str(args.output))
+        elif args.command == "ibkr-audit-diff":
             destination = require_private_output(args.output)
             previous_path = require_private_output(args.previous)
             current_path = require_private_output(args.current)
