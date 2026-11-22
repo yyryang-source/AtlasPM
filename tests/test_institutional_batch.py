@@ -73,6 +73,18 @@ class InstitutionalBatchTests(unittest.TestCase):
             0, places=7,
         )
 
+    def test_equity_add_and_treasury_put_repayment_share_same_cash_budget(self):
+        self.plan["legs"][0]["action"] = "BUY_EQUITY"
+        self.plan["basket_preview"]["order_legs"] = copy.deepcopy(self.plan["legs"])
+        report = propose_multi_asset_batch(self.ledger, self.plan)
+        self.assertEqual(report["decision"], "ALLOW_PAPER_INTENT")
+        after = report["pro_forma_unexecuted"]
+        self.assertAlmostEqual(after["settled_cash"], 705)
+        self.assertAlmostEqual(after["unsettled_receivable"], 500)
+        self.assertAlmostEqual(after["net_liquidation"], 123945)
+        qqq = next(p for p in after["positions"] if p["type"] == "equity")
+        self.assertAlmostEqual(qqq["shares"], 210)
+
     def test_sale_proceeds_not_redeployed_before_settlement(self):
         case = copy.deepcopy(self.plan)
         case["legs"][1]["face_value"] = 15000
