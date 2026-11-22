@@ -30,5 +30,6 @@
       "face_value": 100000,
       "market_value": 97900
     }
-  ]
+  ],
+  "broker_recognized_treasury_collateral_value": 90000
 }
