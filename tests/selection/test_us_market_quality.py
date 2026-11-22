@@ -110,6 +110,25 @@ class USMarketQualityTest(unittest.TestCase):
         self.assertTrue(any("INSUFFICIENT_DECISION_CLOSE_COVERAGE" in x
                             for x in result["review_reasons"]))
 
+    def test_high_month_end_coverage_does_not_hide_thin_trained_universe(self):
+        # All six tickers have month-end closes, but only three tickers
+        # have enough price history for ranker feature windows.
+        self.write_prices(short={"AMD", "GOOGL", "JPM"})
+        audit = audit_current_us_stock_prices(
+            universe_path=self.manifest, prices_path=self.prices,
+            as_of=self.as_of, min_history_sessions=100,
+            recent_sessions=21, min_recent_coverage_pct=100,
+            min_month_end_coverage_pct=90, min_eligible_coverage_pct=75,
+            min_eligible_names=1,
+        )
+        self.assertEqual(audit["stocks_with_exact_decision_close"], 6)
+        self.assertEqual(audit["decision_close_coverage_pct"], 100)
+        self.assertEqual(audit["eligible_history_and_freshness"], 3)
+        self.assertEqual(audit["eligible_coverage_pct"], 50)
+        self.assertEqual(audit["market_data_status"], "REVIEW_REQUIRED")
+        self.assertTrue(any("INSUFFICIENT_SCOREABLE_MARKET_COVERAGE" in x
+                            for x in audit["review_reasons"]))
+
     def test_detect_duplicate_unknown_invalid_without_silent_acceptance(self):
         self.write_prices(duplicate=True, unknown=True, invalid=True)
         result = self.audit()
@@ -150,6 +169,7 @@ class USMarketQualityTest(unittest.TestCase):
             {"min_history_sessions": 0},
             {"recent_sessions": 0},
             {"min_month_end_coverage_pct": float("nan")},
+            {"min_eligible_coverage_pct": float("nan")},
             {"min_eligible_names": True},
             {"max_manifest_age_days": -1},
         ):
