@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.2 read-only multi-asset ledger, equity proposal planner and paper-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.3 synthetic multi-asset batch planner, asset ledger and paper-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -166,12 +166,26 @@ git pull origin main
 
 The example consists **entirely of invented broker and price data**. It creates neither live nor paper orders. A fictional ALLOW_PAPER_INTENT response is not real buying-power confirmation. See [equity planning documentation](docs/EQUITY_PLANNER.md) for limitations and safety controls.
 
+## Integrated stock, Treasury, protective-put and margin basket (v0.4.3)
+
+AtlasPM adds a **read-only multi-asset plan-basket** workflow: a single reconciled account can propose a stock sale/add, a purchase of additional face value of an already-held US Treasury, a fully funded **long protective put**, and a margin principal repayment as one coordinated *hypothetical* package. The engine models unsettled sale proceeds, pays premiums from settled cash, maintains debt separately, **never increases Treasury collateral credit automatically**, computes combined pro-forma risk, and requires a mock broker preview tied to the exact batch of legs.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli plan-basket --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --output local_data\institutional_batch_report.json
+~~~
+
+Entirely fictional market, brokerage, and order data. An internal paper-intent approval is **not** a broker approval, not a hedge performance promise and does not submit orders. Read [multi-asset basket methodology](docs/MULTI_ASSET_BATCH.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── MULTI_ASSET_BATCH.md
 │   ├── EQUITY_PLANNER.md
 │   ├── INSTITUTIONAL_LEDGER.md
 │   ├── INSTITUTIONAL_ROADMAP.md
@@ -192,6 +206,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── institutional_batch.py
 │   ├── institutional_rebalance.py
 │   ├── institutional_ledger.py
 │   ├── institutional_gate.py
