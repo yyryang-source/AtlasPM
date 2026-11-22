@@ -48,6 +48,38 @@ class TailRiskTests(unittest.TestCase):
         self.assertGreater(tail["cash_weight"], .77)
         self.assertAlmostEqual(tail["historical_daily_es_at_selected_exposure"], .02)
 
+    def test_estimator_uses_initialized_symbol_weights(self):
+        # Regression: an optional ES cap must use the supplied risky-sleeve
+        # weights, not reference a local list before it is initialized.
+        sample = [[-.12, 0.0]] + [[0.01, -0.01]] * 39
+        base = dict(
+            maximum_requested_leverage=2,
+            max_annual_volatility=.30,
+            stress_decline=.30,
+            max_stress_loss=.40,
+            maintenance_fraction=.30,
+            minimum_maintenance_buffer=.05,
+            annual_financing_rate=.065,
+            max_annual_financing_cost=.08,
+            daily_training_returns=sample,
+            max_daily_tail_loss=.015,
+            tail_fraction=.05,
+        )
+        result = choose_budgeted_exposure(
+            {"A": .75, "B": .25}, [[.04, 0.0], [0.0, .04]],
+            **base
+        )
+        self.assertAlmostEqual(
+            result["historical_daily_tail_risk"]["daily_expected_shortfall_fraction"],
+            .045, places=8
+        )
+        self.assertAlmostEqual(
+            result["selected_gross_exposure"], 1 / 3, places=8
+        )
+        self.assertAlmostEqual(
+            result["historical_daily_es_at_selected_exposure"], .015, places=8
+        )
+
     def test_no_budget_keeps_old_behavior(self):
         settings = dict(
             maximum_requested_leverage=2,
