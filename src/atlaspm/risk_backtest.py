@@ -13,6 +13,7 @@ from typing import Any
 from atlaspm.backtest import _metrics, _sample_estimates
 from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
 from atlaspm.mean_variance import optimize_mean_variance
+from atlaspm.tail_risk import historical_daily_expected_shortfall
 
 
 def _fraction(value: object, name: str, minimum: float = 0.0,
@@ -39,6 +40,9 @@ def choose_budgeted_exposure(
     minimum_maintenance_buffer: float,
     annual_financing_rate: float,
     max_annual_financing_cost: float,
+    daily_training_returns: list[list[float]] | None = None,
+    max_daily_tail_loss: float | None = None,
+    tail_fraction: float = 0.05,
 ) -> dict[str, Any]:
     """Select gross exposure 0..requested, including a cash sleeve below 1x.
 
@@ -60,6 +64,18 @@ def choose_budgeted_exposure(
     buffer = _fraction(minimum_maintenance_buffer, "minimum_maintenance_buffer", 0, 1)
     apr = _fraction(annual_financing_rate, "annual_financing_rate")
     financing_cap = _fraction(max_annual_financing_cost, "max_annual_financing_cost")
+    _fraction(tail_fraction, "tail_fraction", 0, 0.25, positive=True)
+    tail_diagnostic = None
+    tail_bound = float("inf")
+    if max_daily_tail_loss is not None:
+        daily_limit = _fraction(max_daily_tail_loss, "max_daily_tail_loss", 0, 1)
+        if daily_training_returns is None:
+            raise ValueError("daily_training_returns is required when the ES cap is enabled")
+        tail_diagnostic = historical_daily_expected_shortfall(
+            daily_training_returns, w, tail_fraction=tail_fraction
+        )
+        tail_loss = float(tail_diagnostic["daily_expected_shortfall_fraction"])
+        tail_bound = daily_limit / tail_loss if tail_loss > 0 else float("inf")
     w = list(weights.values())
     variance = sum(w[i] * matrix[i][j] * w[j]
                    for i in range(len(w)) for j in range(len(w)))
@@ -71,8 +87,8 @@ def choose_budgeted_exposure(
     margin_bound = ((1 - buffer) / maintenance_denom
                     if maintenance_denom > 0 else float("inf"))
     interest_bound = (1 + financing_cap / apr if apr > 0 else float("inf"))
-    cash_range = max(0.0, min(1.0, leverage, vol_bound, loss_bound, cash_buffer_bound))
-    margin_range = min(leverage, vol_bound, loss_bound, margin_bound, interest_bound)
+    cash_range = max(0.0, min(1.0, leverage, vol_bound, loss_bound, cash_buffer_bound, tail_bound))
+    margin_range = min(leverage, vol_bound, loss_bound, margin_bound, interest_bound, tail_bound)
     gross = margin_range if margin_range > 1.0 + 1e-10 else cash_range
     gross = min(leverage, max(0.0, gross))
     stress_equity = 1 - gross * shock
@@ -86,6 +102,10 @@ def choose_budgeted_exposure(
         raise ValueError("Stress-loss budget violated by selected exposure")
     if stress_equity - stressed_maint < buffer - 1e-9:
         raise ValueError("Maintenance buffer budget violated by selected exposure")
+    if tail_diagnostic is not None and (
+        gross * float(tail_diagnostic["daily_expected_shortfall_fraction"]) > max_daily_tail_loss + 1e-9
+    ):
+        raise ValueError("Historical daily ES budget violated by selected exposure")
     if annual_cost > financing_cap + 1e-9:
         raise ValueError("Financing budget violated by selected exposure")
     bounds = {
@@ -95,6 +115,7 @@ def choose_budgeted_exposure(
         "unlevered_cash_buffer": cash_buffer_bound,
         "financed_maintenance_buffer": margin_bound,
         "financing_cost": interest_bound,
+        "historical_daily_expected_shortfall": tail_bound,
     }
     # Comparison to each bound is descriptive because some are regime-specific.
     return {
@@ -105,6 +126,11 @@ def choose_budgeted_exposure(
         "uniform_stress_equity_fraction": stress_equity,
         "uniform_stress_maintenance_excess_fraction": stress_equity - stressed_maint,
         "annual_borrowing_cost_fraction": annual_cost,
+        "historical_daily_tail_risk": tail_diagnostic,
+        "historical_daily_es_at_selected_exposure": (
+            gross * float(tail_diagnostic["daily_expected_shortfall_fraction"])
+            if tail_diagnostic is not None else None
+        ),
         "bounds": {k: (v if isfinite(v) else None) for k, v in bounds.items()},
         "notes": "Risk bounds estimated only from past returns at signal time; not broker buying-power limits.",
     }
@@ -154,6 +180,8 @@ def backtest_risk_budget(
     annual_financing_rate: float = 0.065,
     max_annual_financing_cost: float = 0.08,
     fee_bps: float = 5.0,
+    max_daily_tail_loss: float | None = None,
+    tail_fraction: float = 0.05,
 ) -> dict[str, Any]:
     """Roll forward: past-only signal at t-1, execute t, earn t->t+1."""
     for label, value, minimum in (
@@ -174,6 +202,9 @@ def backtest_risk_budget(
     _fraction(minimum_maintenance_buffer, "minimum_maintenance_buffer", 0, 1)
     _fraction(annual_financing_rate, "annual_financing_rate")
     _fraction(max_annual_financing_cost, "max_annual_financing_cost")
+    _fraction(tail_fraction, "tail_fraction", 0, 0.25, positive=True)
+    if max_daily_tail_loss is not None:
+        _fraction(max_daily_tail_loss, "max_daily_tail_loss", 0, 1)
     prices = load_adjusted_prices(path)
     symbols = sorted(prices)
     dates = sorted(set.intersection(*(set(prices[s]) for s in symbols)))
@@ -221,6 +252,9 @@ def backtest_risk_budget(
                 minimum_maintenance_buffer=minimum_maintenance_buffer,
                 annual_financing_rate=annual_financing_rate,
                 max_annual_financing_cost=max_annual_financing_cost,
+                daily_training_returns=training_window if max_daily_tail_loss is not None else None,
+                max_daily_tail_loss=max_daily_tail_loss,
+                tail_fraction=tail_fraction,
             )
             target = selected["selected_gross_exposure"]
             holdings, cash, loan, fees, turnover = _trade_to_risk_budget(
@@ -242,6 +276,8 @@ def backtest_risk_budget(
                 "uniform_stress_equity_fraction": selected["uniform_stress_equity_fraction"],
                 "uniform_stress_maintenance_excess_fraction": selected["uniform_stress_maintenance_excess_fraction"],
                 "annual_borrowing_cost_fraction": selected["annual_borrowing_cost_fraction"],
+                "historical_daily_tail_risk": selected["historical_daily_tail_risk"],
+                "historical_daily_es_at_selected_exposure": selected["historical_daily_es_at_selected_exposure"],
                 "bounds": selected["bounds"],
                 "turnover_notional_over_equity": turnover,
                 "trade_cost_equity_index_units": fees,
@@ -308,6 +344,8 @@ def backtest_risk_budget(
             "minimum_maintenance_buffer": minimum_maintenance_buffer,
             "annual_margin_interest_rate_assumption": annual_financing_rate,
             "max_annual_financing_cost": max_annual_financing_cost,
+            "max_daily_tail_loss": max_daily_tail_loss,
+            "tail_fraction": tail_fraction,
             "trading_cost_basis_points_each_side": fee_bps,
         },
         "data": {
@@ -332,6 +370,17 @@ def backtest_risk_budget(
             "average_selected_gross_exposure": sum(exposures) / len(exposures),
             "cash_allocation_rebalance_count": sum(g < 1 - 1e-9 for g in exposures),
             "margin_allocation_rebalance_count": sum(g > 1 + 1e-9 for g in exposures),
+            "tail_risk_budget_active": max_daily_tail_loss is not None,
+            "tail_risk_binding_rebalance_count": (
+                sum(
+                    d["bounds"]["historical_daily_expected_shortfall"] is not None
+                    and abs(
+                        d["gross_exposure_at_execution"]
+                        - d["bounds"]["historical_daily_expected_shortfall"]
+                    ) < 1e-8
+                    for d in decisions
+                ) if max_daily_tail_loss is not None else 0
+            ),
         },
         "benchmark": {
             "type": "equal_weight_buy_and_hold_same_symbols_no_costs",
@@ -341,8 +390,9 @@ def backtest_risk_budget(
         "equity_curve": curve,
         "warnings": [
             "Past-only rolling signals, next-close hypothetical execution; not a trained AI or a trade system.",
-            "Static historical variance estimates may fail in correlated crashes or regime shifts.",
+            "Historical variance and empirical tail losses can underestimate future jumps or regime shifts.",
             "Risk limits apply at scheduled rebalances, not continuously between trades.",
+            "Optional empirical daily expected shortfall uses only trailing daily returns and cannot guarantee maximum drawdown.",
             "Cash earns zero interest and the financing APR stays constant; taxes, spreads and real trade execution are not modeled.",
             "Maintenance rules are constant illustrative fractions; no broker liquidation or intraday enforcement is modeled.",
             "Current symbols were selected with hindsight; historical simulations cannot establish future outperformance.",
