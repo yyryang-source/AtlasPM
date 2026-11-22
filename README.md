@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.4 synthetic Paper OMS event replay, multi-asset batch planner and read-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.5 synthetic Paper OMS with after-fill risk checks and unsigned audit chain. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -192,12 +192,26 @@ git pull origin main
 
 All events and brokerage previews are **entirely fictional**. This is NOT a connection to real IBKR paper trading and NEVER submits an order. See [Paper OMS design](docs/PAPER_OMS.md).
 
+## After-fill portfolio guard and replay audit (v0.4.5)
+
+Paper OMS now measures conservative gross leverage and equity/Treasury stress **after every synthetic fill**, and halts subsequent replay if an intermediate risk budget is breached. It also saves a reproducible, unsigned SHA-256 event hash chain to help detect edits to local audit results. The prior 13-event example should continue to pass all static risk checks without changing its accounting.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli oms-replay --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --events examples\paper_oms_events.json --output local_data\paper_oms_report.json
+~~~
+
+Both features operate **offline with fabricated broker data**. A hash chain is not a signature, and static post-fill limits are not a broker margin recheck. No real or broker-paper orders are placed. See [OMS risk and audit notes](docs/OMS_RISK_AUDIT.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── OMS_RISK_AUDIT.md
 │   ├── PAPER_OMS.md
 │   ├── MULTI_ASSET_BATCH.md
 │   ├── EQUITY_PLANNER.md
@@ -220,6 +234,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── oms_controls.py
 │   ├── paper_oms.py
 │   ├── institutional_batch.py
 │   ├── institutional_rebalance.py
