@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.10 GET-only IBKR account margin summary monitor and risk diagnostics, layered on the v0.4.9 financing cross-check. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.11 offline financing-cost and margin stress scenarios, layered on v0.4.10 read-only IBKR Gateway margin monitoring. Still no trained AI or order execution connectivity. The optional authenticated local Gateway is GET-only; no brokerage trades are sent. All scenarios are hypothetical and no independent financing debt proof is available. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -15,6 +15,12 @@ See [v0.4.9 PowerShell commands and accounting limits](docs/IBKR_FINANCING.md).
 `ibkr-margin-monitor` reads an authenticated **local** IBKR Client Portal Gateway `GET /portfolio/{accountId}/summary` (or entirely synthetic fixture) and checks securities-segment NLV, EquityWithLoanValue, initial/maintenance margin, available funds, excess liquidity, account IDs, currency restrictions, timestamps, and basic margin risk buffers. It reports redacted `NORMAL`, `WATCH`, `CRITICAL`, or `BLOCKED_DATA` states. No live margin financing principal is independently verified, and no broker/paper orders can be placed.
 
 Run the quick start and read limitations in [v0.4.10 Margin Monitor](docs/IBKR_MARGIN_MONITOR.md).
+
+## v0.4.11: Hypothetical margin shock and financing cost
+
+The new `ibkr-stress` CLI ingests **private** saved v0.4.10 margin monitoring and v0.4.9 financing-claim diagnostics, requires explicit scenario assumptions and estimates illustrative NLV / equity-with-loan, margin requirements, available funds, excess liquidity and simple future borrowing cost. It never treats a claimed loan as verified, never double-subtracts existing debt from NLV, and permanently blocks order execution and institutional risk-gate entry. It does **not** implement IBKR's liquidation algorithm.
+
+Follow the [synthetic Windows PowerShell test procedure](docs/IBKR_MARGIN_STRESS.md).
 
 ## What works today
 
