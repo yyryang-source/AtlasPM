@@ -20,6 +20,7 @@ from atlaspm.institutional_gate import assess_institutional_intent
 from atlaspm.institutional_ledger import build_institutional_ledger
 from atlaspm.institutional_rebalance import plan_equity_trade
 from atlaspm.institutional_batch import propose_multi_asset_batch
+from atlaspm.paper_oms import replay_paper_orders
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -162,6 +163,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/institutional_batch_plan.json")
     )
 
+    paper = sub.add_parser(
+        "oms-replay",
+        help="Offline paper OMS event replay for an approved synthetic multi-asset basket",
+    )
+    paper.add_argument("--ledger", type=Path, required=True)
+    paper.add_argument("--plan", type=Path, required=True)
+    paper.add_argument("--events", type=Path, required=True)
+    paper.add_argument(
+        "--output", type=Path, default=Path("local_data/paper_oms_replay.json")
+    )
+
     return parser
 
 
@@ -169,7 +181,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "plan-basket":
+        if args.command == "oms-replay":
+            base_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
+            plan_payload = json.loads(args.plan.read_text(encoding="utf-8"))
+            event_payload = json.loads(args.events.read_text(encoding="utf-8"))
+            report = replay_paper_orders(base_payload, plan_payload, event_payload)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report = {
+                "written": str(args.output),
+                "method": report["method"],
+                "batch_id": report["batch_id"],
+                "account_id": report["account_id"],
+                "decision": report["decision"],
+                "live_execution_enabled": report["live_execution_enabled"],
+                "duplicate_events_ignored": report["duplicate_events_ignored"],
+                "unresolved_orders": report["unresolved_orders"],
+                "orders": report["orders"],
+                "account_replay": {
+                    key: value for key, value in report["account_replay"].items()
+                    if key != "positions"
+                },
+                "warnings": report["warnings"],
+            }
+        elif args.command == "plan-basket":
             base_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
             batch_payload = json.loads(args.plan.read_text(encoding="utf-8"))
             report = propose_multi_asset_batch(base_payload, batch_payload)
