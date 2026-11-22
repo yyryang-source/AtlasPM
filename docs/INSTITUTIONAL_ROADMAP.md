@@ -25,6 +25,10 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 - [x] Reserve unsettled liabilities from projected available settled cash and fail closed on missing preview or stale marks
 - [x] Research-only coordinated single-account equity, existing Treasury, long put and margin repayment basket; matched synthetic combined preview and separate per-leg RMS vetoes
 - [x] Block use of unsettled equity-sale proceeds for immediate purchases, prevent new Treasury collateral double counting and check covered puts
+- [x] First offline event-replayed paper OMS prototype with 5 order states, terminal status transitions, partial fills and synthetic settlement
+- [x] Idempotent duplicate execution/event handling and UNKNOWN_OUTCOME account reconciliation halt
+- [x] Cash/debt/stock/Treasury/long-option post-fill reconciliation and synthetic audit journal
+- [ ] Persist event sourcing in an append-only database and re-risk partial fills with genuine broker data
 - [ ] Authenticated per-leg broker What-If previews and multi-asset partial-fill/order-state orchestration
 - [ ] Full target-weight rebalancing, multi-leg collateral/option handling, broker order previews and event-sourced settled cash accounting
 - [ ] Pre- and post-trade pro forma account simulation, margin buffer and collateral encumbrance.
