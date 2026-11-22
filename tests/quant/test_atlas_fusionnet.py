@@ -23,7 +23,7 @@ ROOT=Path(__file__).resolve().parents[2]
 
 class ResearchIntegrityTests(unittest.TestCase):
     def test_research_register_has_at_least_20_named_sources(self):
-        report=(ROOT/"docs"/"MODEL_RESEARCH_ATLAS_30.md").read_text(encoding="utf-8")
+        report=(ROOT/"docs"/"quant"/"MODEL_RESEARCH_ATLAS_30.md").read_text(encoding="utf-8")
         entries=[line for line in report.splitlines()
                  if line.startswith("| ") and len(line)>5
                  and line[2:4].isdigit() and "https://" in line]
