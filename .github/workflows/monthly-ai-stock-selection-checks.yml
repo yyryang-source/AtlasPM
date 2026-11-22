@@ -5,12 +5,15 @@ on:
     branches:
       - main
       - refactor/separate-quant-and-stock-selection
+      - feature/selection-us-market-data-quality-v1
   pull_request:
     paths:
       - "src/atlaspm/selection/monthly_stock_selection.py"
       - "tests/selection/test_monthly_stock_selection.py"
       - "src/atlaspm/selection/alpha_eligibility.py"
       - "tests/selection/test_alpha_eligibility.py"
+      - "src/atlaspm/selection/us_market_quality.py"
+      - "tests/selection/test_us_market_quality.py"
       - ".github/workflows/monthly-ai-stock-selection-checks.yml"
   workflow_dispatch:
 
@@ -32,5 +35,28 @@ jobs:
         run: python -m unittest discover -s tests -p "test_monthly_stock_selection.py" -v
       - name: Verify candidate threshold, quant-intent and fail-closed eligibility
         run: python -m unittest discover -s tests -p "test_alpha_eligibility.py" -v
+      - name: Verify all-market data quality audit and NYSE as-of coverage
+        run: python -m unittest discover -s tests -p "test_us_market_quality.py" -v
+      - name: Verify original universe download/cache behavior
+        run: python -m unittest discover -s tests -p "test_us_market_pipeline.py" -v
       - name: Verify V2 learning-to-rank was not changed
         run: python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v
+
+  powershell-market-runner-syntax:
+    name: Verify Windows PowerShell 5.1 market data runner syntax
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Parse selection script using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          $script = (Resolve-Path 'scripts/selection/Invoke-USMarketDataExpansion.ps1').Path
+          [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw "Windows PowerShell 5.1 stock market script parse error"
+          }
