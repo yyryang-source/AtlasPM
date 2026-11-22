@@ -12,6 +12,7 @@ from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_pri
 from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
 from atlaspm.backtest import backtest_walk_forward
+from atlaspm.audit import audit_backtests
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--fee-bps", type=float, default=5.0)
     backtest.add_argument("--maintenance", type=float, default=0.30)
 
+    audit = sub.add_parser("audit", help="Compare saved cash and margin backtests")
+    audit.add_argument("--cash", type=Path, required=True)
+    audit.add_argument("--margin", type=Path, required=True)
+    audit.add_argument("--output", type=Path, default=Path("local_data/risk_audit.json"))
+
     return parser
 
 
@@ -98,6 +104,28 @@ def main(argv: list[str] | None = None) -> int:
                 "written": str(args.output),
                 "metadata": report["metadata"],
                 "next_step": f"atlaspm optimize --file {args.output}",
+            }
+        elif args.command == "audit":
+            report = audit_backtests(args.cash, args.margin)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": str(args.output),
+                "date_range": report["date_range"],
+                "observations": report["observations"],
+                "cash": {
+                    key: value for key, value in report["cash"].items()
+                    if key not in {"calendar_year_returns"}
+                },
+                "margin": {
+                    key: value for key, value in report["margin"].items()
+                    if key not in {"calendar_year_returns"}
+                },
+                "benchmark": report["benchmark"],
+                "conclusion": report["conclusion"],
             }
         elif args.command == "backtest":
             report = backtest_walk_forward(
