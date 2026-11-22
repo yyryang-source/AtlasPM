@@ -380,8 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
     native.add_argument("--train-window", type=int, default=504)
     native.add_argument("--sample-stride", type=int, default=2)
     native.add_argument("--epochs", type=int, default=40)
-    native.add_argument("--architecture", choices=["dual", "risknet"], default="dual",
-                        help="dual trains risk+return, risknet trains independently risk-only from scratch")
+    native.add_argument("--architecture", choices=["dual", "risknet", "fusion"], default="dual",
+                        help="dual trains risk+return, risknet trains risk-only, fusion learns multi-scale overall+downside risk and cross-asset diversification")
     native.add_argument("--return-head-strength", type=float, default=1.0,
                         help="0 disables return forecasts in allocation; 1 is v0.6.0 setting")
     native.add_argument("--no-trade-band", type=float, default=0.0,
