@@ -10,6 +10,7 @@
 - Calculate equity, borrowed balance, gross exposure, leverage, maintenance margin and excess.
 - Stress test uniform market declines for potential margin deficits.
 - Estimate simple annualized borrowing expense given an input APR.
+- Download and align historical adjusted daily prices; estimate sample annualized returns/covariance.
 - Optimize hypothetical mean-variance allocations from user-supplied expected returns and covariance, with capped weights and assumed financing costs.
 - Generate baseline **inverse-volatility** allocations with per-asset concentration caps. This is a non-AI baseline, not an optimal-return guarantee.
 - Run dependency-light unit tests and GitHub Actions CI.
@@ -35,12 +36,26 @@ py -m venv .venv
 
 The same commands work on Python 3.14 for this standard-library-only phase. When numerical/ML libraries are added, development will use a pinned compatible Python and dependency lock.
 
+## Historical data workflow (v0.2)
+
+To replace fictional input assumptions with **observed historical sample statistics**, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[market]"
+.\.venv\Scripts\python.exe -m atlaspm.cli download-prices --symbols QQQ NVDA JPM KO --start 2021-01-01 --end 2026-11-22 --output local_data\prices.csv
+.\.venv\Scripts\python.exe -m atlaspm.cli estimate --file local_data\prices.csv --output local_data\estimates.json
+.\.venv\Scripts\python.exe -m atlaspm.cli optimize --file local_data\estimates.json --risk-aversion 4 --max-weight 0.6 --leverage 1
+```
+
+This uses Yahoo Finance via optional yfinance as a **research data source**, saves data **locally** (ignored by Git), aligns common price dates without forward-filling, and computes annualized historical sample means and covariance. Historical sample means are **not forecasts**. See [data methodology and limitations](docs/DATA.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── DATA.md
 │   ├── ARCHITECTURE.md
 │   ├── RISK_POLICY.md
 │   └── ROADMAP.md
@@ -49,6 +64,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── historical.py
 │   ├── mean_variance.py
 │   ├── models.py
 │   ├── optimizer.py
