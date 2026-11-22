@@ -4,6 +4,100 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Alpha candidate eligibility threshold (research, not broker permission)
+
+The optional `stock-alpha-gate` CLI converts a month-end V2 AI stock
+ranking into a **strict top-percentile research candidate allowlist** for
+the quant platform's hypothetical **new / increased exposure** checks.
+Default: top 10% of scoreable US stocks, cap Top 50; refuse incomplete
+coverage, stale models, or ambiguous score-tie boundaries. The companion
+`stock-alpha-check` examines `OPEN`, `INCREASE`, `HOLD`, `REDUCE`,
+`CLOSE` without placing an order. Reductions and closures remain outside
+this alpha filter. No real optimizer or brokerage integration is connected.
+See [Alpha Eligibility Gate documentation](docs/ALPHA_ELIGIBILITY_GATE.md).
+
+## Monthly AI stock-selection engine (research only)
+
+`stock-ai-monthly` converts the stock-only V2 LightGBM ranked shortlist
+into a calendar-correct **month-end** research report with Top20/50,
+actual NYSE last-session validation, complete-close requirement,
+market-universe coverage audits, stale-model flags and tied-rank warnings.
+Windows local runner: `scripts/Invoke-MonthlyStockResearch.ps1`.
+Daily quote refresh and quarterly retraining remain **separate**;
+there is no broker connection, trading or risk action.
+See [Monthly Alpha Selection Engine](docs/MONTHLY_ALPHA_SELECTION.md).
+
+## Experimental: learning-to-rank stock picker V2
+
+An independent `stock-ai-train-v2` model uses LightGBM
+`rank_xendcg` grouped by historical decision date and 0–4 within-date
+forward-performance relevance, rather than predicting false-precision
+percentage returns. `stock-ai-rank-v2` publishes ordinal candidate
+scores with tied-rank diagnostics, not broker orders. It must demonstrate
+genuine test-IC improvement over the regression baseline before replacement.
+See [V2 design and Windows commands](docs/AI_STOCK_RANKER_V2.md).
+
+## Experimental: Qlib-inspired AI stock ranking (LightGBM)
+
+The optional `stock-ai-train` and `stock-ai-rank` commands build a
+**locally trained** cross-sectional stock selector from decision-close price
+features and future **next-close to 21-session-close excess return** labels.
+Chronological train/validation/test periods are purged at boundaries; report
+date-wise rank information coefficients versus a simple momentum baseline.
+It is original AtlasPM code informed by public research in Microsoft Qlib,
+not a copied or pretrained Wall Street alpha model. This module only ranks
+candidate stocks, never changes the existing Atlas RiskNet/RegimeNet/FusionNet,
+IBKR or trading-risk controls. For Windows commands and documented research
+limits, see [AI stock ranker](docs/AI_STOCK_RANKER.md).
+
+## Experimental: discover all CURRENT US-listed stocks for screening
+
+Use `stock-universe` to download Nasdaq Trader's current listings, excluding
+explicit ETFs/test issues and known non-common instruments. Then run
+`stock-sync-market` to cache **all available equity ticker daily histories**
+with per-provider error/coverage reporting, and feed the assembled CSV to the
+existing `stock-screen` ranking. The screener only chooses candidates; AtlasPM
+RiskNet/RegimeNet/FusionNet and independent portfolio risk/trading controls
+remain separate. This current listings snapshot cannot reconstruct all stocks
+listed or delisted between 2000–2026. See [US market screener and Windows
+commands](docs/US_MARKET_SCREENER.md).
+
+## Experimental: matched equal-weight stock universe comparator
+
+`stock-backtest` can now report a second, independently accounted
+equal-weight, periodically rebalanced **all price-qualified surviving tickers**
+reference alongside SPY. It uses the same completed-close decision, next-close
+execution, fee/slippage assumptions and separate risk metrics to expose whether
+factor-selected Top N beats a simple portfolio constructed from the same
+retrospective universe. This comparison **does not** remove survivorship bias.
+See [Windows example and constraints](docs/STOCK_WALKFORWARD.md).
+
+## Experimental: 2000–2026 stock-selection walk-forward backtest
+
+`stock-backtest` repeatedly runs the technical factor screen at completed
+historical closes, executes *one benchmark session later*, estimates
+transaction costs and compares long-only equal-weight selected stocks to SPY.
+Full normalized equity, annual performance and model decisions remain inside
+private `local_data/`. It is a survivor-biased research simulation—not trained
+AI, out-of-sample proof, or broker/paper/live trading. The first simulated
+year may begin after 2000 because a 253-close warmup is mandatory.
+See [Windows commands, methodology and limitations](docs/STOCK_WALKFORWARD.md).
+
+## Experimental: offline multi-factor stock screener
+
+The new `stock-screen` command ranks a supplied universe of stocks by
+12–1 and 6–1 price momentum, price versus the 200-day moving average,
+volatility, drawdown, and optionally **publication-dated** ROE, revenue
+growth, debt/equity, free-cash-flow yield and EV/EBITDA. It rejects stale
+history and unsuitable candidates before scoring, supports a per-sector
+selection cap, and writes inspectable private JSON.
+
+**Important:** this is a transparent, deterministic baseline, *not* a trained
+return-prediction model. It does not automatically fetch company financials,
+screen every U.S. stock, test out-of-sample alpha or place orders. All
+historical fundamental dates require user verification. See
+[Stock screener methodology and Windows PowerShell instructions](docs/STOCK_SCREENER.md).
+
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
 Use `ibkr-financing-check` with an IBKR read-only capture, a manually reviewed conid manifest, and a separately supplied current securities-segment margin/financing statement. The tool checks loan principal claim differences, the Gateway NLV, initial/maintenance formulas, margin cushion, account IDs, and snapshot timestamps. Output is private under `local_data/`. **Every result remains non-executable and unverified:** neither cross-checked numbers nor manually supplied source labels establish authentic broker margin buying power.

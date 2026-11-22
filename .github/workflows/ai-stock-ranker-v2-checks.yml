@@ -1,0 +1,36 @@
+name: AI stock ranker V2 fitted-model checks
+
+on:
+  push:
+    branches:
+      - feature/ai-stock-learning-to-rank-v2
+      - feature/monthly-ai-stock-selection-v1
+  pull_request:
+    paths:
+      - "src/atlaspm/ai_stock_ranker_v2.py"
+      - "tests/test_ai_stock_ranker_v2.py"
+      - "src/atlaspm/monthly_stock_selection.py"
+      - "tests/test_monthly_stock_selection.py"
+      - ".github/workflows/ai-stock-ranker-v2-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  fitted-lightgbm-ranker:
+    name: Fit real grouped LightGBM stock rank_xendcg model
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ML dependencies
+        run: python -m pip install -e ".[ml,calendar]"
+      - name: Verify real grouped V2 training and inference
+        run: python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v
+      - name: Verify real month-end NYSE calendar and monthly selection
+        run: python -m unittest discover -s tests -p "test_monthly_stock_selection.py" -v
+      - name: Verify V1 has no regressions
+        run: python -m unittest discover -s tests -p "test_ai_stock_ranker.py" -v

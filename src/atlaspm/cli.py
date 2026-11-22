@@ -40,6 +40,14 @@ from atlaspm.ml_dynamic_rebalance import backtest_ml_dynamic_rebalance, redacted
 from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tournament_console
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
+from atlaspm.stock_screener import screen_stocks
+from atlaspm.stock_walkforward import backtest_stock_screener
+from atlaspm.us_market_universe import build_us_listed_universe
+from atlaspm.us_market_prices import sync_us_market_prices
+from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
+from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
+from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
+from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -412,6 +420,193 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    alpha_gate = sub.add_parser(
+        "stock-alpha-gate",
+        help="Build rank-percentile allowlist for monthly quant research, never order permission",
+    )
+    alpha_gate.add_argument("--monthly-report", type=Path, required=True)
+    alpha_gate.add_argument("--top-percent", type=float, default=10.0)
+    alpha_gate.add_argument("--max-ranked-names", type=int, default=50)
+    alpha_gate.add_argument("--minimum-scored-names", type=int, default=500)
+    alpha_gate.add_argument("--minimum-listing-coverage-pct", type=float, default=90)
+    alpha_gate.add_argument("--maximum-model-age-days", type=int, default=180)
+    alpha_gate.add_argument("--output", type=Path, required=True)
+    alpha_gate.add_argument("--overwrite", action="store_true")
+
+    alpha_check = sub.add_parser(
+        "stock-alpha-check",
+        help="Check hypothetical NEW/INCREASE or REDUCE/CLOSE against alpha universe",
+    )
+    alpha_check.add_argument("--gate", type=Path, required=True)
+    alpha_check.add_argument("--symbol", required=True)
+    alpha_check.add_argument("--action", required=True)
+    alpha_check.add_argument("--decision-date", required=True)
+
+    monthly = sub.add_parser(
+        "stock-ai-monthly",
+        help="Produce calendar-correct NYSE month-end pure AI stock research; no orders",
+    )
+    monthly.add_argument("--prices", type=Path, required=True)
+    monthly.add_argument("--benchmark-prices", type=Path, required=True)
+    monthly.add_argument("--model", type=Path, required=True)
+    monthly.add_argument("--month", required=True, help="Calendar month YYYY-MM")
+    monthly.add_argument("--universe", type=Path, default=None,
+                         help="Optional listing manifest for real full-market coverage audit")
+    monthly.add_argument("--benchmark-symbol", default="SPY")
+    monthly.add_argument("--min-scored", type=int, default=20)
+    monthly.add_argument("--min-market-coverage-pct", type=float, default=90)
+    monthly.add_argument("--max-training-age-days", type=int, default=365)
+    monthly.add_argument("--output-dir", type=Path,
+                         default=Path("local_data/monthly_stock_research"))
+    monthly.add_argument("--overwrite", action="store_true",
+                         help="Explicitly replace previous month's research snapshot")
+
+    ai_train_v2 = sub.add_parser(
+        "stock-ai-train-v2",
+        help="Train a pure stock learning-to-rank LightGBM rank_xendcg model",
+    )
+    ai_train_v2.add_argument("--prices", type=Path, required=True)
+    ai_train_v2.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_train_v2.add_argument("--start", default="2000-01-01")
+    ai_train_v2.add_argument("--train-end", default="2018-12-31")
+    ai_train_v2.add_argument("--validation-end", default="2022-12-30")
+    ai_train_v2.add_argument("--test-end", default="2026-11-20")
+    ai_train_v2.add_argument("--benchmark-symbol", default="SPY")
+    ai_train_v2.add_argument("--horizon-sessions", type=int, default=21)
+    ai_train_v2.add_argument("--sample-every-sessions", type=int, default=21)
+    ai_train_v2.add_argument("--num-boost-round", type=int, default=300)
+    ai_train_v2.add_argument("--top", type=int, default=10)
+    ai_train_v2.add_argument("--model-output", type=Path,
+                             default=Path("local_data/atlas_stock_ranker_v2.txt"))
+    ai_train_v2.add_argument("--report", type=Path,
+                             default=Path("local_data/atlas_stock_ranker_v2_report.json"))
+
+    ai_rank_v2 = sub.add_parser(
+        "stock-ai-rank-v2",
+        help="Rank stocks with an ordinal learning-to-rank model, no orders",
+    )
+    ai_rank_v2.add_argument("--prices", type=Path, required=True)
+    ai_rank_v2.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_rank_v2.add_argument("--model", type=Path, required=True)
+    ai_rank_v2.add_argument("--as-of", required=True)
+    ai_rank_v2.add_argument("--top", type=int, default=20)
+    ai_rank_v2.add_argument("--benchmark-symbol", default="SPY")
+    ai_rank_v2.add_argument("--output", type=Path,
+                            default=Path("local_data/atlas_stock_ranker_v2_rankings.json"))
+
+    ai_train = sub.add_parser(
+        "stock-ai-train",
+        help="Train a price-based LightGBM alpha ranker on purged chronological market splits",
+    )
+    ai_train.add_argument("--prices", type=Path, required=True)
+    ai_train.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_train.add_argument("--start", default="2000-01-01")
+    ai_train.add_argument("--train-end", default="2018-12-31")
+    ai_train.add_argument("--validation-end", default="2022-12-30")
+    ai_train.add_argument("--test-end", default="2026-11-20")
+    ai_train.add_argument("--benchmark-symbol", default="SPY")
+    ai_train.add_argument("--sample-every-sessions", type=int, default=21)
+    ai_train.add_argument("--horizon-sessions", type=int, default=21)
+    ai_train.add_argument("--num-boost-round", type=int, default=180)
+    ai_train.add_argument("--min-train-rows", type=int, default=300)
+    ai_train.add_argument("--top", type=int, default=10)
+    ai_train.add_argument("--model-output", type=Path,
+                          default=Path("local_data/atlas_ai_stock_lgbm.txt"))
+    ai_train.add_argument("--report", type=Path,
+                          default=Path("local_data/atlas_ai_stock_train.json"))
+
+    ai_rank = sub.add_parser(
+        "stock-ai-rank",
+        help="Rank stocks with a locally trained LightGBM alpha ranker; no trades",
+    )
+    ai_rank.add_argument("--prices", type=Path, required=True)
+    ai_rank.add_argument("--benchmark-prices", type=Path, required=True)
+    ai_rank.add_argument("--model", type=Path, required=True)
+    ai_rank.add_argument("--benchmark-symbol", default="SPY")
+    ai_rank.add_argument("--as-of", required=True)
+    ai_rank.add_argument("--top", type=int, default=20)
+    ai_rank.add_argument("--output", type=Path,
+                         default=Path("local_data/atlas_ai_stock_ranking.json"))
+
+    market_universe = sub.add_parser(
+        "stock-universe",
+        help="Discover current all-US-exchange-listed equity candidates from Nasdaq Trader",
+    )
+    market_universe.add_argument(
+        "--output", type=Path, default=Path("local_data/us_equity_universe.csv")
+    )
+    market_universe.add_argument(
+        "--report", type=Path, default=Path("local_data/us_equity_universe_report.json")
+    )
+    market_universe.add_argument("--nasdaq-file", type=Path, default=None)
+    market_universe.add_argument("--other-file", type=Path, default=None)
+
+    market_sync = sub.add_parser(
+        "stock-sync-market",
+        help="Resume-safe quote download for every symbol in a market universe",
+    )
+    market_sync.add_argument("--universe", type=Path, required=True)
+    market_sync.add_argument("--start", default="2024-01-01")
+    market_sync.add_argument("--end", default="2026-11-21")
+    market_sync.add_argument(
+        "--cache-dir", type=Path, default=Path("local_data/us_equity_cache")
+    )
+    market_sync.add_argument(
+        "--output", type=Path, default=Path("local_data/us_equity_prices.csv")
+    )
+    market_sync.add_argument(
+        "--report", type=Path, default=Path("local_data/us_equity_coverage.json")
+    )
+    market_sync.add_argument(
+        "--max-symbols", type=int, default=0,
+        help="0=all uncovered symbols; positive integer=quick trial batch",
+    )
+    market_sync.add_argument("--workers", type=int, default=2)
+    market_sync.add_argument("--attempts", type=int, default=2)
+
+    stock_backtest = sub.add_parser(
+        "stock-backtest",
+        help="Long-only 2000-2026 walk-forward stock ranking vs adjusted SPY, no orders",
+    )
+    stock_backtest.add_argument("--prices", type=Path, required=True)
+    stock_backtest.add_argument("--benchmark-prices", type=Path, required=True)
+    stock_backtest.add_argument("--benchmark-symbol", default="SPY")
+    stock_backtest.add_argument("--start", default="2000-01-01")
+    stock_backtest.add_argument("--end", default="2026-11-20")
+    stock_backtest.add_argument("--top", type=int, default=10)
+    stock_backtest.add_argument("--rebalance-days", type=int, default=21)
+    stock_backtest.add_argument("--fee-bps", type=float, default=5.0)
+    stock_backtest.add_argument("--slippage-bps", type=float, default=5.0)
+    stock_backtest.add_argument("--max-volatility", type=float, default=0.80)
+    stock_backtest.add_argument("--max-drawdown", type=float, default=0.65)
+    stock_backtest.add_argument("--require-uptrend", action="store_true")
+    stock_backtest.add_argument(
+        "--output", type=Path,
+        default=Path("local_data/stock_walkforward_2000_2026.json"),
+    )
+
+    stock = sub.add_parser(
+        "stock-screen",
+        help="Offline point-in-time-capped multi-factor stock ranking; no orders",
+    )
+    stock.add_argument("--prices", type=Path, required=True,
+                       help="Long CSV: date,symbol,adjusted_close")
+    stock.add_argument("--as-of", required=True, help="Evaluation date YYYY-MM-DD")
+    stock.add_argument("--fundamentals", type=Path, default=None,
+                       help="Optional dated fundamental snapshot CSV")
+    stock.add_argument("--top", type=int, default=10)
+    stock.add_argument("--max-price-age-days", type=int, default=10)
+    stock.add_argument("--max-fundamental-age-days", type=int, default=200)
+    stock.add_argument("--max-volatility", type=float, default=0.80)
+    stock.add_argument("--max-drawdown", type=float, default=0.65)
+    stock.add_argument("--min-market-cap", type=float, default=0.0,
+                       help="Minimum market_cap_usd; requires --fundamentals")
+    stock.add_argument("--require-uptrend", action="store_true")
+    stock.add_argument("--max-per-sector", type=int, default=None,
+                       help="Max picks per sector; requires --fundamentals")
+    stock.add_argument("--output", type=Path,
+                       default=Path("local_data/stock_screen.json"))
+
     return parser
 
 
@@ -419,7 +614,359 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "atlas-native-audit":
+        if args.command == "stock-alpha-gate":
+            source = require_private_output(args.monthly_report)
+            destination = require_private_output(args.output)
+            if source.suffix.lower() != ".json" or destination.suffix.lower() != ".json":
+                raise ValueError("Alpha eligibility input/output must be .json under local_data")
+            if source == destination:
+                raise ValueError("Alpha gate cannot overwrite monthly input report")
+            candidate_gate = build_from_file(
+                source, top_percent=args.top_percent,
+                max_ranked_names=args.max_ranked_names,
+                minimum_scored_names=args.minimum_scored_names,
+                minimum_listing_coverage_pct=args.minimum_listing_coverage_pct,
+                maximum_model_age_days=args.maximum_model_age_days,
+            )
+            written = write_eligibility_json(
+                candidate_gate, destination, overwrite=args.overwrite
+            )
+            report = {
+                "month": candidate_gate["month"],
+                "valid_for_month": candidate_gate["valid_for_month"],
+                "eligibility_status": candidate_gate["research_eligibility_status"],
+                "eligible_count": candidate_gate["eligible_count"],
+                "blocked_reasons": candidate_gate["blocked_reasons"],
+                "eligible_symbols": candidate_gate["eligible_symbols"],
+                "written": written,
+                "live_execution_enabled": False,
+                "automated_handoff_approved": False,
+            }
+        elif args.command == "stock-alpha-check":
+            source = require_private_output(args.gate)
+            if source.suffix.lower() != ".json":
+                raise ValueError("Alpha gate must be private .json")
+            candidate_gate = json.loads(source.read_text(encoding="utf-8"))
+            report = research_action_check(
+                candidate_gate, symbol=args.symbol, action=args.action,
+                decision_date=args.decision_date,
+            )
+        elif args.command == "stock-ai-monthly":
+            output_probe = require_private_output(args.output_dir / "_output_probe.json")
+            model_path = require_private_output(args.model)
+            output_dir = output_probe.parent
+            source_paths = {
+                args.prices.expanduser().resolve(),
+                args.benchmark_prices.expanduser().resolve(),
+                model_path,
+                model_path.with_suffix(model_path.suffix + ".meta.json"),
+            }
+            if args.universe is not None:
+                source_paths.add(args.universe.expanduser().resolve())
+            if any(p == output_dir or p.is_relative_to(output_dir)
+                   for p in source_paths):
+                raise ValueError("Monthly output directory must not contain input/model files")
+            result = monthly_candidates(
+                args.prices, args.benchmark_prices, model_path,
+                month=args.month, benchmark_symbol=args.benchmark_symbol,
+                universe_path=args.universe, min_scored=args.min_scored,
+                min_market_coverage_pct=args.min_market_coverage_pct,
+                max_training_age_days=args.max_training_age_days,
+            )
+            artifacts = write_monthly_research(
+                result, output_dir, overwrite=args.overwrite
+            )
+            report = {
+                "month": result["month"],
+                "as_of_nyse_session": result["as_of_nyse_session"],
+                "report_status": result["report_status"],
+                "review_reasons": result["review_reasons"],
+                "data_quality": result["data_quality"],
+                "top20_returned": result["top_20"]["returned"],
+                "top50_returned": result["top_50"]["returned"],
+                "top20_ambiguous": result["top_20"]["boundary_tied"],
+                "top50_ambiguous": result["top_50"]["boundary_tied"],
+                "artifacts": artifacts,
+                "research_only": True,
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-train-v2":
+            destination = require_private_output(args.model_output)
+            report_path = require_private_output(args.report)
+            if destination.suffix.lower() != ".txt" or report_path.suffix.lower() != ".json":
+                raise ValueError("V2 ranker model must be private .txt and report private .json")
+            metadata = destination.with_suffix(destination.suffix + ".meta.json")
+            inputs = {args.prices.expanduser().resolve(), args.benchmark_prices.expanduser().resolve()}
+            if len({destination, metadata, report_path}) != 3 or any(
+                item in inputs for item in (destination, metadata, report_path)
+            ):
+                raise ValueError("Ranker outputs must not overwrite model metadata or input data")
+            result = train_stock_learning_to_rank(
+                args.prices, args.benchmark_prices, destination,
+                start=args.start, train_end=args.train_end,
+                validation_end=args.validation_end, test_end=args.test_end,
+                benchmark_symbol=args.benchmark_symbol,
+                horizon_sessions=args.horizon_sessions,
+                sample_every_sessions=args.sample_every_sessions,
+                num_boost_round=args.num_boost_round, top=args.top,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "status": result["status"],
+                "model": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "split_counts": result["split_counts"],
+                "group_counts": result["group_counts"],
+                "validation": result["validation"],
+                "test": result["test"],
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-rank-v2":
+            destination = require_private_output(args.output)
+            model_path = require_private_output(args.model)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Ranker V2 output must be private .json")
+            if destination in {
+                args.prices.expanduser().resolve(), args.benchmark_prices.expanduser().resolve(),
+                model_path, model_path.with_suffix(model_path.suffix + ".meta.json"),
+            }:
+                raise ValueError("Ranker output cannot overwrite input data")
+            result = rank_stocks_v2(
+                args.prices, args.benchmark_prices, model_path,
+                as_of=args.as_of, top=args.top, benchmark_symbol=args.benchmark_symbol,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "as_of": result["as_of"],
+                "scored_count": result["scored_count"],
+                "selected": result["selected"],
+                "ranking_diagnostics": result["ranking_diagnostics"],
+                "model_diagnostics": result["model_diagnostics"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-train":
+            model_path = require_private_output(args.model_output)
+            report_path = require_private_output(args.report)
+            if model_path.suffix.lower() != ".txt" or report_path.suffix.lower() != ".json":
+                raise ValueError("AI model needs private local_data .txt and report .json")
+            inputs = {args.prices.expanduser().resolve(),
+                      args.benchmark_prices.expanduser().resolve()}
+            metadata_path = model_path.with_suffix(model_path.suffix + ".meta.json")
+            if (len({model_path, metadata_path, report_path}) != 3
+                    or any(p in inputs for p in (model_path, metadata_path, report_path))):
+                raise ValueError("Model and report must be distinct, cannot overwrite input data")
+            result = train_ai_stock_ranker(
+                args.prices, args.benchmark_prices, model_path,
+                start=args.start, train_end=args.train_end,
+                validation_end=args.validation_end, test_end=args.test_end,
+                benchmark_symbol=args.benchmark_symbol,
+                sample_every_sessions=args.sample_every_sessions,
+                horizon_sessions=args.horizon_sessions,
+                num_boost_round=args.num_boost_round,
+                min_train_rows=args.min_train_rows,
+                top=args.top,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "status": result["status"],
+                "model": str(model_path.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "split_counts": result["split_counts"],
+                "purged_rows": result["purged_rows"],
+                "validation": result["validation"],
+                "test": result["test"],
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-rank":
+            destination = require_private_output(args.output)
+            model_path = require_private_output(args.model)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("AI rank output must be private local_data .json")
+            inputs = {args.prices.expanduser().resolve(),
+                      args.benchmark_prices.expanduser().resolve(),
+                      model_path,
+                      model_path.with_suffix(model_path.suffix + ".meta.json")}
+            if destination in inputs:
+                raise ValueError("AI rank output cannot overwrite inputs or model")
+            result = rank_with_ai(
+                args.prices, args.benchmark_prices, model_path,
+                as_of=args.as_of, top=args.top, benchmark_symbol=args.benchmark_symbol,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "as_of": result["as_of"],
+                "universe_count": result["universe_count"],
+                "scored_count": result["scored_count"],
+                "excluded_count": result["excluded_count"],
+                "selected": result["selected"],
+                "ranking_diagnostics": result["ranking_diagnostics"],
+                "model_diagnostics": result["model_diagnostics"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-universe":
+            destination = require_private_output(args.output)
+            report_path = require_private_output(args.report)
+            if destination.suffix.lower() != ".csv" or report_path.suffix.lower() != ".json":
+                raise ValueError("Universe needs .csv output and .json report under local_data")
+            if destination == report_path:
+                raise ValueError("Universe CSV and report paths must differ")
+            sources = {
+                p.expanduser().resolve() for p in (args.nasdaq_file, args.other_file) if p is not None
+            }
+            if destination in sources or report_path in sources:
+                raise ValueError("Refusing to overwrite universe source file")
+            report = build_us_listed_universe(
+                destination, nasdaq_file=args.nasdaq_file, other_file=args.other_file,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            report = {
+                "listing_count": report["listing_count"],
+                "unverified_issue_count": report["unverified_issue_count"],
+                "snapshot_utc": report["snapshot_utc"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+                "warning": "Current listings only, NOT historical all stocks.",
+            }
+        elif args.command == "stock-sync-market":
+            destination = require_private_output(args.output)
+            report_path = require_private_output(args.report)
+            cache_probe = require_private_output(args.cache_dir / "_atlaspm_probe.json")
+            cache_dir = cache_probe.parent
+            if destination.suffix.lower() != ".csv" or report_path.suffix.lower() != ".json":
+                raise ValueError("Quote output needs .csv and report .json under local_data")
+            if len({destination, report_path}) != 2:
+                raise ValueError("Quote output and report must differ")
+            universe_file = args.universe.expanduser().resolve()
+            if destination == universe_file or report_path == universe_file:
+                raise ValueError("Refusing to overwrite stock universe manifest")
+            if destination.is_relative_to(cache_dir) or report_path.is_relative_to(cache_dir):
+                raise ValueError("Quote output/report must not be inside ticker cache")
+            details = sync_us_market_prices(
+                args.universe, cache_dir, destination,
+                start=args.start, end=args.end,
+                max_symbols=args.max_symbols, workers=args.workers,
+                attempts=args.attempts,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(details, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "listing_candidates": details["listing_candidates"],
+                "covered": details["cached_or_downloaded_symbols"],
+                "missing": details["missing_symbols"],
+                "coverage_pct": details["coverage_pct"],
+                "new_successes": details["new_download_successes"],
+                "failed_this_run": details["failed_this_run"],
+                "price_rows": details["price_rows"],
+                "full_market_coverage": details["full_market_coverage"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-backtest":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Stock backtest output must be private local_data .json")
+            sources = {args.prices.expanduser().resolve(),
+                       args.benchmark_prices.expanduser().resolve()}
+            if destination in sources:
+                raise ValueError("Stock backtest cannot overwrite its inputs")
+            result = backtest_stock_screener(
+                args.prices, args.benchmark_prices,
+                start=args.start, end=args.end,
+                benchmark_symbol=args.benchmark_symbol,
+                top=args.top, rebalance_days=args.rebalance_days,
+                fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
+                max_volatility=args.max_volatility,
+                max_drawdown=args.max_drawdown,
+                require_uptrend=args.require_uptrend,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": "local_data/" + destination.relative_to(
+                    (Path.cwd().resolve() / "local_data").resolve()
+                ).as_posix(),
+                "requested_window": result["requested_window"],
+                "actual_window": result["actual_window"],
+                "universe_count": result["universe_count_excluding_benchmark"],
+                "decision_count": result["decision_count"],
+                "executed_rebalances": result["executed_rebalances"],
+                "portfolio": result["portfolio"],
+                "benchmark": result["benchmark"],
+                "equal_weight_universe": result["equal_weight_universe"],
+                "relative": result["relative"],
+                "live_execution_enabled": False,
+                "data_caution": "Surviving ticker universe; NOT survivorship-safe or certified alpha.",
+            }
+        elif args.command == "stock-screen":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Stock screen output must be a private local_data .json file")
+            inputs = {args.prices.expanduser().resolve()}
+            if args.fundamentals:
+                inputs.add(args.fundamentals.expanduser().resolve())
+            if destination in inputs:
+                raise ValueError("Refusing to overwrite stock screener input")
+            result = screen_stocks(
+                args.prices,
+                args.as_of,
+                fundamentals_path=args.fundamentals,
+                top=args.top,
+                max_price_age_days=args.max_price_age_days,
+                max_fundamental_age_days=args.max_fundamental_age_days,
+                max_annual_volatility=args.max_volatility,
+                max_drawdown=args.max_drawdown,
+                minimum_market_cap_usd=args.min_market_cap,
+                require_uptrend=args.require_uptrend,
+                max_per_sector=args.max_per_sector,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": "local_data/" + destination.relative_to(
+                    (Path.cwd().resolve() / "local_data").resolve()
+                ).as_posix(),
+                "as_of": result["as_of"],
+                "mode": result["mode"],
+                "universe_count": result["universe_count"],
+                "eligible_count": result["eligible_count"],
+                "excluded_count": len(result["excluded"]),
+                "selected": [
+                    {"rank": row["rank"], "symbol": row["symbol"], "score": row["score"]}
+                    for row in result["selected"]
+                ],
+                "live_execution_enabled": False,
+            }
+        elif args.command == "atlas-native-audit":
             inputs = [
                 require_private_output(args.risknet_report),
                 require_private_output(args.dual_report),
