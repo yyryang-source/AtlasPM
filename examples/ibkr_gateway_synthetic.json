@@ -24,7 +24,7 @@
         "netliquidationvalue": 123950,
         "tbondsmarketvalue": 97900,
         "stockmarketvalue": 60000,
-        "interest": 150
+        "interest": 0.065
       }
     },
     "/portfolio2/DU1234567/positions": [
@@ -37,7 +37,8 @@
         "position": 200,
         "marketPrice": 300,
         "marketValue": 60000,
-        "timestamp": 1795220000
+        "timestamp": 1795220000,
+        "mktValue": 60000
       },
       {
         "conid": 202020,
@@ -47,7 +48,8 @@
         "description": "FICTIONAL US TREASURY",
         "position": 100000,
         "marketValue": 97900,
-        "timestamp": 1795220000
+        "timestamp": 1795220000,
+        "mktValue": 97900
       }
     ]
   }
