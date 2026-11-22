@@ -90,10 +90,14 @@ def check_risk_budget(
     }
     cap = min(bounds.values())
     # A 1x unlevered account is NOT subject to maintenance requirements.
-    if cap < 1 and all((name != "maintenance_buffer_cap_for_margin" or value >= 1) for name, value in bounds.items()):
-        feasible = False
-    else:
-        feasible = all((value >= 1 - 1e-10) for name, value in bounds.items() if name != "maintenance_buffer_cap_for_margin") and concentration <= name_cap + 1e-10
+    # Maintenance stops applying precisely at 1x (unlevered); a margin-only
+    # cap below 1x therefore means "no financing", not "no portfolio".
+    feasible = (
+        concentration <= name_cap + 1e-10
+        and volatility_bound >= 1 - 1e-10
+        and shock_bound >= 1 - 1e-10
+        and 1 - shock >= buffer - 1e-10
+    )
     recommendation = max(1.0, min(cap, lev_cap)) if feasible else None
     return {
         "status": "WITHIN_RESEARCH_BUDGET" if all(limits.values()) else "EXCEEDS_RESEARCH_BUDGET",
