@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.12 hypothetical multiasset correlation stress and financing risk budgets, layered on v0.4.11 offline margin stress and v0.4.10 GET-only local IBKR monitoring. No trained AI, authenticated financing evidence or trading connections. Scenarios are assumed research models, not IBKR liquidation rules. Not investment advice.
+> **Status:** v0.4.13 offline reverse margin stress and hypothetical drawdown-threshold diagnostics, layered on v0.4.12 multiasset risk budgets. Optional IBKR Gateway reads are GET-only. No trained AI, authenticated financing debt proof, order submission, or real liquidation forecasting. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -27,6 +27,12 @@ Follow the [synthetic Windows PowerShell test procedure](docs/IBKR_MARGIN_STRESS
 The `ibkr-multiasset-budget` CLI uses the private prior `ibkr-stress` output and a new synthetic-only research-sleeve manifest. It computes explicitly supplied per-asset shock P&L, a 99% one-day parametric normal VaR under validated positive-semidefinite correlation matrices, simple assumed borrowing interest, and illustrative margin/buffer/concentration budget alerts. Correlation affects statistical VaR but does **not** change user-specified deterministic shocks. No AI model is trained; no brokerage orders are possible, and every trust/readiness flag stays false.
 
 See [v0.4.12 Windows instructions and assumptions](docs/IBKR_MULTI_ASSET_BUDGET.md).
+
+## v0.4.13: Reverse margin and liquidity buffer stress
+
+The new `ibkr-reverse-stress` CLI consumes the private v0.4.12 synthetic budget output and assumed interest, maintenance and correlated shock sensitivities. It analytically finds the hypothetical market decline at which a stated liquidity-buffer floor, zero maintenance excess or zero NLV is reached. Results distinguish already-at-threshold, within-range and not-reached states; they **do not** predict IBKR liquidation prices and cannot grant broker risk permissions.
+
+See [v0.4.13 PowerShell commands and modeling boundaries](docs/IBKR_REVERSE_STRESS.md).
 
 ## What works today
 
