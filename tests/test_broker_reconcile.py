@@ -50,7 +50,9 @@ class BrokerExportReconcileTests(unittest.TestCase):
         self.broker["positions"] = [
             self.broker["positions"][0],
             {"type": "option", "identifier": "FAKE-OPTION",
-             "contracts": 1, "multiplier": 100, "market_value": 100},
+             "contracts": 1, "multiplier": 100, "market_value": 100,
+             "underlying": "QQQ", "right": "put",
+             "strike": 275, "expiration_date": "2027-02-19"},
         ]
         r = self.reconcile()
         self.assertIn("treasury:91282CDE0", r["missing_in_import"])
