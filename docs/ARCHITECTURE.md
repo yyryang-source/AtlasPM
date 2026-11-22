@@ -12,7 +12,9 @@
 
 - `models.py`: validated long-only account and position objects.
 - `portfolio.py`: ledger-based equity/leverage, borrowing estimates, scenario stress.
-- `backtest.py`: rolling-window close-to-next-close simulated trading with constant-rate financing, fees, drifted positions, high-water drawdowns, and benchmark; no broker liquidation.
+- `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
+- `audit.py`: compare saved cash and margin curves and report stress warnings.
+- `backtest.py`: rolling-window close-to-next-close simulated trading with constant-rate financing, fees, drifted positions, high-water drawdowns, and benchmark; optional one-session-delayed full-deleveraging stress scenario, but no broker liquidation model.
 - `historical.py`: optional Yahoo Finance downloader and strict local CSV estimator (252 trading days per year, shared-date simple daily returns, no forward-fill).
 - `mean_variance.py`: deterministic projected-gradient mean-variance scenario optimizer; estimates/covariance are explicit inputs and assumed financing is not a broker margin check.
 - `optimizer.py`: deterministic inverse-volatility baseline with max-weight constraints.
