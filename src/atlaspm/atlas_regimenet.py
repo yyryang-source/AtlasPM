@@ -338,6 +338,7 @@ def backtest_atlas_native(
     slippage_bps: float = 5.0,
     no_trade_band: float = 0.0,
     return_head_strength: float = 1.0,
+    architecture: str = "dual",
 ) -> dict[str, Any]:
     """Train our own network and simulate each next-close rebalance.
 
@@ -366,6 +367,18 @@ def backtest_atlas_native(
     return_head_strength = _real(
         return_head_strength, "return_head_strength", 0, 1
     )
+    if architecture not in ("dual","risknet"):
+        raise ValueError("Atlas native architecture must be dual or risknet")
+    if architecture == "risknet" and return_head_strength != 0:
+        raise ValueError(
+            "Atlas RiskNet has no return head: --return-head-strength must be 0"
+        )
+    if architecture == "risknet":
+        # Imported only for explicit risk-only research; it shares standard
+        # historical features, not dual-head trained weights or loss.
+        from atlaspm.atlas_risknet import (
+            RISKNET_NAME, fit_atlas_risknet, predict_atlas_risknet,
+        )
 
     _numpy()
     prices = load_adjusted_prices(path)
@@ -413,20 +426,40 @@ def backtest_atlas_native(
         signal = t-1
         before = {key: state["equity"] for key, state in states.items()}
         if (t-first_exec) % rebalance_days == 0:
-            fitted = fit_atlas_regimenet(
-                per_asset, signal, feature_days, forecast_days,
-                minimum_training_samples, train_window=training_window,
-                sample_stride=sample_stride, epochs=training_epochs,
-            )
-            last_model = fitted
-            outputs = [
-                predict_atlas_regimenet(
-                    fitted, native_feature_vector(per_asset, signal, j, feature_days)
+            if architecture == "risknet":
+                fitted = fit_atlas_risknet(
+                    per_asset, signal, feature_days, forecast_days,
+                    minimum_training_samples, train_window=training_window,
+                    sample_stride=sample_stride, epochs=training_epochs,
                 )
-                for j in range(len(symbols))
-            ]
+                outputs = [
+                    predict_atlas_risknet(
+                        fitted, native_feature_vector(
+                            per_asset, signal, j, feature_days
+                        )
+                    ) for j in range(len(symbols))
+                ]
+            else:
+                fitted = fit_atlas_regimenet(
+                    per_asset, signal, feature_days, forecast_days,
+                    minimum_training_samples, train_window=training_window,
+                    sample_stride=sample_stride, epochs=training_epochs,
+                )
+                outputs = [
+                    predict_atlas_regimenet(
+                        fitted, native_feature_vector(
+                            per_asset, signal, j, feature_days
+                        )
+                    ) for j in range(len(symbols))
+                ]
+            last_model = fitted
             vol = [out["annualized_rms_risk_forecast"] for out in outputs]
-            alpha = [out["annualized_arithmetic_return_forecast"] for out in outputs]
+            original_alpha = [
+                out["annualized_arithmetic_return_forecast"] for out in outputs
+            ]
+            # A risk-only network has NO trained return signal. Zero is only a
+            # neutral allocation constant, never an inferred return forecast.
+            alpha = [0.0 if value is None else value for value in original_alpha]
             naive_vol = [
                 _rms(per_asset[j][signal-feature_days:signal])
                 for j in range(len(symbols))
@@ -528,7 +561,7 @@ def backtest_atlas_native(
                         "asset": symbol,
                         "annualized_risk_forecast": vol[j],
                         "baseline_trailing_risk_forecast": naive_vol[j],
-                        "annualized_return_forecast": alpha[j],
+                        "annualized_return_forecast": original_alpha[j],
                         "realized_forward_annual_rms": _rms(observed),
                         "realized_forward_arithmetic_annual_return":
                             fmean(observed)*TRADING_DAYS_PER_YEAR,
@@ -545,12 +578,13 @@ def backtest_atlas_native(
                 "training_initial_loss": fitted["initial_data_loss"],
                 "training_final_loss": fitted["final_data_loss"],
                 "annualized_risk_forecasts": dict(zip(symbols, vol)),
-                "annualized_return_forecasts": dict(zip(symbols, alpha)),
+                "annualized_return_forecasts": dict(zip(symbols, original_alpha)),
                 "latent_expert_probabilities": {
                     s: o["latent_expert_probabilities"]
                     for s, o in zip(symbols, outputs)
                 },
                 "return_confidence_exposure_cap": return_confidence_cap,
+                "trained_model_architecture": architecture,
                 "native_execution_policy": execution_decisions["atlas_native"],
                 "baseline_execution_policy":
                     execution_decisions["naive_trailing_vol_risk"],
@@ -588,7 +622,9 @@ def backtest_atlas_native(
     return {
         "method": "atlaspm_original_regimenet_v1_walk_forward",
         "status": "OFFLINE_TRAINED_RESEARCH_ONLY",
-        "model_family": MODEL_NAME,
+        "model_family": RISKNET_NAME if architecture == "risknet" else MODEL_NAME,
+        "architecture_choice": architecture,
+        "return_prediction_head_trained": architecture == "dual",
         "trained_from_scratch": True,
         "pretrained_weights_used": False,
         "is_official_qlib_pipeline": False,
@@ -619,6 +655,7 @@ def backtest_atlas_native(
             "fee_bps": fee_bps, "slippage_bps": slippage_bps,
             "no_trade_band_l1_account_weight": no_trade_band,
             "return_head_strength": return_head_strength,
+            "architecture": architecture,
         },
         "execution_summary": {
             name: {
@@ -641,7 +678,7 @@ def backtest_atlas_native(
                 abs(p["annualized_return_forecast"] -
                     p["realized_forward_arithmetic_annual_return"])
                 for p in predictions
-            ) if predictions else None,
+            ) if predictions and architecture == "dual" else None,
             "zero_return_baseline_mae_annualized": fmean(
                 abs(p["realized_forward_arithmetic_annual_return"])
                 for p in predictions
@@ -654,7 +691,7 @@ def backtest_atlas_native(
                 ) < fmean(
                     abs(p["realized_forward_arithmetic_annual_return"])
                     for p in predictions
-                ) if predictions else False
+                ) if predictions and architecture == "dual" else None
             ),
             "warning": "Overlapping prediction labels are correlated; train and test are time-ordered but there is no untouched independent final holdout.",
         },
@@ -669,6 +706,7 @@ def backtest_atlas_native(
         "live_execution_enabled": False,
         "warnings": [
             "This is our own shared softmax-gated three-expert dual-target architecture and trained parameters, not imported pre-trained Ridge/LightGBM/Qlib weights. It uses standard published ML primitives.",
+            "Atlas RiskNet is separately fitted with a risk-only objective and has no return head; absent forecasts are null, not false alpha predictions.",
             "Return head is optional for allocation ablation, and zero-return MAE baseline is provided; training loss improvement is not evidence of investable alpha.",
             "No-trade bands revalidate actual holdings against all hard risk caps before skipping; fewer trades are not a guaranteed performance gain.",
             "Forecast return is uncertain, not alpha proof; stress and loss budgets cannot be overridden by learned forecasts.",
@@ -692,6 +730,8 @@ def redacted_atlas_native_console(result: dict[str, Any], output: str) -> dict[s
         "method": result["method"],
         "status": result["status"],
         "model_family": result["model_family"],
+        "architecture": result["architecture_choice"],
+        "return_prediction_head_trained": result["return_prediction_head_trained"],
         "trained_from_scratch": result["trained_from_scratch"],
         "asset_count": len(result["data"]["symbols"]),
         "held_out_trading_sessions":

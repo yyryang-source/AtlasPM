@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.6.1 original AtlasPM three-expert dual-risk-and-return model, now with controlled return-head ablations, validated no-trade corridor and out-of-sample forecast comparisons against naive risk/zero return. Native v0.6.0 underperformed naive trailing-risk Sharpe and cumulative returns on a user's 2000–2026 history. None of the models is certified profitable or ready for IBKR paper/live orders; all research is offline cash-only 0–1x. Not investment advice.
+> **Status:** v0.6.2 Atlas RiskNet v2: our independently trained, three-expert **risk-only** neural model with asymmetric robust risk loss, alongside legacy Atlas RegimeNet dual-head and historical risk baselines. Native risk-only and dual-head/return-off experiments remain unvalidated for future investment performance. All simulations are 0–1x cash-only; no IBKR live or paper orders or financing. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -87,6 +87,12 @@ We are using standard public mathematical operations and optional NumPy **only f
 Our own `atlas-native-backtest` now supports `--return-head-strength 0|1` to isolate whether the model's self-trained forward-return estimates help the allocation, and `--no-trade-band 0.05` to skip small target-weight changes **only when actual current holdings pass all rechecked risk limits**. Traditional trailing risk receives the same no-trade policy; there is no hidden execution advantage for native AI.
 
 Historical output reports learned forecast MAE versus naive trailing-volatility and zero-return predictions, and compares native vs traditional trades and costs under matching rules. The first unmodified v0.6.0 experiment yielded **198.72% simulated cumulative native return and 0.856 Sharpe vs 215.58% and 1.007 for traditional risk**; improving training loss alone did not produce investable alpha. See [our native architecture, experiment results and reproducible ablations](docs/ATLAS_NATIVE_MODEL.md).
+
+## v0.6.2: Atlas RiskNet v2 — independently trained risk-only AI
+
+Our `atlas-native-backtest --architecture risknet --return-head-strength 0` now trains a **new original single-output three-expert network from scratch**, with a robust asymmetric Huber loss designed specifically for future realized risk. It is **not** the old dual-head network with the return signal merely switched off. There is **no return prediction head**; reports use null rather than inventing an expected return. The original `--architecture dual` remains intact as an independent comparator. Both share the same cash ledger, 0–1x risk limits, transaction fees and optional no-trade band, as does the traditional risk benchmark.
+
+The 2000–2026 baseline comparison at `--no-trade-band 0.05` previously showed Atlas dual-head return-off historical return **220.13%** vs **216.83%** traditional, but traditional's Sharpe **1.011** beat Atlas's **0.974** and it had a slightly lower max drawdown. RiskNet v2's actual historical scores are **not known** until you run it locally. See [native RiskNet v2 specification and PowerShell commands](docs/ATLAS_RISKNET_V2.md).
 
 ## What works today
 
