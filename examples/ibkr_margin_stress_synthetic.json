@@ -1,0 +1,33 @@
+{
+  "_synthetic_fixture": "All amounts and scenarios are fictional; no IBKR approved maintenance model.",
+  "method": "hypothetical_static_margin_stress",
+  "shockable_position_value_usd": 60000,
+  "assumed_annual_financing_apr": 0.065,
+  "minimum_excess_to_nlv_ratio": 0.15,
+  "scenarios": [
+    {
+      "name": "baseline_no_shock",
+      "shock_fraction": 0,
+      "maintenance_multiplier": 1,
+      "horizon_days": 0
+    },
+    {
+      "name": "equity_down_20pct",
+      "shock_fraction": 0.2,
+      "maintenance_multiplier": 1.2,
+      "horizon_days": 30
+    },
+    {
+      "name": "equity_down_40pct",
+      "shock_fraction": 0.4,
+      "maintenance_multiplier": 1.5,
+      "horizon_days": 90
+    },
+    {
+      "name": "combined_severe_decline_and_house_margin_jump",
+      "shock_fraction": 0.8,
+      "maintenance_multiplier": 2.5,
+      "horizon_days": 365
+    }
+  ]
+}
