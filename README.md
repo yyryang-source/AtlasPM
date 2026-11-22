@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.3.1 research prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.0 architecture and paper-only risk-control prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -123,12 +123,31 @@ Extend `backtest-risk` with an empirical historical **one-day 5%-tail Expected S
 
 Only past observations are used at each scheduled rebalance. An empirical 3% worst-tail average loss bound is **not** a maximum drawdown or crash-protection guarantee. Omitting `--max-daily-tail-loss` retains the previous behavior. This initial feature scales total exposure, not weights. Read [tail-loss methodology](docs/TAIL_RISK.md).
 
+## Institutional architecture (v0.4.0 contract milestone)
+
+AtlasPM is being redesigned toward an **institutional PMS + RMS + collateral + hedge + OMS** stack. Read [Institutional architecture](docs/INSTITUTIONAL_ARCHITECTURE.md) and the [Phased institutional roadmap](docs/INSTITUTIONAL_ROADMAP.md).
+
+The first integrated building block is a **fail-closed, paper-only trade-intent risk gate**. It handles NORMAL/WATCH/DE_RISK/CRITICAL/HALT states, separate cash/margin account constraints, source freshness and reconciliation, broker-style hypothetical What-If preview, verified-vs-unknown Treasury collateral credits, and protective option premium and permissions. It produces audit reasons; it **never connects to a real broker, fetches real account data or places trades**.
+
+From Windows PowerShell in the repository:
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli institutional-check --file examples\institutional_scenario.json --output local_data\institutional_preflight.json
+~~~
+
+The example is **entirely synthetic**, including its mock broker margin preview and recognized Treasury credit. A local paper-intent approval is *not* broker authorization or investment advice. Real-world trading remains disabled.
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── INSTITUTIONAL_ROADMAP.md
+│   ├── INSTITUTIONAL_ARCHITECTURE.md
 │   ├── TAIL_RISK.md
 │   ├── ADAPTIVE_RISK.md
 │   ├── RISK_BUDGET.md
@@ -145,6 +164,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── institutional_gate.py
 │   ├── tail_risk.py
 │   ├── risk_backtest.py
 │   ├── risk_budget.py
