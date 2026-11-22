@@ -48,6 +48,12 @@ def _load(path: Path) -> dict[str, Any]:
     breaches = sum(bool(p.get("below_assumed_maintenance", False)) for p in raw["equity_curve"])
     if breaches != raw["strategy"].get("below_assumed_maintenance_days"):
         raise ValueError("Reported maintenance breaches disagree with equity curve")
+    events = raw.get("forced_deleveraging_events", [])
+    if not isinstance(events, list):
+        raise ValueError("Malformed forced_deleveraging_events")
+    event_count = raw["strategy"].get("forced_deleveraging_event_count", len(events))
+    if event_count != len(events):
+        raise ValueError("Forced deleveraging count does not match event log")
     return raw
 
 
@@ -96,6 +102,7 @@ def _view(source: dict[str, Any]) -> dict[str, Any]:
             "target_leverage": source["parameters"].get("target_leverage"),
             "lookback_trading_days": source["parameters"].get("lookback_trading_days"),
             "rebalance_every_trading_days": source["parameters"].get("rebalance_every_trading_days"),
+            "margin_policy": source["parameters"].get("margin_policy", "none"),
         },
         "annualized_compounded_return": strategy_cagr,
         "benchmark_compounded_return": bench_cagr,
@@ -106,10 +113,13 @@ def _view(source: dict[str, Any]) -> dict[str, Any]:
         "ending_equity_index": _number(strategy.get("ending_equity_index"), "ending_equity_index"),
         "maintenance_breach_dates": violated_dates,
         "maintenance_breach_days": len(violated_dates),
+        "forced_deleveraging_events": source.get("forced_deleveraging_events", []),
+        "forced_deleveraging_event_count": len(source.get("forced_deleveraging_events", [])),
         "worst_five_calendar_years": worst,
         "calendar_year_returns": yearly,
         "research_flags": {
             "margin_breach_detected": bool(violated_dates),
+            "modeled_forced_deleveraging": bool(source.get("forced_deleveraging_events", [])),
             "drawdown_exceeds_50_percent": drawdown <= -0.50,
             "underperformed_equal_weight_cagr": strategy_cagr < bench_cagr,
             "live_trading_validated": False,
@@ -151,7 +161,7 @@ def audit_backtests(cash_path: Path, margin_path: Path) -> dict[str, Any]:
             "research_only": True,
             "broker_execution_suitability_established": False,
             "warning": (
-                "Maintenance breaches are not liquidated in simulation; "
+                "Maintenance breaches are not subject to real broker liquidation; "
                 "leveraged performance is not a realizable brokerage track record. "
                 "Historical asset selection, prices and funding assumptions require independent validation."
             ),
