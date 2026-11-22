@@ -14,11 +14,12 @@
 - [x] Deterministic long-only mean-variance prototype with covariance validation and concentration caps
 - [x] User-defined leverage and financing assumptions in scenario output
 - [x] Make cash-account maintenance requirement zero
-- [ ] Connect historical data and estimate returns/covariance with provenance
+- [x] Download adjusted Yahoo Finance daily prices via optional yfinance; estimate historical annualized returns/covariance with provenance
 
 ### Remaining data work
 
-- [ ] Data import (CSV first; optional vendors later), provenance and calendar alignment
+- [x] Strict CSV schema, common-date calendar alignment and source metadata
+- [ ] Additional vetted data providers and corporate-action validation
 - [ ] Total return and corporate-action handling
 - [ ] Walk-forward backtesting, look-ahead/leakage checks, realistic fees and slippage
 - [ ] Historical multi-asset covariance, factor and drawdown risk reports
