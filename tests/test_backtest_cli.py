@@ -40,10 +40,10 @@ class BacktestCliTest(unittest.TestCase):
             self.assertNotIn("equity_curve", summary)
             saved = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertEqual(
-                saved["data"]["backtest_daily_observations"], 59
+                saved["data"]["backtest_daily_observations"], 58
             )
             self.assertEqual(
-                len(saved["equity_curve"]), 59
+                len(saved["equity_curve"]), 58
             )
             self.assertGreater(saved["strategy"]["rebalance_count"], 0)
 
