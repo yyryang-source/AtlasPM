@@ -74,13 +74,18 @@ class USMarketQualityTest(unittest.TestCase):
                 w.writerow(["2026-11-02", "WMT", "-5"])
 
     def audit(self, **kwargs):
-        return audit_current_us_stock_prices(
-            universe_path=self.manifest, prices_path=self.prices,
-            as_of=self.as_of, min_history_sessions=100,
-            recent_sessions=21, min_recent_coverage_pct=100,
-            min_month_end_coverage_pct=90, min_eligible_names=5,
-            **kwargs,
-        )
+        defaults = {
+            "universe_path": self.manifest,
+            "prices_path": self.prices,
+            "as_of": self.as_of,
+            "min_history_sessions": 100,
+            "recent_sessions": 21,
+            "min_recent_coverage_pct": 100,
+            "min_month_end_coverage_pct": 90,
+            "min_eligible_names": 5,
+        }
+        defaults.update(kwargs)
+        return audit_current_us_stock_prices(**defaults)
 
     def test_good_whole_market_fixture_is_ready_for_research_only(self):
         result = self.audit()
