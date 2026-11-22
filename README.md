@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.3.0 research prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.3.1 research prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -113,12 +113,23 @@ If the modeled 2× candidate fails, it reports **which constraints failed** and 
 
 The second `--margin` parameter is merely the name of the second comparison case; the adaptive strategy may use no margin at many dates. **Do not interpret in-sample risk rules or results as future Alpha.** Read [adaptive risk methodology](docs/ADAPTIVE_RISK.md) and the strategy's caveats.
 
+## Optional rolling historical tail-loss budget (v0.3.1)
+
+Extend `backtest-risk` with an empirical historical **one-day 5%-tail Expected Shortfall** bound:
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli backtest-risk --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.60 --max-leverage 2 --max-volatility 0.30 --stress-decline 0.30 --max-stress-loss 0.40 --maintenance 0.30 --min-buffer 0.05 --apr 0.065 --max-financing-cost 0.08 --fee-bps 5 --max-daily-tail-loss 0.03 --tail-fraction 0.05 --output local_data\backtest_tail_3pct.json
+```
+
+Only past observations are used at each scheduled rebalance. An empirical 3% worst-tail average loss bound is **not** a maximum drawdown or crash-protection guarantee. Omitting `--max-daily-tail-loss` retains the previous behavior. This initial feature scales total exposure, not weights. Read [tail-loss methodology](docs/TAIL_RISK.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── TAIL_RISK.md
 │   ├── ADAPTIVE_RISK.md
 │   ├── RISK_BUDGET.md
 │   ├── MARGIN_SIM.md
@@ -134,6 +145,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── tail_risk.py
 │   ├── risk_backtest.py
 │   ├── risk_budget.py
 │   ├── benchmark.py
