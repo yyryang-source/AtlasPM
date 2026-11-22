@@ -13,6 +13,7 @@ from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
 from atlaspm.backtest import backtest_walk_forward
 from atlaspm.audit import audit_backtests
+from atlaspm.benchmark import compare_spy
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,11 +69,18 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--apr", type=float, default=0.065)
     backtest.add_argument("--fee-bps", type=float, default=5.0)
     backtest.add_argument("--maintenance", type=float, default=0.30)
+    backtest.add_argument("--margin-policy", choices=["none", "next_close_deleverage_to_1x"], default="none")
 
     audit = sub.add_parser("audit", help="Compare saved cash and margin backtests")
     audit.add_argument("--cash", type=Path, required=True)
     audit.add_argument("--margin", type=Path, required=True)
     audit.add_argument("--output", type=Path, default=Path("local_data/risk_audit.json"))
+
+    benchmark = sub.add_parser("benchmark-spy", help="Exact-date independent SPY comparison")
+    benchmark.add_argument("--cash", type=Path, required=True)
+    benchmark.add_argument("--margin", type=Path, required=True)
+    benchmark.add_argument("--spy", type=Path, required=True)
+    benchmark.add_argument("--output", type=Path, default=Path("local_data/spy_comparison.json"))
 
     return parser
 
@@ -105,6 +113,15 @@ def main(argv: list[str] | None = None) -> int:
                 "metadata": report["metadata"],
                 "next_step": f"atlaspm optimize --file {args.output}",
             }
+        elif args.command == "benchmark-spy":
+            report = compare_spy(args.cash, args.margin, args.spy)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {key: value for key, value in report.items() if key != "spy_curve"}
+            report["written"] = str(args.output)
         elif args.command == "audit":
             report = audit_backtests(args.cash, args.margin)
             args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
                 annual_financing_rate=args.apr,
                 fee_bps=args.fee_bps,
                 maintenance_fraction=args.maintenance,
+                margin_policy=args.margin_policy,
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
