@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.2.4 research prototype. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.2.5 research prototype. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -91,12 +91,23 @@ The SPY comparison now also estimates **historical Beta, correlation, tracking e
 
 See [hypothetical margin stress rules](docs/MARGIN_SIM.md) and [independent SPY benchmark](docs/BENCHMARK.md). Neither feature validates live trading or eliminates survivorship bias.
 
+## Pre-trade portfolio risk budget (v0.2.5)
+
+The new read-only `risk-check` command evaluates a **hypothetical** optimized portfolio against leverage, name concentration, modeled annual volatility, financing expense and a uniform market-crash scenario:
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli risk-check --file local_data\estimates.json --leverage 2 --risk-aversion 4 --max-weight 0.6 --max-name-weight 0.6 --max-volatility 0.30 --stress-decline 0.30 --max-stress-loss 0.40 --maintenance 0.30 --min-buffer 0.05 --output local_data\risk_budget_2x.json
+```
+
+If the modeled 2× candidate fails, it reports **which constraints failed** and whether any fully invested exposure of 1× or more could satisfy the assumptions. This is **not** broker-approved buying power and does not change live orders or past backtests. See [risk-budget methodology](docs/RISK_BUDGET.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── RISK_BUDGET.md
 │   ├── MARGIN_SIM.md
 │   ├── BENCHMARK.md
 │   ├── AUDIT.md
@@ -110,6 +121,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── risk_budget.py
 │   ├── benchmark.py
 │   ├── audit.py
 │   ├── backtest.py
