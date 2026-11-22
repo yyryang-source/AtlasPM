@@ -27,3 +27,5 @@ jobs:
 
       - name: Smoke test optimizer
         run: python -m atlaspm.cli optimize --file examples/optimizer.json
+      - name: Smoke test read-only risk budget
+        run: python -m atlaspm.cli risk-check --file examples/optimizer.json --leverage 1 --output local_data/ci_risk_budget.json
