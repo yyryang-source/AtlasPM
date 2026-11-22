@@ -51,3 +51,5 @@ jobs:
         run: python -m atlaspm.cli ibkr-readonly --fixture examples/ibkr_gateway_synthetic.json --account DU1234567 --output local_data/ci_ibkr_private_capture.json
       - name: Smoke test synthetic IBKR conid mapping diagnostic (no network)
         run: python -m atlaspm.cli ibkr-map-check --capture local_data/ci_ibkr_private_capture.json --mapping examples/ibkr_mapping_synthetic.json --output local_data/ci_ibkr_mapping.json
+      - name: Smoke test synthetic IBKR financing and margin reconciliation (no network)
+        run: python -m atlaspm.cli ibkr-financing-check --capture local_data/ci_ibkr_private_capture.json --mapping examples/ibkr_mapping_synthetic.json --statement examples/ibkr_financing_synthetic.json --output local_data/ci_ibkr_financing.json
