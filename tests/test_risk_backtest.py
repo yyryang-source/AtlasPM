@@ -123,7 +123,7 @@ class AdaptiveBudgetTest(unittest.TestCase):
                 {"max_weight": .4},
             ):
                 with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
-                    backtest_risk_budget(path, lookback_days=40, **{k: v for k, v in kwargs.items() if k != "lookback_days"} if "lookback_days" not in kwargs else kwargs)
+                    backtest_risk_budget(path, **({"lookback_days": 40} | kwargs))
 
     def test_all_cash_when_zero_allowed_stress_loss(self):
         policy = choose_budgeted_exposure(
