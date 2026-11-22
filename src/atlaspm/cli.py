@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from atlaspm.optimizer import inverse_volatility_weights
+from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
 
 
@@ -35,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Annualized volatility items such as QQQ=0.25 NVDA=0.50",
     )
     allocate.add_argument("--max-weight", type=float, default=0.60)
+    optim = sub.add_parser("optimize", help="Constrained mean-variance scenario")
+    optim.add_argument("--file", type=Path, required=True)
+    optim.add_argument("--risk-aversion", type=float, default=4.0)
+    optim.add_argument("--max-weight", type=float, default=0.60)
+    optim.add_argument("--leverage", type=float, default=1.0)
+    optim.add_argument("--apr", type=float, default=0.065)
     return parser
 
 
@@ -50,6 +57,18 @@ def main(argv: list[str] | None = None) -> int:
                 parse_accounts(payload),
                 declines=args.declines,
                 annual_margin_rate=args.apr,
+            )
+        elif args.command == "optimize":
+            assumptions = json.loads(args.file.read_text(encoding="utf-8"))
+            if not isinstance(assumptions, dict):
+                raise ValueError("Input file must be an object")
+            report = optimize_mean_variance(
+                assumptions["expected_returns"],
+                assumptions["covariance"],
+                risk_aversion=args.risk_aversion,
+                max_weight=args.max_weight,
+                leverage=args.leverage,
+                annual_financing_rate=args.apr,
             )
         else:
             vols: dict[str, float] = {}

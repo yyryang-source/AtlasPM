@@ -12,6 +12,7 @@
 
 - `models.py`: validated long-only account and position objects.
 - `portfolio.py`: ledger-based equity/leverage, borrowing estimates, scenario stress.
+- `mean_variance.py`: deterministic projected-gradient mean-variance scenario optimizer; estimates/covariance are explicit inputs and assumed financing is not a broker margin check.
 - `optimizer.py`: deterministic inverse-volatility baseline with max-weight constraints.
 - `cli.py`: reproducible JSON-in/JSON-out command-line interface.
 - `examples/`: fictional sample input.

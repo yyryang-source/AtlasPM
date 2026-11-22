@@ -9,12 +9,19 @@
 - [x] Capped inverse-volatility allocation baseline
 - [x] Automated unit tests and CI
 
-## v0.2 — historical research
+## v0.2 — constrained optimization and historical research (in progress)
+
+- [x] Deterministic long-only mean-variance prototype with covariance validation and concentration caps
+- [x] User-defined leverage and financing assumptions in scenario output
+- [x] Make cash-account maintenance requirement zero
+- [ ] Connect historical data and estimate returns/covariance with provenance
+
+## v0.2 — remaining data work
 
 - [ ] Data import (CSV first; optional vendors later), provenance and calendar alignment
 - [ ] Total return and corporate-action handling
 - [ ] Walk-forward backtesting, look-ahead/leakage checks, realistic fees and slippage
-- [ ] Multi-asset covariance, concentration, factor and drawdown risk reports
+- [ ] Historical multi-asset covariance, factor and drawdown risk reports
 
 ## v0.3 — optimization and AI experiments
 

@@ -70,6 +70,8 @@ class PortfolioAccount:
 
     @property
     def maintenance_required(self) -> float:
+        if self.account_type == "cash":
+            return 0.0
         return sum(
             p.market_value * p.maintenance_requirement for p in self.positions
         )
