@@ -1,10 +1,9 @@
-"""v0.5.0 supervised ML dynamic rebalancing RESEARCH engine (offline only).
+"""v0.5.2 supervised ML dynamic rebalancing RESEARCH engine (offline only).
 
-Trains an expanding-window ridge-regression *volatility forecast model* for
-each risky asset; the supervised risk forecast changes relative portfolio
-weights and the aggregate cash allocation. Model predictions are not alpha
-forecasts. Everything is historical research, with strict time-safe labels,
-long-only cash-account allocations and no real/paper broker order endpoint.
+Trains expanding-window ridge or optionally native LightGBM *volatility
+forecast models* for risky assets; predictions change portfolio weights and
+cash allocation. These supervised models are not alpha forecasts. Research
+only: no real/paper broker order endpoint, no authenticated risk approval.
 
 WARNING: execution-at-next-close after prior-close signals still ignores
 market impact and the inability to guarantee a closing auction fill.
@@ -248,6 +247,7 @@ def backtest_ml_dynamic_rebalance(
     drawdown_exposure_cap: float = 0.25,
     fee_bps: float = 5.0,
     slippage_bps: float = 5.0,
+    model_family: str = "ridge",
 ) -> dict[str, Any]:
     """Walk-forward supervised vol models + simulated rebalances.
 
@@ -286,6 +286,14 @@ def backtest_ml_dynamic_rebalance(
     )
     fee_bps = _real(fee_bps, "fee_bps", 0, 1000)
     slippage_bps = _real(slippage_bps, "slippage_bps", 0, 1000)
+    if model_family not in {"ridge", "lightgbm"}:
+        raise ValueError("Supported supervised risk models: ridge or lightgbm")
+    if model_family == "lightgbm":
+        # Do not import the optional dependency for default Ridge use.
+        from atlaspm.ml_lightgbm import (
+            _dependency, train_lightgbm_risk, predict_lightgbm_risk,
+        )
+        _dependency()
 
     prices = load_adjusted_prices(path)
     symbols = sorted(prices)
@@ -328,14 +336,22 @@ def backtest_ml_dynamic_rebalance(
             ai_sigma: list[float] = []
             naive_sigma: list[float] = []
             for j, symbol in enumerate(symbols):
-                model = _train_asset_model(
-                    by_asset[j], signal, feature_days,
-                    forecast_days, minimum_training_samples,
-                )
+                if model_family == "lightgbm":
+                    model = train_lightgbm_risk(
+                        by_asset[j], signal, feature_days,
+                        forecast_days, minimum_training_samples,
+                    )
+                else:
+                    model = _train_asset_model(
+                        by_asset[j], signal, feature_days,
+                        forecast_days, minimum_training_samples,
+                    )
                 trained[symbol] = model
-                ai_sigma.append(_forecast(
-                    model, _features(by_asset[j], signal, feature_days),
-                ))
+                features = _features(by_asset[j], signal, feature_days)
+                ai_sigma.append(
+                    predict_lightgbm_risk(model, features)
+                    if model_family == "lightgbm" else _forecast(model, features)
+                )
                 naive_sigma.append(_rms(by_asset[j][signal-feature_days:signal]))
             last_trained_models = trained
             trailing = returns[signal-feature_days:signal]
@@ -402,7 +418,11 @@ def backtest_ml_dynamic_rebalance(
                     signal-forecast_days
                 ].isoformat(),
                 "training_sample_count_per_asset":trained[symbols[0]]["training_samples"],
-                "model": "trained_regularized_log_future_rms_ridge",
+                "model": (
+                    "trained_lightgbm_log_forward_rms_risk"
+                    if model_family == "lightgbm"
+                    else "trained_regularized_log_future_rms_ridge"
+                ),
                 "ai_forecast_annual_rms":dict(zip(symbols, ai_sigma)),
                 "naive_forecast_annual_rms":dict(zip(symbols, naive_sigma)),
                 "ai_allocation":selected["ai"],
@@ -447,7 +467,14 @@ def backtest_ml_dynamic_rebalance(
         "method":"atlaspm_trained_ml_dynamic_rebalance_walkforward",
         "status":"OFFLINE_TRAINED_RESEARCH_ONLY",
         "is_trained_machine_learning_model":True,
-        "model_family":"supervised_ridge_regression_log_forward_rms_risk",
+        "model_family":(
+            "supervised_lightgbm_gbdt_log_forward_rms_risk"
+            if model_family == "lightgbm"
+            else "supervised_ridge_regression_log_forward_rms_risk"
+        ),
+        "selected_model_family": model_family,
+        "is_official_qlib_pipeline": False,
+        "is_pretrained_institutional_model": False,
         "trading_mode":"local_historical_cash_account_simulation",
         "data":{
             "symbols":symbols, "shared_price_dates":len(dates),
@@ -490,7 +517,8 @@ def backtest_ml_dynamic_rebalance(
         "ready_for_institutional_risk_gate":False,
         "live_execution_enabled":False,
         "warnings":[
-            "First trained supervised model predicts realized future risk, NOT asset returns, alpha, market direction or guaranteed profit.",
+            "The supervised model predicts realized future risk, NOT asset returns, alpha, market direction or guaranteed profit.",
+            "LightGBM optional training uses an open-source model family also benchmarked by Microsoft Qlib; it is NOT an official Qlib Alpha158 run or a proprietary pretrained institutional model.",
             "All fitted labels are fully observed by each signal date. The execution is one close after the signal, so no forecast sees the held returns.",
             "This uses unverified adjusted-close history; survivorship bias, vendor revisions, splits, historical availability, real bid-ask spreads and market impact are not authenticated.",
             "No cash yield; no direct U.S. Treasury cashflows or actual IBKR Portfolio Margin rules. Gross holdings are always at most 1x account equity.",
