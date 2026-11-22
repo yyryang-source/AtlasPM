@@ -41,3 +41,22 @@ jobs:
         run: python -m unittest discover -s tests -p "test_us_market_pipeline.py" -v
       - name: Verify V2 learning-to-rank was not changed
         run: python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v
+
+  powershell-market-runner-syntax:
+    name: Verify Windows PowerShell 5.1 market data runner syntax
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Parse selection script using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          $script = (Resolve-Path 'scripts/selection/Invoke-USMarketDataExpansion.ps1').Path
+          [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List
+            throw "Windows PowerShell 5.1 stock market script parse error"
+          }
