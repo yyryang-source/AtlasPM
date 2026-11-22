@@ -93,6 +93,17 @@
 - [ ] Add Treasury CUSIP cashflow accounting, options contracts and a full order/event ledger
 - [ ] Expand into controlled paper OMS and replayable reconciliation before any live access
 
+## v0.4.1 — read-only institutional multi-asset ledger (committed; awaiting Windows validation)
+
+- [x] Synthetic cash and margin accounts with settled cash, margin debt and financing accrual
+- [x] Equity/ETF share marks, US Treasury dirty price and first-order duration DV01
+- [x] Signed option position market values and short liability flags
+- [x] Independent account net-liquidation reconciliation, quote staleness and USD-only validation
+- [x] Broker-sourced Treasury collateral value reported but never added to cash or equity
+- [x] Offline regression tests and PowerShell ledger-report command
+- [ ] Treasury coupon settlement journal and real broker read-only ingestion
+- [ ] Option expiry/assignment/payoff engine, plus robust broker margin validation
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
