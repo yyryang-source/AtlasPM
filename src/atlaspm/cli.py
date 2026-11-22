@@ -27,6 +27,7 @@ from atlaspm.ibkr_gateway import (
     collect_ibkr_readonly_account, redacted_console_summary,
     require_private_output,
 )
+from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -204,6 +205,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_private_raw.json")
     )
 
+    mapper = sub.add_parser(
+        "ibkr-map-check",
+        help="Offline, non-executable conid identity and unit mapping diagnostics",
+    )
+    mapper.add_argument("--capture", type=Path, required=True)
+    mapper.add_argument("--mapping", type=Path, required=True)
+    mapper.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_mapping_check.json")
+    )
+
     return parser
 
 
@@ -211,7 +222,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-readonly":
+        if args.command == "ibkr-map-check":
+            destination = require_private_output(args.output)
+            capture_payload = json.loads(args.capture.read_text(encoding="utf-8"))
+            mapping_payload = json.loads(args.mapping.read_text(encoding="utf-8"))
+            diagnostic = diagnose_ibkr_contract_mapping(
+                capture_payload, mapping_payload
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = mapping_redacted_summary(diagnostic, str(args.output))
+        elif args.command == "ibkr-readonly":
             if (args.fixture is None) == (not args.allow_local_gateway):
                 raise ValueError(
                     "Choose exactly one: --fixture for no-network test OR --allow-local-gateway"
