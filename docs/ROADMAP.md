@@ -138,6 +138,16 @@
 - [x] Synthetic example, offline unit tests and CI smoke CLI
 - [ ] Real broker read-only order/position reconciliation, persisted event sourcing, true market calendar, post-fill risk repricing and access controls
 
+## v0.4.5 — post-fill controls and unsigned audit chain (committed; awaiting Windows validation)
+
+- [x] Recalculate marked gross leverage, stressed equity/Treasury loss and cash/debt validity after each unique synthetic fill
+- [x] Halt the replay on an intermediate risk-budget violation even when a full-basket proposal initially passed
+- [x] Capture deterministic SHA-256 chain over each original event, order transition and accounting result
+- [x] Detect modified audit entries in a verification test; separate repeat-execution deduplication from original entries
+- [x] Expose summary risk breaches, audit hash root, self-consistency and explicit broker-margin-not-rechecked flags
+- [x] Offline regression tests and synthetic CI smoke run
+- [ ] Authenticated broker data, margin/Greeks recalculation after each actual fill, signed append-only event storage, operator recovery
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
