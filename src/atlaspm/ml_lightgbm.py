@@ -14,18 +14,21 @@ from atlaspm.ml_dynamic_rebalance import FEATURE_NAMES, SIGMA_CEILING, SIGMA_FLO
 
 LIGHTGBM_PARAMS = {
     "objective": "regression",
-    "n_estimators": 65,
+    "metric": "l2",
     "learning_rate": 0.05,
     "max_depth": 3,
     "num_leaves": 7,
-    "min_child_samples": 5,
-    "reg_lambda": 2.0,
-    "subsample": 1.0,
-    "colsample_bytree": 1.0,
-    "random_state": 1729,
-    "n_jobs": 1,
+    "min_data_in_leaf": 5,
+    "lambda_l2": 2.0,
+    "feature_fraction": 1.0,
+    "bagging_fraction": 1.0,
+    "seed": 1729,
+    "num_threads": 1,
+    "deterministic": True,
+    "force_col_wise": True,
     "verbosity": -1,
 }
+BOOST_ROUNDS = 65
 
 
 def _dependency():
@@ -53,9 +56,11 @@ def train_lightgbm_risk(
         log(max(SIGMA_FLOOR, _rms(asset_returns[i:i+horizon])))
         for i in points
     ]
-    model = lgb.LGBMRegressor(**LIGHTGBM_PARAMS)
-    model.fit(x, y, feature_name=list(FEATURE_NAMES))
-    raw = model.booster_.model_to_string()
+    # Native LightGBM train() rather than its sklearn LGBMRegressor wrapper:
+    # [ml] only needs LightGBM's declared core dependencies.
+    dataset = lgb.Dataset(x, label=y, feature_name=list(FEATURE_NAMES))
+    booster = lgb.train(LIGHTGBM_PARAMS, dataset, num_boost_round=BOOST_ROUNDS)
+    raw = booster.model_to_string()
     if not isinstance(raw, str) or not raw:
         raise ValueError("LightGBM produced no trained model artifact")
     return {
@@ -66,9 +71,9 @@ def train_lightgbm_risk(
         "label_fully_observed_through_price_index": last_sample + horizon,
         "target": "log_next_horizon_annualized_root_mean_square_daily_return",
         "feature_names": list(FEATURE_NAMES),
-        "hyperparameters": dict(LIGHTGBM_PARAMS),
+        "hyperparameters": {**LIGHTGBM_PARAMS, "num_boost_round": BOOST_ROUNDS},
         "feature_importance_split": [
-            int(v) for v in model.booster_.feature_importance(importance_type="split")
+            int(v) for v in booster.feature_importance(importance_type="split")
         ],
         "trained_native_model_text_private": raw,
         "source_project": "lightgbm-org/LightGBM",
