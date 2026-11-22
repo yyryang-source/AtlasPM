@@ -83,6 +83,16 @@
 - [ ] Compare 2003–2026 outcomes with an unchanged v0.3.0 baseline and SPY
 - [ ] Out-of-sample model selection and direct CVaR asset-weight optimization
 
+## v0.4.0 — institutional architecture contracts (committed; needs Windows validation)
+
+- [x] Product architecture: PMS/RMS, cash/margin accounts, Treasury collateral, options overlay and OMS
+- [x] Phase-by-phase implementation roadmap with testable operational requirements
+- [x] Pure fail-closed intent preflight for paper-only proposals and broker preview inputs
+- [x] Cash borrowing, unknown Treasury credit, stale quote, options permissions and margin tests
+- [ ] Integrate real broker read-only accounts and trustworthy What-If data via separate adapter
+- [ ] Add Treasury CUSIP cashflow accounting, options contracts and a full order/event ledger
+- [ ] Expand into controlled paper OMS and replayable reconciliation before any live access
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
