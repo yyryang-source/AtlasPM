@@ -4,6 +4,18 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Experimental: discover all CURRENT US-listed stocks for screening
+
+Use `stock-universe` to download Nasdaq Trader's current listings, excluding
+explicit ETFs/test issues and known non-common instruments. Then run
+`stock-sync-market` to cache **all available equity ticker daily histories**
+with per-provider error/coverage reporting, and feed the assembled CSV to the
+existing `stock-screen` ranking. The screener only chooses candidates; AtlasPM
+RiskNet/RegimeNet/FusionNet and independent portfolio risk/trading controls
+remain separate. This current listings snapshot cannot reconstruct all stocks
+listed or delisted between 2000–2026. See [US market screener and Windows
+commands](docs/US_MARKET_SCREENER.md).
+
 ## Experimental: matched equal-weight stock universe comparator
 
 `stock-backtest` can now report a second, independently accounted
