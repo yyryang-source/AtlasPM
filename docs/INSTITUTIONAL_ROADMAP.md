@@ -59,6 +59,8 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 - [x] Local normalized broker-export vs ledger reconciliation (USD account/position/collateral, stale-data and mismatch rejection); imports remain unauthenticated
 - [x] GET-only IBKR Client Portal Gateway local HTTPS raw capture with explicit opt-in, browser-based authentication check and synthetic fixture tests
 - [x] Restrict local raw data to ignored local_data/ and mask account numbers and private dollar balances in CLI
+- [x] Local IBKR contract identity diagnostic: exact conid-to-stock, declared Treasury CUSIP, option metadata, unit/issuer confirmation and redacted output
+- [x] Expose unverified debt bridge and explicitly refuse interpreting IBKR interest rate as accrued financing liability
 - [ ] Normalize real conid, option OCC terms, UST CUSIP, cash financing and per-security margin from verified broker data
 - [ ] Genuine authenticated IBKR read-only account synchronization and security-contract mapping
 - [ ] IBKR read-only account sync first, then official order-preview/What-If.
