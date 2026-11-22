@@ -51,10 +51,8 @@ class StockWalkforwardTest(unittest.TestCase):
                 writer.writerow([day.isoformat(), "SPY", 200 * 1.0003 ** i])
 
     def _run(self, **kwargs):
-        return backtest_stock_screener(
-            self.stocks, self.benchmark, start=self.start, end=self.end,
-            top=2, **kwargs,
-        )
+        arguments = {"start": self.start, "end": self.end, "top": 2, **kwargs}
+        return backtest_stock_screener(self.stocks, self.benchmark, **arguments)
 
     def test_date_range_and_benchmark(self):
         r = self._run()
