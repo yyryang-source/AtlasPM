@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.15 offline audit-to-audit change detection and hypothetical risk alert comparisons, layered on v0.4.14 five-stage local evidence audits. All source data and local hashes are unsigned; no authenticated financing debt proof, validated broker margin controls, live orders or automated execution. Not investment advice.
+> **Status:** v0.4.16 private offline HTML risk dashboard, layered on v0.4.10–v0.4.15 read-only and synthetic IBKR diagnostics. All local audit hashes and saved reports are unsigned; no independently authenticated financing debt, validated broker margin controls, live orders or automated execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -45,6 +45,12 @@ See [v0.4.14 PowerShell walkthrough and evidence caveats](docs/IBKR_RISK_CHAIN_A
 The `ibkr-audit-diff` command compares two private v0.4.14 audit JSON files for the same account, detects SHA-256 local source-fingerprint changes and hypothetical alert-count shifts, and reports review-required states for inconsistent or changed inputs. A decline in simulated alerts is **not** verification of risk reduction. All inputs/output remain in `local_data/` and the CLI displays a redacted summary.
 
 See [v0.4.15 PowerShell audit comparison workflow](docs/IBKR_RISK_AUDIT_DIFF.md).
+
+## v0.4.16: Offline browser-based risk dashboard
+
+Run `ibkr-dashboard` to create `local_data/atlaspm_dashboard.html`, then open the standalone file in a Windows browser. The dark, responsive interface summarizes five saved risk stages, hypothetical scenario counts, local audit warnings and report-diff diagnostics. It embeds **only masked state labels**—not full account details, financing balances, asset names, private scenario names or SHA-256 digests. The HTML has no scripts, remote assets, server, API calls or trading function.
+
+See [v0.4.16 Windows PowerShell quick start](docs/IBKR_DASHBOARD.md).
 
 ## What works today
 
