@@ -37,6 +37,7 @@ from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain, redacted_audit_
 from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits, redacted_audit_diff_summary
 from atlaspm.ibkr_dashboard import build_dashboard_view, render_dashboard_html, redacted_dashboard_console
 from atlaspm.ml_dynamic_rebalance import backtest_ml_dynamic_rebalance, redacted_ml_console
+from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tournament_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -340,6 +341,31 @@ def build_parser() -> argparse.ArgumentParser:
     ml.add_argument("--fee-bps", type=float, default=5.0)
     ml.add_argument("--slippage-bps", type=float, default=5.0)
 
+    tournament = sub.add_parser(
+        "ml-model-tournament",
+        help="Time-safe Ridge/LightGBM/trailing-vol model competition and offline automatic rebalancing",
+    )
+    tournament.add_argument("--file", type=Path, required=True)
+    tournament.add_argument("--output", type=Path, default=Path("local_data/model_tournament.json"))
+    tournament.add_argument("--mode", choices=["champion", "ensemble"], default="champion")
+    tournament.add_argument("--feature-days", type=int, default=20)
+    tournament.add_argument("--forecast-days", type=int, default=5)
+    tournament.add_argument("--min-train", type=int, default=60)
+    tournament.add_argument("--rebalance-days", type=int, default=10)
+    tournament.add_argument("--validation-window", type=int, default=36)
+    tournament.add_argument("--min-validated-rebalances", type=int, default=6)
+    tournament.add_argument("--switch-margin", type=float, default=0.02)
+    tournament.add_argument("--target-volatility", type=float, default=0.18)
+    tournament.add_argument("--max-weight", type=float, default=0.70)
+    tournament.add_argument("--max-exposure", type=float, default=1.0)
+    tournament.add_argument("--stress-decline", type=float, default=0.30)
+    tournament.add_argument("--max-stress-loss", type=float, default=0.25)
+    tournament.add_argument("--max-daily-tail-loss", type=float, default=0.04)
+    tournament.add_argument("--drawdown-trigger", type=float, default=0.10)
+    tournament.add_argument("--drawdown-exposure-cap", type=float, default=0.25)
+    tournament.add_argument("--fee-bps", type=float, default=5.0)
+    tournament.add_argument("--slippage-bps", type=float, default=5.0)
+
     return parser
 
 
@@ -347,7 +373,45 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ml-rebalance-backtest":
+        if args.command == "ml-model-tournament":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Model tournament output must be a private .json file")
+            if destination == args.file.expanduser().resolve():
+                raise ValueError("Model tournament cannot overwrite training input")
+            try:
+                result = backtest_model_tournament(
+                    args.file,
+                    mode=args.mode,
+                    feature_days=args.feature_days,
+                    forecast_days=args.forecast_days,
+                    minimum_training_samples=args.min_train,
+                    rebalance_days=args.rebalance_days,
+                    validation_window=args.validation_window,
+                    minimum_validated_rebalances=args.min_validated_rebalances,
+                    switch_margin=args.switch_margin,
+                    target_annual_volatility=args.target_volatility,
+                    maximum_name_weight=args.max_weight,
+                    maximum_gross_exposure=args.max_exposure,
+                    uniform_stress_decline=args.stress_decline,
+                    maximum_uniform_stress_loss=args.max_stress_loss,
+                    maximum_daily_tail_loss=args.max_daily_tail_loss,
+                    account_drawdown_trigger=args.drawdown_trigger,
+                    drawdown_exposure_cap=args.drawdown_exposure_cap,
+                    fee_bps=args.fee_bps,
+                    slippage_bps=args.slippage_bps,
+                )
+            except (OSError, ValueError, TypeError, KeyError, OverflowError):
+                raise ValueError(
+                    "Offline model tournament failed validation; inspect private data and optional [ml] dependency"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_tournament_console(result, str(args.output))
+        elif args.command == "ml-rebalance-backtest":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":
                 raise ValueError("ML backtest output must be private .json under local_data/")
