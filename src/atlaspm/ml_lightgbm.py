@@ -58,7 +58,13 @@ def train_lightgbm_risk(
     ]
     # Native LightGBM train() rather than its sklearn LGBMRegressor wrapper:
     # [ml] only needs LightGBM's declared core dependencies.
-    dataset = lgb.Dataset(x, label=y, feature_name=list(FEATURE_NAMES))
+    import numpy as np
+
+    dataset = lgb.Dataset(
+        np.asarray(x, dtype=np.float64),
+        label=np.asarray(y, dtype=np.float64),
+        feature_name=list(FEATURE_NAMES),
+    )
     booster = lgb.train(LIGHTGBM_PARAMS, dataset, num_boost_round=BOOST_ROUNDS)
     raw = booster.model_to_string()
     if not isinstance(raw, str) or not raw:
@@ -94,7 +100,11 @@ def predict_lightgbm_risk(model: dict, feature_row: list[float]) -> float:
     ):
         raise ValueError("Non-finite LightGBM prediction features")
     booster = lgb.Booster(model_str=model["trained_native_model_text_private"])
-    prediction = float(booster.predict([feature_row])[0])
+    import numpy as np
+
+    prediction = float(
+        booster.predict(np.asarray([feature_row], dtype=np.float64))[0]
+    )
     if not isfinite(prediction):
         raise ValueError("Non-finite LightGBM risk forecast")
     from math import exp
