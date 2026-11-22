@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.6 offline broker-export reconciliation, Paper OMS risk audits and multi-asset research. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.7 IBKR local Gateway GET-only capture, broker reconciliation and paper OMS research. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -218,12 +218,28 @@ git pull origin main
 
 The demonstration uses **two invented local JSON files**, NOT an authenticated export from IBKR. A matching result remains explicitly labeled MATCHED_UNVERIFIED_EXPORT; it neither confirms true brokerage buying power nor enables orders. See [broker snapshot reconciliation contracts](docs/BROKER_RECONCILIATION.md).
 
+## IBKR Client Portal Gateway — guarded read-only ingestion (v0.4.7)
+
+AtlasPM now has an **explicit-opt-in GET-only localhost HTTPS adapter** for the IBKR Client Portal Gateway. It can capture a manually authenticated account's raw USD ledger and IBKR contract-ID positions. It never requests credentials, disables TLS checks, submits orders, or turns IBKR balances into automatically approved collateral.
+
+Start with the fully offline synthetic fixture:
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli ibkr-readonly --fixture examples\ibkr_gateway_synthetic.json --account DU1234567 --output local_data\ibkr_fixture_capture.json
+~~~
+
+Actual IBKR account access is **optional**, requires the user to launch the official local Gateway, log in themselves and explicitly supply --allow-local-gateway with a verified localhost TLS certificate. The complete raw output is private and restricted to the Git-ignored local_data directory, while the console is redacted. **Do not upload real snapshots, broker session information, credentials or account identifiers.** See [IBKR read-only setup and limitations](docs/IBKR_READONLY.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── IBKR_READONLY.md
 │   ├── BROKER_RECONCILIATION.md
 │   ├── OMS_RISK_AUDIT.md
 │   ├── PAPER_OMS.md
@@ -248,6 +264,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── ibkr_gateway.py
 │   ├── broker_reconcile.py
 │   ├── oms_controls.py
 │   ├── paper_oms.py
