@@ -62,12 +62,23 @@ A **past-only rolling** backtest is available. This avoids fitting once on the w
 
 The command prints a summary and saves full daily-equity and rebalance histories locally. It compares against **same-universe equal-weight buy-and-hold**, not SPY, and is a simulation with simplified fees, financing and execution. See [walk-forward methodology](docs/BACKTEST.md) before interpreting its performance.
 
+## Compare cash and margin backtests (risk audit)
+
+Once both `backtest_cash.json` and `backtest_margin_2x.json` exist, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli audit --cash local_data\backtest_cash.json --margin local_data\backtest_margin_2x.json --output local_data\risk_audit.json
+```
+
+The audit compares annualized returns, volatility and drawdowns, highlights benchmark underperformance and **shows every simulated maintenance breach date**. It refuses mismatched simulations and explicitly labels results as research only. [Risk audit documentation](docs/AUDIT.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── AUDIT.md
 │   ├── BACKTEST.md
 │   ├── DATA.md
 │   ├── ARCHITECTURE.md
@@ -78,6 +89,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── audit.py
 │   ├── backtest.py
 │   ├── historical.py
 │   ├── mean_variance.py
