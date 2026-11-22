@@ -37,3 +37,5 @@ jobs:
         run: python -m atlaspm.cli institutional-check --file examples/institutional_scenario.json --output local_data/ci_institutional_preflight.json
       - name: Smoke test institutional read-only ledger (synthetic accounts)
         run: python -m atlaspm.cli ledger-report --file examples/institutional_ledger.json --output local_data/ci_institutional_ledger.json
+      - name: Smoke test paper-only equity add/reduce planner (fully synthetic)
+        run: python -m atlaspm.cli plan-equity --ledger examples/institutional_ledger.json --plan examples/institutional_equity_plan.json --output local_data/ci_equity_plan.json
