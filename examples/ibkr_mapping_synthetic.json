@@ -19,7 +19,8 @@
       "identifier": "91282CDE0",
       "quantity_units": "FACE_USD",
       "manually_reviewed": true,
-      "units_confirmed": true
+      "units_confirmed": true,
+      "issuer_confirmed": true
     }
   ]
 }
