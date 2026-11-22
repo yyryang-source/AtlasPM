@@ -400,8 +400,85 @@ def train_ai_stock_ranker(
         "test": test_metrics,
         "model_sha256": digest,
         "live_execution_enabled": False,
-        "warnings": list(_RISK_DISCLOSURES),
+        "warnings": list(_RISK_DISCLOSURES) + (
+            ["Top N cuts across statistically indistinguishable displayed "
+             "model scores; ranked selection is AMBIGUOUS and needs review."]
+            if resolution["ties_cross_top_n_cutoff"] else []
+        ),
     }
+
+
+def _rank_predictions_with_ties(
+    rows: list[dict[str, Any]], predictions: Any, top: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Report unresolved score ties, without inventing ordered stock preferences.
+
+    The tie bucket is the exact displayed precision (0.0001 percentage
+    points), so output never claims a distinction invisible to the reader.
+    A sequential display_position is only a stable output position, NOT
+    the model's ordinal rank within a tied group.
+    """
+    if len(rows) != len(predictions):
+        raise ValueError("Prediction length mismatch")
+    ordered = []
+    for row, raw in zip(rows, predictions):
+        score = float(raw)
+        if not isfinite(score):
+            raise ValueError("Non-finite AI prediction")
+        ordered.append({
+            "symbol": row["symbol"],
+            "predicted_forward_excess_return": score,
+            "predicted_forward_excess_percent": round(score * 100, 4),
+        })
+    ordered.sort(key=lambda row: (
+        -row["predicted_forward_excess_percent"], row["symbol"]
+    ))
+    largest_tie = 0
+    tied_stocks = 0
+    groups = 0
+    pos = 0
+    while pos < len(ordered):
+        end = pos + 1
+        score = ordered[pos]["predicted_forward_excess_percent"]
+        while (end < len(ordered)
+               and ordered[end]["predicted_forward_excess_percent"] == score):
+            end += 1
+        size = end - pos
+        largest_tie = max(largest_tie, size)
+        tied_stocks += size if size > 1 else 0
+        groups += 1
+        for i in range(pos, end):
+            ordered[i]["rank"] = pos + 1  # Competition rank: 1, 2, 3, 3, ...
+            ordered[i]["display_position"] = i + 1
+            ordered[i]["tie_count"] = size
+            ordered[i]["tied"] = size > 1
+        pos = end
+
+    threshold = min(top, len(ordered))
+    boundary_tie = bool(
+        threshold and ordered[threshold - 1]["rank"]
+        + ordered[threshold - 1]["tie_count"] - 1 > threshold
+    )
+    summary = {
+        "scored_stocks": len(ordered),
+        "distinct_displayed_score_levels": groups,
+        "distinct_displayed_score_fraction": round(groups / len(ordered), 4),
+        "largest_tied_group": largest_tie,
+        "stocks_with_tied_scores": tied_stocks,
+        "ties_cross_top_n_cutoff": boundary_tie,
+        "requested_top_n": top,
+        "top_n_is_unambiguous": not boundary_tie,
+        "rank_quality": (
+            "REVIEW_REQUIRED" if boundary_tie or groups < max(3, len(ordered) // 5)
+            else "TIES_REPORTED"
+        ),
+        "rank_interpretation": (
+            "Equal predictions have equal competition ranks. display_position "
+            "is for stable output only, NOT evidence of preference. If the "
+            "Top N boundary splits a tied group, a unique Top N is undefined."
+        ),
+    }
+    return ordered, summary
 
 
 def rank_with_ai(
@@ -445,18 +522,20 @@ def rank_with_ai(
     prediction = model.predict(
         _matrix(rows), num_iteration=metadata.get("best_iteration")
     )
-    ranked = sorted(
-        [{
-            "symbol": row["symbol"],
-            "predicted_forward_excess_return": float(pred),
-            "predicted_forward_excess_percent": round(float(pred) * 100, 4),
-        } for row, pred in zip(rows, prediction)],
-        key=lambda r: (-r["predicted_forward_excess_return"], r["symbol"]),
+    ranked, resolution = _rank_predictions_with_ties(rows, prediction, top)
+    importances = sorted(
+        ({
+            "feature": feature,
+            "gain": round(float(gain), 6),
+            "splits": int(splits),
+        }
+        for feature, gain, splits in zip(
+            FEATURE_NAMES,
+            model.feature_importance(importance_type="gain"),
+            model.feature_importance(importance_type="split"),
+        )),
+        key=lambda item: (-item["gain"], item["feature"]),
     )
-    if any(not isfinite(x["predicted_forward_excess_return"]) for x in ranked):
-        raise ValueError("Non-finite AI prediction")
-    for idx, row in enumerate(ranked, 1):
-        row["rank"] = idx
     return {
         "as_of": as_of,
         "model_kind": metadata["model_kind"],
@@ -466,6 +545,16 @@ def rank_with_ai(
         "scored_count": len(ranked),
         "excluded_count": len(history) - len(ranked),
         "selected": ranked[:top],
+        "ranking_diagnostics": resolution,
+        "model_diagnostics": {
+            "best_iteration": metadata["best_iteration"],
+            "number_of_trees_saved": model.num_trees(),
+            "feature_importance": importances,
+            "note": (
+                "In-sample gain/split counts diagnose model usage, not a "
+                "measurement of out-of-sample factor importance."
+            ),
+        },
         "feature_names": list(FEATURE_NAMES),
         "model_sha256": metadata["model_sha256"],
         "live_execution_enabled": False,
