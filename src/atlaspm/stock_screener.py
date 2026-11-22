@@ -127,6 +127,40 @@ def screen_stocks(
     No prices on later dates enter a score. Fundamentals as_of_date represents
     the *first publicly available* date, not a fiscal period-end date.
     """
+    """Screen a CSV price source through an explicit date cutoff."""
+    return screen_stocks_from_prices(
+        load_adjusted_prices(prices_path), as_of,
+        fundamentals_path=fundamentals_path, top=top,
+        max_price_age_days=max_price_age_days,
+        max_fundamental_age_days=max_fundamental_age_days,
+        max_annual_volatility=max_annual_volatility,
+        max_drawdown=max_drawdown,
+        minimum_market_cap_usd=minimum_market_cap_usd,
+        require_uptrend=require_uptrend,
+        max_per_sector=max_per_sector,
+    )
+
+
+def screen_stocks_from_prices(
+    prices: dict[str, dict[date, float]],
+    as_of: str,
+    *,
+    fundamentals_path: Path | None = None,
+    top: int = 10,
+    max_price_age_days: int = 10,
+    max_fundamental_age_days: int = 200,
+    max_annual_volatility: float = .80,
+    max_drawdown: float = .65,
+    minimum_market_cap_usd: float = 0.0,
+    require_uptrend: bool = False,
+    max_per_sector: int | None = None,
+    require_decision_close: bool = False,
+) -> dict[str, Any]:
+    """Rank historical snapshots, with pre-scoring data/risk eligibility checks.
+
+    No prices on later dates enter a score. Fundamentals as_of_date represents
+    the *first publicly available* date, not a fiscal period-end date.
+    """
     try:
         cutoff = date.fromisoformat(as_of)
     except ValueError as exc:
@@ -142,7 +176,6 @@ def screen_stocks(
         raise ValueError("Market-cap and sector caps require --fundamentals")
 
     fundamentals = _fundamental_rows(fundamentals_path, cutoff) if fundamentals_path else {}
-    prices = load_adjusted_prices(prices_path)
     weights = _MIXED_WEIGHTS if fundamentals_path else _TECH_WEIGHTS
     eligible: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
@@ -151,6 +184,8 @@ def screen_stocks(
         reason = ""
         if len(observations) < 253:
             reason = "INSUFFICIENT_HISTORY_253_SESSIONS"
+        elif require_decision_close and observations[-1][0] != cutoff:
+            reason = "MISSING_DECISION_CLOSE"
         elif (cutoff - observations[-1][0]).days > max_price_age_days:
             reason = "STALE_PRICE"
         elif (observations[-1][0] - observations[-253][0]).days > 420:
