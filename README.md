@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.5 synthetic Paper OMS with after-fill risk checks and unsigned audit chain. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.6 offline broker-export reconciliation, Paper OMS risk audits and multi-asset research. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -205,12 +205,26 @@ git pull origin main
 
 Both features operate **offline with fabricated broker data**. A hash chain is not a signature, and static post-fill limits are not a broker margin recheck. No real or broker-paper orders are placed. See [OMS risk and audit notes](docs/OMS_RISK_AUDIT.md).
 
+## Offline broker-export versus portfolio-ledger reconciliation (v0.4.6)
+
+The latest **read-only broker-reconcile** command compares separately supplied account/position reports with the local multi-asset ledger. It checks cash, financing principal and interest, net liquidation, equity shares, Treasury face value, options contracts and terms, mark-to-market values, **reported** collateral credits and snapshot freshness. It detects missing/extra holdings and mismatched imported balance-sheet arithmetic.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli broker-reconcile --ledger examples\institutional_batch_ledger.json --snapshot examples\broker_export_synthetic.json --output local_data\broker_reconciliation.json
+~~~
+
+The demonstration uses **two invented local JSON files**, NOT an authenticated export from IBKR. A matching result remains explicitly labeled MATCHED_UNVERIFIED_EXPORT; it neither confirms true brokerage buying power nor enables orders. See [broker snapshot reconciliation contracts](docs/BROKER_RECONCILIATION.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── BROKER_RECONCILIATION.md
 │   ├── OMS_RISK_AUDIT.md
 │   ├── PAPER_OMS.md
 │   ├── MULTI_ASSET_BATCH.md
@@ -234,6 +248,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── broker_reconcile.py
 │   ├── oms_controls.py
 │   ├── paper_oms.py
 │   ├── institutional_batch.py
