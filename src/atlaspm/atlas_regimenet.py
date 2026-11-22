@@ -26,6 +26,7 @@ from atlaspm.ml_dynamic_rebalance import (
     SIGMA_CEILING, SIGMA_FLOOR, _integer, _real, _rms, _select_allocation,
 )
 from atlaspm.risk_backtest import _trade_to_risk_budget
+from atlaspm.atlas_execution_policy import assess_native_no_trade
 
 MODEL_NAME = "atlaspm_original_regimenet_v1_dual_head"
 REGIMES = 3
@@ -335,6 +336,8 @@ def backtest_atlas_native(
     drawdown_exposure_cap: float = .25,
     fee_bps: float = 5.0,
     slippage_bps: float = 5.0,
+    no_trade_band: float = 0.0,
+    return_head_strength: float = 1.0,
 ) -> dict[str, Any]:
     """Train our own network and simulate each next-close rebalance.
 
@@ -359,6 +362,10 @@ def backtest_atlas_native(
     drawdown_exposure_cap = _real(drawdown_exposure_cap, "drawdown_exposure_cap", 0, 1)
     fee_bps = _real(fee_bps, "fee_bps", 0, 1000)
     slippage_bps = _real(slippage_bps, "slippage_bps", 0, 1000)
+    no_trade_band = _real(no_trade_band, "no_trade_band", 0, .5)
+    return_head_strength = _real(
+        return_head_strength, "return_head_strength", 0, 1
+    )
 
     _numpy()
     prices = load_adjusted_prices(path)
@@ -376,12 +383,22 @@ def backtest_atlas_native(
     ]
     per_asset = [[r[j] for r in daily] for j in range(len(symbols))]
     fee = (fee_bps + slippage_bps)/10000
+    no_trade_risk_policy = {
+        "target_annual_volatility": target_annual_volatility,
+        "maximum_gross_exposure": maximum_gross_exposure,
+        "uniform_stress_decline": uniform_stress_decline,
+        "maximum_uniform_stress_loss": maximum_uniform_stress_loss,
+        "maximum_daily_tail_loss": maximum_daily_tail_loss,
+        "account_drawdown_trigger": account_drawdown_trigger,
+        "drawdown_exposure_cap": drawdown_exposure_cap,
+    }
 
     def empty():
         return {
             "holdings": [0.0]*len(symbols), "cash": 1.0, "equity": 1.0,
             "peak": 1.0, "returns": [], "curve": [],
             "total_cost": 0.0, "turnover": 0.0, "rebalances": 0,
+            "skipped_rebalance_decisions": 0,
         }
 
     states = {
@@ -418,7 +435,7 @@ def backtest_atlas_native(
             # or a packaged optimizer. Relative signals affect sleeve weights.
             desirability = [
                 (1/max(v, .03)) * exp(
-                    .35*max(-2.0, min(2.0, a/max(v, .08)))
+                    .35*return_head_strength*max(-2.0, min(2.0, a/max(v, .08)))
                 )
                 for v, a in zip(vol, alpha)
             ]
@@ -428,10 +445,13 @@ def backtest_atlas_native(
             # The return head may only REDUCE an independent risk cap, never
             # increase exposure past a hard broker-independent risk guard.
             return_confidence_cap = max(
-                0.0, min(1.0, 1.0 + expected_sleeve_annual/.15)
+                0.0, min(
+                    1.0, 1.0 + return_head_strength*expected_sleeve_annual/.15
+                )
             )
             trailing = daily[signal-feature_days:signal]
             allocations = {}
+            execution_decisions = {}
             for label, sigma, override, extra_cap in (
                 ("atlas_native", vol, native_sleeve, return_confidence_cap),
                 ("naive_trailing_vol_risk", naive_vol, None, 1.0),
@@ -451,19 +471,40 @@ def backtest_atlas_native(
                     sleeve_weights=override,
                     additional_exposure_cap=extra_cap,
                 )
-                h, cash, loan, paid, turnover = _trade_to_risk_budget(
-                    state["holdings"], state["equity"],
-                    [allocation["risky_sleeve_weights"][s] for s in symbols],
-                    allocation["risky_gross"], fee,
+                no_trade = assess_native_no_trade(
+                    symbols=symbols,
+                    existing_holdings=state["holdings"],
+                    existing_cash=state["cash"],
+                    equity=state["equity"],
+                    proposed_allocation=allocation,
+                    risk_forecasts=sigma,
+                    trailing_daily_returns=trailing,
+                    no_trade_band=no_trade_band,
+                    name_weight_cap=maximum_name_weight,
+                    risk_policy=no_trade_risk_policy,
+                    account_drawdown=state["equity"]/state["peak"]-1,
+                    additional_exposure_cap=extra_cap,
                 )
+                if no_trade["skipped"]:
+                    h, cash, loan, paid, turnover = (
+                        state["holdings"], state["cash"], 0, 0.0, 0.0
+                    )
+                    state["skipped_rebalance_decisions"] += 1
+                else:
+                    h, cash, loan, paid, turnover = _trade_to_risk_budget(
+                        state["holdings"], state["equity"],
+                        [allocation["risky_sleeve_weights"][s] for s in symbols],
+                        allocation["risky_gross"], fee,
+                    )
+                    state["rebalances"] += 1
                 if loan != 0:
                     raise ValueError("Atlas native engine attempted borrowing")
                 state["holdings"], state["cash"] = h, cash
                 state["equity"] -= paid
                 state["total_cost"] += paid
                 state["turnover"] += turnover
-                state["rebalances"] += 1
                 allocations[label] = allocation
+                execution_decisions[label] = no_trade
             if t == first_exec:
                 bench = states["equal_weight_buy_and_hold"]
                 h, cash, loan, paid, turnover = _trade_to_risk_budget(
@@ -486,6 +527,7 @@ def backtest_atlas_native(
                         "signal_date": dates[signal].isoformat(),
                         "asset": symbol,
                         "annualized_risk_forecast": vol[j],
+                        "baseline_trailing_risk_forecast": naive_vol[j],
                         "annualized_return_forecast": alpha[j],
                         "realized_forward_annual_rms": _rms(observed),
                         "realized_forward_arithmetic_annual_return":
@@ -509,6 +551,9 @@ def backtest_atlas_native(
                     for s, o in zip(symbols, outputs)
                 },
                 "return_confidence_exposure_cap": return_confidence_cap,
+                "native_execution_policy": execution_decisions["atlas_native"],
+                "baseline_execution_policy":
+                    execution_decisions["naive_trailing_vol_risk"],
                 "atlas_native_allocation": allocations["atlas_native"],
                 "naive_allocation": allocations["naive_trailing_vol_risk"],
                 "is_real_or_paper_broker_order": False,
@@ -572,6 +617,14 @@ def backtest_atlas_native(
             "account_drawdown_trigger": account_drawdown_trigger,
             "drawdown_exposure_cap": drawdown_exposure_cap,
             "fee_bps": fee_bps, "slippage_bps": slippage_bps,
+            "no_trade_band_l1_account_weight": no_trade_band,
+            "return_head_strength": return_head_strength,
+        },
+        "execution_summary": {
+            name: {
+                "executed_rebalances": state["rebalances"],
+                "skipped_rebalance_decisions": state["skipped_rebalance_decisions"],
+            } for name, state in states.items()
         },
         "performance": scores,
         "forecast_validation": {
@@ -580,11 +633,29 @@ def backtest_atlas_native(
                 abs(p["annualized_risk_forecast"] -
                     p["realized_forward_annual_rms"]) for p in predictions
             ) if predictions else None,
+            "naive_trailing_risk_mae_annualized": fmean(
+                abs(p["baseline_trailing_risk_forecast"] -
+                    p["realized_forward_annual_rms"]) for p in predictions
+            ) if predictions else None,
             "return_mae_annualized": fmean(
                 abs(p["annualized_return_forecast"] -
                     p["realized_forward_arithmetic_annual_return"])
                 for p in predictions
             ) if predictions else None,
+            "zero_return_baseline_mae_annualized": fmean(
+                abs(p["realized_forward_arithmetic_annual_return"])
+                for p in predictions
+            ) if predictions else None,
+            "return_forecast_better_than_zero_baseline": (
+                fmean(
+                    abs(p["annualized_return_forecast"] -
+                        p["realized_forward_arithmetic_annual_return"])
+                    for p in predictions
+                ) < fmean(
+                    abs(p["realized_forward_arithmetic_annual_return"])
+                    for p in predictions
+                ) if predictions else False
+            ),
             "warning": "Overlapping prediction labels are correlated; train and test are time-ordered but there is no untouched independent final holdout.",
         },
         "final_trained_model_snapshot": last_model,
@@ -598,6 +669,8 @@ def backtest_atlas_native(
         "live_execution_enabled": False,
         "warnings": [
             "This is our own shared softmax-gated three-expert dual-target architecture and trained parameters, not imported pre-trained Ridge/LightGBM/Qlib weights. It uses standard published ML primitives.",
+            "Return head is optional for allocation ablation, and zero-return MAE baseline is provided; training loss improvement is not evidence of investable alpha.",
+            "No-trade bands revalidate actual holdings against all hard risk caps before skipping; fewer trades are not a guaranteed performance gain.",
             "Forecast return is uncertain, not alpha proof; stress and loss budgets cannot be overridden by learned forecasts.",
             "Risk and return targets are only fitted when their horizon is fully observed at each prior decision.",
             "Historical prices, research closing-price execution, cash returns and transaction costs are not independently audited; cash yield is set to zero.",
