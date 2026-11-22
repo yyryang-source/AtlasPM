@@ -59,6 +59,16 @@ candidate stocks, never changes the existing Atlas RiskNet/RegimeNet/FusionNet,
 IBKR or trading-risk controls. For Windows commands and documented research
 limits, see [AI stock ranker](docs/selection/AI_STOCK_RANKER.md).
 
+## All-market quote readiness audit (research only)
+
+Run `stock-universe` and `stock-sync-market` to obtain a CURRENT
+US-listed stock candidate universe, then `stock-market-audit` to verify
+actual decision-day quote coverage, NYSE sessions, 253-session history,
+recent trading gaps and quote quality. Its JSON output is **read-only
+research readiness**, not an order or Alpha Eligibility Gate permission.
+A 38-stock dataset will fail the default >=500 warmed-up-stock condition.
+See [US market data expansion](docs/selection/US_MARKET_DATA_EXPANSION.md).
+
 ## Experimental: discover all CURRENT US-listed stocks for screening
 
 Use `stock-universe` to download Nasdaq Trader's current listings, excluding
