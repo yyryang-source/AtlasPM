@@ -211,6 +211,8 @@ def build_institutional_ledger(payload: Mapping[str, Any]) -> dict[str, Any]:
             account.get("accrued_financing_interest", 0.0),
             "accrued_financing_interest", nonnegative=True,
         )
+        if kind == "cash" and cash < 0:
+            raise ValueError("Cash accounts cannot have negative settled cash")
         if kind == "cash" and (margin_debt > 0 or accrued_funding > 0):
             raise ValueError("Cash accounts cannot contain margin debt or accrued margin financing")
         account_as_of = _timestamp(account.get("snapshot_at"), "account.snapshot_at")
