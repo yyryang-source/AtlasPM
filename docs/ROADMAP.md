@@ -158,6 +158,17 @@
 - [x] CLI, synthetic source, regression tests and CI smoke check
 - [ ] Authenticate and normalize real IBKR account / contract snapshots; verify actual margin preview separately
 
+## v0.4.7 — IBKR localhost GET-only raw ingestion (committed; awaiting Windows validation)
+
+- [x] Explicit opt-in local Client Portal Gateway GET-only adapter, browser auth-status check, verified localhost TLS and no proxy/redirects
+- [x] Require exact account selection from portfolio/accounts before reading USD ledger and contract-ID positions
+- [x] Raw private output restricted to Git-ignored local_data/ and redacted terminal results
+- [x] Zero-network synthetic Gateway fixture, regression suite and CI smoke workflow
+- [x] Fail closed on unsupported currency, missing contract IDs and absent/unauthenticated sessions
+- [ ] Verify capture against user's own Gateway only with consent; real account/raw output is private and should never be uploaded
+- [ ] IBKR conid/CUSIP/OCC mapping, financing debit interpretation, option risk and true margin/collateral validation
+- [ ] Authenticated read-only position reconciliation and genuine What-If margin preview before any order pathway
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
