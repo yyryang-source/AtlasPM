@@ -1,0 +1,128 @@
+{
+  "_synthetic_fixture": "100% fictional quotes, account, portfolio, and broker preview. No order execution.",
+  "batch_id": "SYN-BASKET-0001",
+  "account_id": "DEMO-MARGIN",
+  "allow_margin_borrowing": false,
+  "legs": [
+    {
+      "leg_id": "SELL-QQQ-10",
+      "action": "SELL_EQUITY",
+      "identifier": "QQQ",
+      "shares": 10,
+      "limit_price": 300,
+      "fee": 1
+    },
+    {
+      "leg_id": "BUY-UST-10K",
+      "action": "BUY_TREASURY",
+      "identifier": "91282CDE0",
+      "face_value": 10000,
+      "dirty_price_per_100": 97.9,
+      "fee": 2
+    },
+    {
+      "leg_id": "BUY-QQQ-PUT",
+      "action": "BUY_PUT",
+      "identifier": "QQQ-2027-01-15-P-280",
+      "underlying": "QQQ",
+      "contracts": 1,
+      "multiplier": 100,
+      "strike": 280,
+      "expiration_date": "2027-01-15",
+      "mark_premium": 5,
+      "limit_premium": 5,
+      "quote_age_seconds": 15,
+      "mark_source": "synthetic",
+      "trading_permission": true,
+      "fee": 2
+    },
+    {
+      "leg_id": "REPAY-2000",
+      "action": "REPAY_MARGIN",
+      "amount": 2000,
+      "fee": 0
+    }
+  ],
+  "policy": {
+    "max_data_age_seconds": 60,
+    "max_gross_leverage": 1.75,
+    "max_stress_loss_fraction": 0.4,
+    "min_excess_liquidity_fraction": 0.1,
+    "max_single_order_fraction": 0.1,
+    "max_option_premium_fraction": 0.015,
+    "watch_drawdown_fraction": 0.1,
+    "reduce_drawdown_fraction": 0.2,
+    "critical_drawdown_fraction": 0.3,
+    "max_limit_mark_deviation_bps": 20
+  },
+  "broker_snapshot": {
+    "account_id": "DEMO-MARGIN",
+    "net_liquidation": 123950,
+    "margin_debt": 50000,
+    "available_funds": 55000,
+    "excess_liquidity": 40000,
+    "data_age_seconds": 10
+  },
+  "market": {
+    "oldest_quote_age_seconds": 18
+  },
+  "risk_observation": {
+    "current_drawdown_fraction": 0.04,
+    "pro_forma_stress_loss_fraction": 0.22,
+    "pro_forma_gross_leverage": 1.4
+  },
+  "stress_assumptions": {
+    "equity_decline_fraction": 0.3,
+    "treasury_decline_fraction": 0.06
+  },
+  "basket_preview": {
+    "batch_id": "SYN-BASKET-0001",
+    "account_id": "DEMO-MARGIN",
+    "order_legs": [
+      {
+        "leg_id": "SELL-QQQ-10",
+        "action": "SELL_EQUITY",
+        "identifier": "QQQ",
+        "shares": 10,
+        "limit_price": 300,
+        "fee": 1
+      },
+      {
+        "leg_id": "BUY-UST-10K",
+        "action": "BUY_TREASURY",
+        "identifier": "91282CDE0",
+        "face_value": 10000,
+        "dirty_price_per_100": 97.9,
+        "fee": 2
+      },
+      {
+        "leg_id": "BUY-QQQ-PUT",
+        "action": "BUY_PUT",
+        "identifier": "QQQ-2027-01-15-P-280",
+        "underlying": "QQQ",
+        "contracts": 1,
+        "multiplier": 100,
+        "strike": 280,
+        "expiration_date": "2027-01-15",
+        "mark_premium": 5,
+        "limit_premium": 5,
+        "quote_age_seconds": 15,
+        "mark_source": "synthetic",
+        "trading_permission": true,
+        "fee": 2
+      },
+      {
+        "leg_id": "REPAY-2000",
+        "action": "REPAY_MARGIN",
+        "amount": 2000,
+        "fee": 0
+      }
+    ],
+    "accepted": true,
+    "age_seconds": 12,
+    "available_funds_after": 30000,
+    "excess_liquidity_after": 32000,
+    "margin_debt_after": 48000,
+    "net_liquidation_after": 123945
+  }
+}
