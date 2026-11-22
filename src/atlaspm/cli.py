@@ -41,6 +41,7 @@ from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tour
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.stock_screener import screen_stocks
+from atlaspm.stock_walkforward import backtest_stock_screener
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -413,6 +414,27 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    stock_backtest = sub.add_parser(
+        "stock-backtest",
+        help="Long-only 2000-2026 walk-forward stock ranking vs adjusted SPY, no orders",
+    )
+    stock_backtest.add_argument("--prices", type=Path, required=True)
+    stock_backtest.add_argument("--benchmark-prices", type=Path, required=True)
+    stock_backtest.add_argument("--benchmark-symbol", default="SPY")
+    stock_backtest.add_argument("--start", default="2000-01-01")
+    stock_backtest.add_argument("--end", default="2026-11-20")
+    stock_backtest.add_argument("--top", type=int, default=10)
+    stock_backtest.add_argument("--rebalance-days", type=int, default=21)
+    stock_backtest.add_argument("--fee-bps", type=float, default=5.0)
+    stock_backtest.add_argument("--slippage-bps", type=float, default=5.0)
+    stock_backtest.add_argument("--max-volatility", type=float, default=0.80)
+    stock_backtest.add_argument("--max-drawdown", type=float, default=0.65)
+    stock_backtest.add_argument("--require-uptrend", action="store_true")
+    stock_backtest.add_argument(
+        "--output", type=Path,
+        default=Path("local_data/stock_walkforward_2000_2026.json"),
+    )
+
     stock = sub.add_parser(
         "stock-screen",
         help="Offline point-in-time-capped multi-factor stock ranking; no orders",
@@ -442,7 +464,45 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-screen":
+        if args.command == "stock-backtest":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Stock backtest output must be private local_data .json")
+            sources = {args.prices.expanduser().resolve(),
+                       args.benchmark_prices.expanduser().resolve()}
+            if destination in sources:
+                raise ValueError("Stock backtest cannot overwrite its inputs")
+            result = backtest_stock_screener(
+                args.prices, args.benchmark_prices,
+                start=args.start, end=args.end,
+                benchmark_symbol=args.benchmark_symbol,
+                top=args.top, rebalance_days=args.rebalance_days,
+                fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
+                max_volatility=args.max_volatility,
+                max_drawdown=args.max_drawdown,
+                require_uptrend=args.require_uptrend,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": "local_data/" + destination.relative_to(
+                    (Path.cwd().resolve() / "local_data").resolve()
+                ).as_posix(),
+                "requested_window": result["requested_window"],
+                "actual_window": result["actual_window"],
+                "universe_count": result["universe_count_excluding_benchmark"],
+                "decision_count": result["decision_count"],
+                "executed_rebalances": result["executed_rebalances"],
+                "portfolio": result["portfolio"],
+                "benchmark": result["benchmark"],
+                "relative": result["relative"],
+                "live_execution_enabled": False,
+                "data_caution": "Surviving ticker universe; NOT survivorship-safe or certified alpha.",
+            }
+        elif args.command == "stock-screen":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":
                 raise ValueError("Stock screen output must be a private local_data .json file")
