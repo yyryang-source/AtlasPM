@@ -17,7 +17,12 @@ param(
     [int] $MaxSymbols = 50,
     [int] $Workers = 2,
     [int] $Attempts = 2,
+    [int] $BatchSize = 25,
+    [double] $BatchPauseSeconds = 3.0,
+    [int] $MaxConsecutiveFailures = 12,
+    [int] $MaxRateLimitErrors = 2,
     [switch] $SkipUniverseRefresh,
+    [switch] $CacheOnly,
 
     [string] $Universe = "local_data\us_equity_universe.csv",
     [string] $UniverseReport = "local_data\us_equity_universe_report.json",
@@ -49,6 +54,20 @@ if ($MaxSymbols -lt 0 -or $MaxSymbols -gt 100000) {
 }
 if ($Workers -lt 1 -or $Workers -gt 8) { throw "Workers must be in 1..8" }
 if ($Attempts -lt 1 -or $Attempts -gt 3) { throw "Attempts must be in 1..3" }
+if ($BatchSize -lt 1 -or $BatchSize -gt 100) { throw "BatchSize must be in 1..100" }
+if ($BatchPauseSeconds -lt 0 -or $BatchPauseSeconds -gt 120 -or [double]::IsNaN($BatchPauseSeconds)) {
+    throw "BatchPauseSeconds must be 0..120"
+}
+if ($MaxConsecutiveFailures -lt 1 -or $MaxConsecutiveFailures -gt 100) {
+    throw "MaxConsecutiveFailures must be 1..100"
+}
+if ($MaxRateLimitErrors -lt 1 -or $MaxRateLimitErrors -gt 100) {
+    throw "MaxRateLimitErrors must be 1..100"
+}
+if ($CacheOnly) {
+    $SkipUniverseRefresh = $true
+    $MaxSymbols = 0
+}
 $endExclusive = $decision.AddDays(1).ToString("yyyy-MM-dd", $culture)
 
 function RunAtlas {
@@ -74,17 +93,27 @@ try {
         Write-Host "1/3 Reusing existing current listing manifest"
     }
 
-    Write-Host ("2/3 Sync quote history for up to {0} missing ticker(s); 0 means all" -f $MaxSymbols)
-    RunAtlas -CommandArgs @(
+    if ($CacheOnly) {
+        Write-Host "2/3 CACHE ONLY: rebuilding prices and coverage from saved files; no network."
+    } else {
+        Write-Host ("2/3 Sync quote history for up to {0} missing ticker(s); 0 means all" -f $MaxSymbols)
+    }
+    $syncArguments = @(
         "stock-sync-market",
         "--universe", $Universe,
         "--start", $Start, "--end", $endExclusive,
         "--max-symbols", "$MaxSymbols",
         "--workers", "$Workers", "--attempts", "$Attempts",
+        "--batch-size", "$BatchSize",
+        "--batch-pause-seconds", "$BatchPauseSeconds",
+        "--max-consecutive-failures", "$MaxConsecutiveFailures",
+        "--max-rate-limit-errors", "$MaxRateLimitErrors",
         "--cache-dir", $CacheDir,
         "--output", $Prices,
         "--report", $CoverageReport
     )
+    if ($CacheOnly) { $syncArguments += "--cache-only" }
+    RunAtlas -CommandArgs $syncArguments
 
     Write-Host "3/3 Audit actual NYSE decision close, price history and market scope"
     RunAtlas -CommandArgs @(
