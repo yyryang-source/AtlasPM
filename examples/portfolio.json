@@ -1,0 +1,26 @@
+{
+  "_note": "Illustrative only. Amounts, rate assumptions, and broker rules are fictional.",
+  "accounts": [
+    {
+      "name": "Long-Term Cash",
+      "account_type": "cash",
+      "cash": 20000,
+      "debt": 0,
+      "positions": [
+        {"symbol": "QQQ", "market_value": 50000, "maintenance_requirement": 0.30},
+        {"symbol": "KO", "market_value": 30000, "maintenance_requirement": 0.30}
+      ]
+    },
+    {
+      "name": "Margin Research",
+      "account_type": "margin",
+      "cash": 0,
+      "debt": 100000,
+      "positions": [
+        {"symbol": "QQQ", "market_value": 100000, "maintenance_requirement": 0.30},
+        {"symbol": "NVDA", "market_value": 75000, "maintenance_requirement": 0.40},
+        {"symbol": "JPM", "market_value": 25000, "maintenance_requirement": 0.30}
+      ]
+    }
+  ]
+}
