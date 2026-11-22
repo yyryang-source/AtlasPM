@@ -30,6 +30,7 @@ from atlaspm.ibkr_gateway import (
 from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
 from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin, financing_redacted_summary
 from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_margin_console
+from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -243,6 +244,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_margin_monitor.json")
     )
 
+    stress = sub.add_parser(
+        "ibkr-stress",
+        help="Offline hypothetical margin shock and financing-cost scenarios; no execution",
+    )
+    stress.add_argument("--monitor", type=Path, required=True)
+    stress.add_argument("--financing", type=Path, required=True)
+    stress.add_argument("--scenarios", type=Path, required=True)
+    stress.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_margin_stress.json")
+    )
+
     return parser
 
 
@@ -250,7 +262,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-margin-monitor":
+        if args.command == "ibkr-stress":
+            destination = require_private_output(args.output)
+            # Historical monitor/finance reports contain account IDs and balances.
+            monitor_source = require_private_output(args.monitor)
+            financing_source = require_private_output(args.financing)
+            try:
+                monitor_payload = json.loads(monitor_source.read_text(encoding="utf-8"))
+                finance_payload = json.loads(financing_source.read_text(encoding="utf-8"))
+                assumptions = json.loads(args.scenarios.read_text(encoding="utf-8"))
+                result = run_margin_stress(monitor_payload, finance_payload, assumptions)
+            except (ValueError, TypeError, KeyError, OSError):
+                raise ValueError(
+                    "Local margin stress inputs failed validation; inspect only your private files"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_stress_console(result, str(args.output))
+        elif args.command == "ibkr-margin-monitor":
             destination = require_private_output(args.output)
             if (args.fixture is None) == (not args.allow_local_gateway):
                 raise ValueError(
