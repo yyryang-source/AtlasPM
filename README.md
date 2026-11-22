@@ -4,6 +4,16 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Experimental: learning-to-rank stock picker V2
+
+An independent `stock-ai-train-v2` model uses LightGBM
+`rank_xendcg` grouped by historical decision date and 0–4 within-date
+forward-performance relevance, rather than predicting false-precision
+percentage returns. `stock-ai-rank-v2` publishes ordinal candidate
+scores with tied-rank diagnostics, not broker orders. It must demonstrate
+genuine test-IC improvement over the regression baseline before replacement.
+See [V2 design and Windows commands](docs/AI_STOCK_RANKER_V2.md).
+
 ## Experimental: Qlib-inspired AI stock ranking (LightGBM)
 
 The optional `stock-ai-train` and `stock-ai-rank` commands build a
