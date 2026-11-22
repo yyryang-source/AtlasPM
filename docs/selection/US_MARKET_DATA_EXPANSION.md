@@ -89,6 +89,7 @@ current-month candidate**. Actual as-of completeness is a separate question:
     --recent-sessions 63 `
     --min-recent-coverage-pct 85 `
     --min-month-end-coverage-pct 90 `
+    --min-eligible-coverage-pct 75 `
     --min-eligible-names 500 `
     --output local_data\us_market_data_audit.json
 
