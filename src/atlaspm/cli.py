@@ -33,6 +33,7 @@ from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_ma
 from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
 from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget, redacted_multiasset_summary
 from atlaspm.ibkr_reverse_stress import reverse_margin_stress, redacted_reverse_summary
+from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain, redacted_audit_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -277,6 +278,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_reverse_stress.json")
     )
 
+    chain = sub.add_parser(
+        "ibkr-risk-audit",
+        help="Audit five private offline IBKR risk diagnostics; no broker proof or execution",
+    )
+    chain.add_argument("--monitor", type=Path, required=True)
+    chain.add_argument("--financing", type=Path, required=True)
+    chain.add_argument("--stress", type=Path, required=True)
+    chain.add_argument("--multiasset", type=Path, required=True)
+    chain.add_argument("--reverse", type=Path, required=True)
+    chain.add_argument("--compare", type=Path, default=None)
+    chain.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_risk_audit.json")
+    )
+
     return parser
 
 
@@ -284,7 +299,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-reverse-stress":
+        if args.command == "ibkr-risk-audit":
+            destination = require_private_output(args.output)
+            source_paths = {
+                "monitor": require_private_output(args.monitor),
+                "financing": require_private_output(args.financing),
+                "stress": require_private_output(args.stress),
+                "multiasset": require_private_output(args.multiasset),
+                "reverse": require_private_output(args.reverse),
+            }
+            baseline_path = require_private_output(args.compare) if args.compare else None
+            if destination in set(source_paths.values()) or destination == baseline_path:
+                raise ValueError("Refusing to overwrite a private risk audit input")
+            try:
+                reports = {
+                    name: json.loads(path.read_text(encoding="utf-8"))
+                    for name, path in source_paths.items()
+                }
+                previous = (
+                    json.loads(baseline_path.read_text(encoding="utf-8"))
+                    if baseline_path else None
+                )
+                result = audit_ibkr_risk_chain(reports, baseline_audit=previous)
+            except (OSError, ValueError, KeyError, TypeError):
+                raise ValueError(
+                    "Local audit reports failed validation; inspect private files only"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_audit_summary(result, str(args.output))
+        elif args.command == "ibkr-reverse-stress":
             destination = require_private_output(args.output)
             upstream_path = require_private_output(args.budget)
             try:
