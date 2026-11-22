@@ -81,6 +81,17 @@ class IBKRMappingTests(unittest.TestCase):
         self.assertEqual(r["mapping_status"], "BLOCK_MAPPING")
         self.assertIn("IBKR_POSITION_UNITS_NOT_CONFIRMED", r["mapping_block_reasons"])
 
+    def test_ust_issuer_never_inferred_from_bond_class(self):
+        self.mapping["contracts"][1]["issuer_confirmed"] = False
+        r = self.check()
+        self.assertEqual(r["mapping_status"], "BLOCK_MAPPING")
+        self.assertIn("US_TREASURY_ISSUER_NOT_CONFIRMED", r["mapping_block_reasons"])
+
+    def test_ust_mapping_requires_explicit_issuer_field(self):
+        del self.mapping["contracts"][1]["issuer_confirmed"]
+        with self.assertRaisesRegex(ValueError, "issuer_confirmed"):
+            self.check()
+
     def test_unreviewed_manual_identity_is_blocked(self):
         self.mapping["contracts"][0]["manually_reviewed"] = False
         self.assertIn("CONTRACT_IDENTITY_NOT_REVIEWED", self.check()["mapping_block_reasons"])
