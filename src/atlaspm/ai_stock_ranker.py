@@ -400,11 +400,7 @@ def train_ai_stock_ranker(
         "test": test_metrics,
         "model_sha256": digest,
         "live_execution_enabled": False,
-        "warnings": list(_RISK_DISCLOSURES) + (
-            ["Top N cuts across statistically indistinguishable displayed "
-             "model scores; ranked selection is AMBIGUOUS and needs review."]
-            if resolution["ties_cross_top_n_cutoff"] else []
-        ),
+        "warnings": list(_RISK_DISCLOSURES),
     }
 
 
@@ -558,5 +554,9 @@ def rank_with_ai(
         "feature_names": list(FEATURE_NAMES),
         "model_sha256": metadata["model_sha256"],
         "live_execution_enabled": False,
-        "warnings": list(_RISK_DISCLOSURES),
+        "warnings": list(_RISK_DISCLOSURES) + (
+            ["Top N cuts across indistinguishable displayed model scores; "
+             "selection is AMBIGUOUS and requires review."]
+            if resolution["ties_cross_top_n_cutoff"] else []
+        ),
     }
