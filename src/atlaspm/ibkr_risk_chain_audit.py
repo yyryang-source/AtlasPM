@@ -72,7 +72,8 @@ def _finite_case_indices(cases: list[Any], label: str) -> list[dict[str, Any]]:
     if len(rows) > 20:
         raise ValueError("Too many hypothetical scenarios in source report")
     for expected, row in enumerate(rows, start=1):
-        if row.get("index") != expected:
+        ix = row.get("index")
+        if isinstance(ix, bool) or not isinstance(ix, int) or ix != expected:
             raise ValueError("Report scenario index sequence is invalid")
     return rows
 
@@ -195,9 +196,25 @@ def audit_ibkr_risk_chain(
           "STRESS_MULTI_EXPOSURE_DRIFT", issues)
     rows = _finite_case_indices(_list(stress.get("scenarios"), "stress cases"), "stress case")
     stress_alert_count = 0
+    stress_apr = _number(stress.get("assumed_annual_financing_apr"), "stress APR", low=0)
     for r in rows:
         loss = _number(r.get("hypothetical_market_loss_usd"), "stress loss")
+        decline = _number(r.get("assumed_shock_fraction"), "stress shock", low=0)
+        if decline > 1:
+            issues.append("STRESS_SHOCK_OUT_OF_RANGE")
+        _same(loss, assumed_exposure * decline, "STRESS_SHOCK_FORMULA_DRIFT", issues)
         cost = _number(r.get("new_simple_financing_interest_usd"), "stress interest", low=0)
+        days = r.get("horizon_days")
+        if isinstance(days, bool) or not isinstance(days, int) or not 0 <= days <= 365:
+            raise ValueError("Stress horizon invalid")
+        _same(cost, loan * stress_apr * days / 365,
+              "STRESS_INTEREST_FORMULA_DRIFT", issues)
+        multiplier = _number(r.get("assumed_maintenance_multiplier"),
+                             "stress maintenance multiplier", low=1)
+        _same(maint * multiplier, r.get("hypothetical_maintenance_margin_usd"),
+              "STRESS_MAINTENANCE_MULTIPLIER_DRIFT", issues)
+        _same(init * multiplier, r.get("hypothetical_initial_margin_usd"),
+              "STRESS_INITIAL_MULTIPLIER_DRIFT", issues)
         _same(nlv - loss - cost, r.get("hypothetical_nlv_usd"),
               "STRESS_NLV_FORMULA_DRIFT", issues)
         _same(elv - loss - cost, r.get("hypothetical_equity_with_loan_value_usd"),
