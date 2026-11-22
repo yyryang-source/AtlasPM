@@ -28,6 +28,9 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 - [x] First offline event-replayed paper OMS prototype with 5 order states, terminal status transitions, partial fills and synthetic settlement
 - [x] Idempotent duplicate execution/event handling and UNKNOWN_OUTCOME account reconciliation halt
 - [x] Cash/debt/stock/Treasury/long-option post-fill reconciliation and synthetic audit journal
+- [x] Offline after-fill static gross/stress checks; halt replay on an intermediate risk breach even if the complete basket was initially approved
+- [x] Deterministic unsigned SHA-256 hash chain for each unique source event, audit transition and marked account equity
+- [ ] Authenticated broker origin, durable signed event storage and independent post-fill margin/Greeks recalculation
 - [ ] Persist event sourcing in an append-only database and re-risk partial fills with genuine broker data
 - [ ] Authenticated per-leg broker What-If previews and multi-asset partial-fill/order-state orchestration
 - [ ] Full target-weight rebalancing, multi-leg collateral/option handling, broker order previews and event-sourced settled cash accounting
