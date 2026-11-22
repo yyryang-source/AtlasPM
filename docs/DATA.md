@@ -17,11 +17,11 @@ The download command requires network access. We deliberately **do not download 
 
 ## What is fetched?
 
-- Yahoo Finance daily historical **Close** from the unofficial \`yfinance\` Python client, explicitly with \`auto_adjust=True\`. This aims to adjust for dividends/splits using the provider's adjusted close convention.
-- \`--start\` is inclusive and \`--end\` is **exclusive**. The sample command requests prices through the last available session before 2026-11-22.
+- Yahoo Finance daily historical **Close** from the unofficial `yfinance` Python client, explicitly with `auto_adjust=True`. This aims to adjust for dividends/splits using the provider's adjusted close convention.
+- `--start` is inclusive and `--end` is **exclusive**. The sample command requests prices through the last available session before 2026-11-22.
 - Each ticker is downloaded individually and checked for non-empty usable prices. A missing ticker fails the entire operation instead of silently assigning zero returns.
-- The output is a local CSV with header \`date,symbol,adjusted_close\`.
-- \`local_data/\` is Git-ignored. Do not commit actual portfolio or brokerage exports.
+- The output is a local CSV with header `date,symbol,adjusted_close`.
+- `local_data/` is Git-ignored. Do not commit actual portfolio or brokerage exports.
 
 ## How the estimates are built
 
@@ -40,4 +40,4 @@ The client is unofficial and source availability, data licensing, adjustment con
 
 The estimator uses full-period observations to produce a static in-sample demonstration. **Do not call an optimization generated from these estimates a backtest or predictive AI.** Next: rolling training windows, test windows strictly after their training period, turnover, financing-cost accrual, trading frictions, benchmark comparison, and point-in-time universe.
 
-To download again to the same path, add \`--overwrite\`; otherwise the command refuses to replace an existing CSV.
+To download again to the same path, add `--overwrite`; otherwise the command refuses to replace an existing CSV.
