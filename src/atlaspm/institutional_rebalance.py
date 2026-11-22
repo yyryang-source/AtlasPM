@@ -6,7 +6,6 @@ authority to execute. Fake broker previews in tests are for contract testing.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from math import isfinite
 from typing import Any, Mapping
 
@@ -86,11 +85,17 @@ def plan_equity_trade(
     risk = _obj(p.get("risk_observation"), "risk_observation")
     preview = p.get("broker_preview")
     preview_obj = preview if isinstance(preview, dict) else None
-    blockers: list[str] = []
+    blockers: list[str] = list(blockers_early)
     warnings: list[str] = []
 
     nlv = float(account["net_liquidation_calculated"])
     pre_cash = float(account["settled_cash"])
+    # Keep unsettled obligations reserved; they cannot fund new purchases.
+    reserved_payables = float(account["unsettled_payable"])
+    if pre_cash + 1e-8 < reserved_payables:
+        blockers_early = ["SETTLED_CASH_BELOW_UNSETTLED_PAYABLE"]
+    else:
+        blockers_early = []
     pre_debt = float(account["margin_debt"])
     market_price = float(equity_position["mark_price"])
     gross_trade_value = shares * limit_price
@@ -122,7 +127,7 @@ def plan_equity_trade(
     # sale: a future separate payment event must reconcile that cash movement.
     if side == "BUY":
         cost = gross_trade_value + estimated_fee
-        cash_used = min(max(pre_cash, 0.0), cost)
+        cash_used = min(max(pre_cash - reserved_payables, 0.0), cost)
         borrowing = cost - cash_used
         post_cash = pre_cash - cash_used
         post_debt = pre_debt + borrowing
