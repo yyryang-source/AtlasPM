@@ -1,6 +1,10 @@
 """Contract, chronology and safety tests for offline stock selection."""
 
+import contextlib
 import csv
+import io
+import json
+import os
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -102,6 +106,44 @@ class StockScreenerTest(unittest.TestCase):
             f.write(f"{self.days[-1].isoformat()},AAA,Technology,100000000,.2,.1,.1,.1,10\n")
         with self.assertRaisesRegex(ValueError, "Duplicate fundamentals"):
             screen_stocks(self.prices, self.as_of, fundamentals_path=self.fundamentals)
+
+    def test_cli_private_json_output(self):
+        from atlaspm.cli import main
+        current = Path.cwd()
+        try:
+            os.chdir(self.root)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main([
+                    "stock-screen", "--prices", str(self.prices),
+                    "--as-of", self.as_of, "--top", "2",
+                    "--output", "local_data/ranked.json",
+                ])
+            self.assertEqual(code, 0)
+            summary = json.loads(out.getvalue())
+            saved = json.loads((self.root / "local_data/ranked.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["selected"][0]["symbol"], saved["selected"][0]["symbol"])
+            self.assertEqual(len(saved["selected"]), 2)
+            self.assertFalse(saved["live_execution_enabled"])
+        finally:
+            os.chdir(current)
+
+    def test_cli_blocks_public_repository_output(self):
+        from atlaspm.cli import main
+        current = Path.cwd()
+        try:
+            os.chdir(self.root)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = main([
+                    "stock-screen", "--prices", str(self.prices),
+                    "--as-of", self.as_of, "--output", "not-private.json",
+                ])
+            self.assertEqual(code, 2)
+            self.assertIn("AtlasPM error:", err.getvalue())
+            self.assertFalse((self.root / "not-private.json").exists())
+        finally:
+            os.chdir(current)
 
 
 if __name__ == "__main__":
