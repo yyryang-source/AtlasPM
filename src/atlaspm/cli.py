@@ -553,6 +553,7 @@ def build_parser() -> argparse.ArgumentParser:
     market_audit.add_argument("--recent-sessions", type=int, default=63)
     market_audit.add_argument("--min-recent-coverage-pct", type=float, default=85)
     market_audit.add_argument("--min-month-end-coverage-pct", type=float, default=90)
+    market_audit.add_argument("--min-eligible-coverage-pct", type=float, default=75)
     market_audit.add_argument("--min-eligible-names", type=int, default=500)
     market_audit.add_argument("--max-manifest-age-days", type=int, default=7)
     market_audit.add_argument("--output", type=Path,
@@ -882,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
                 recent_sessions=args.recent_sessions,
                 min_recent_coverage_pct=args.min_recent_coverage_pct,
                 min_month_end_coverage_pct=args.min_month_end_coverage_pct,
+                min_eligible_coverage_pct=args.min_eligible_coverage_pct,
                 min_eligible_names=args.min_eligible_names,
                 max_manifest_age_days=args.max_manifest_age_days,
             )
