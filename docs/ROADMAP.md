@@ -148,6 +148,16 @@
 - [x] Offline regression tests and synthetic CI smoke run
 - [ ] Authenticated broker data, margin/Greeks recalculation after each actual fill, signed append-only event storage, operator recovery
 
+## v0.4.6 — offline broker export versus ledger reconciliation (committed; awaiting Windows validation)
+
+- [x] Compare one exact account and all stocks, Treasury face, and signed option contract identifiers, terms and marks
+- [x] Compare cash, receivables/payables, margin principal/interest, NLV and informational Treasury collateral credit
+- [x] Independent imported broker balance-sheet arithmetic and account-vs-export mismatch report
+- [x] Fail closed on stale snapshots, missing/extra positions, duplicate holdings and negative broker liquidity
+- [x] Preserve untrusted-source flags and live execution disabled even if two local files match
+- [x] CLI, synthetic source, regression tests and CI smoke check
+- [ ] Authenticate and normalize real IBKR account / contract snapshots; verify actual margin preview separately
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
