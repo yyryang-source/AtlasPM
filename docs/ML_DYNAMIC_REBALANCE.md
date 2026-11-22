@@ -1,4 +1,6 @@
-# AtlasPM v0.5.0 — First Trained ML Dynamic Portfolio Rebalancing Engine
+# AtlasPM v0.5.0–v0.5.1 — Trained ML Dynamic Portfolio Rebalancing Engine
+
+**v0.5.1 Windows correction:** The `written` path in redacted ML CLI output is now always relative to the project's `local_data/` directory, never an absolute Windows profile path. A previous cross-platform test incorrectly searched JSON-escaped Windows path strings instead of parsing the JSON and asserting the normalized output path. CI now runs this regression on Windows and Linux. The model itself and offline-only safety flags are unchanged.
 
 **Research-only.** AtlasPM now fits a real, supervised machine-learning model and uses its forecasts to automatically set asset weights and cash levels during a strictly out-of-sample historical simulation. This is a first technical training baseline, not a profitable or validated AI trading strategy. **It never submits any IBKR real or paper orders.**
 
