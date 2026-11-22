@@ -61,3 +61,7 @@ jobs:
         run: python -m atlaspm.cli ibkr-multiasset-budget --stress local_data/ci_ibkr_margin_stress.json --assumptions examples/ibkr_multiasset_budget_synthetic.json --output local_data/ci_ibkr_multiasset_budget.json
       - name: Smoke test v0.4.13 reverse margin stress (synthetic, no network)
         run: python -m atlaspm.cli ibkr-reverse-stress --budget local_data/ci_ibkr_multiasset_budget.json --assumptions examples/ibkr_reverse_stress_synthetic.json --output local_data/ci_ibkr_reverse_stress.json
+      - name: Smoke test v0.4.14 complete private IBKR risk audit chain (synthetic, no network)
+        run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --output local_data/ci_ibkr_risk_audit.json
+      - name: Smoke test v0.4.14 audit baseline SHA-256 comparison
+        run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --compare local_data/ci_ibkr_risk_audit.json --output local_data/ci_ibkr_risk_audit_second.json
