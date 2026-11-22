@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.2.5 research prototype. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.3.0 research prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -101,12 +101,25 @@ The new read-only `risk-check` command evaluates a **hypothetical** optimized po
 
 If the modeled 2× candidate fails, it reports **which constraints failed** and whether any fully invested exposure of 1× or more could satisfy the assumptions. This is **not** broker-approved buying power and does not change live orders or past backtests. See [risk-budget methodology](docs/RISK_BUDGET.md).
 
+## Dynamic cash and margin risk budgets (v0.3.0)
+
+**New opt-in past-only backtest:** instead of simply detecting a 2× leverage breach after the fact, the engine caps gross exposure at every rebalance based on *then-available* sample covariance, a volatility limit, a market-crash loss budget, a maintenance buffer, and annual interest costs. It can also hold cash (gross exposure below 1×). The original `backtest` command remains unchanged.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli backtest-risk --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.60 --max-leverage 2 --max-volatility 0.30 --stress-decline 0.30 --max-stress-loss 0.40 --maintenance 0.30 --min-buffer 0.05 --apr 0.065 --max-financing-cost 0.08 --fee-bps 5 --output local_data\backtest_risk_managed.json
+
+.\.venv\Scripts\python.exe -m atlaspm.cli benchmark-spy --cash local_data\backtest_cash.json --margin local_data\backtest_risk_managed.json --spy local_data\spy_prices.csv --output local_data\spy_comparison_risk_managed.json
+```
+
+The second `--margin` parameter is merely the name of the second comparison case; the adaptive strategy may use no margin at many dates. **Do not interpret in-sample risk rules or results as future Alpha.** Read [adaptive risk methodology](docs/ADAPTIVE_RISK.md) and the strategy's caveats.
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── ADAPTIVE_RISK.md
 │   ├── RISK_BUDGET.md
 │   ├── MARGIN_SIM.md
 │   ├── BENCHMARK.md
@@ -121,6 +134,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── risk_backtest.py
 │   ├── risk_budget.py
 │   ├── benchmark.py
 │   ├── audit.py
