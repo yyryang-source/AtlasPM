@@ -85,7 +85,7 @@ def plan_equity_trade(
     risk = _obj(p.get("risk_observation"), "risk_observation")
     preview = p.get("broker_preview")
     preview_obj = preview if isinstance(preview, dict) else None
-    blockers: list[str] = list(blockers_early)
+    blockers: list[str] = []
     warnings: list[str] = []
 
     nlv = float(account["net_liquidation_calculated"])
@@ -93,9 +93,7 @@ def plan_equity_trade(
     # Keep unsettled obligations reserved; they cannot fund new purchases.
     reserved_payables = float(account["unsettled_payable"])
     if pre_cash + 1e-8 < reserved_payables:
-        blockers_early = ["SETTLED_CASH_BELOW_UNSETTLED_PAYABLE"]
-    else:
-        blockers_early = []
+        blockers.append("SETTLED_CASH_BELOW_UNSETTLED_PAYABLE")
     pre_debt = float(account["margin_debt"])
     market_price = float(equity_position["mark_price"])
     gross_trade_value = shares * limit_price
