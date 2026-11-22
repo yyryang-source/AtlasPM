@@ -33,12 +33,20 @@ class WalkForwardTests(unittest.TestCase):
             report = backtest_walk_forward(
                 sample_csv(temp), lookback_days=40, rebalance_days=21, fee_bps=5
             )
-        self.assertEqual(report["data"]["backtest_daily_observations"], 87)
+        self.assertEqual(report["data"]["backtest_daily_observations"], 86)
         self.assertEqual(report["strategy"]["rebalance_count"], 5)
         self.assertGreater(report["strategy"]["total_trading_fees_equity_index_units"], 0)
         self.assertEqual(
             report["rebalances"][0]["first_held_return_date"],
             report["equity_curve"][0]["date"]
+        )
+        self.assertLess(
+            report["rebalances"][0]["training_last_date"],
+            report["rebalances"][0]["execution_date"]
+        )
+        self.assertLess(
+            report["rebalances"][0]["execution_date"],
+            report["rebalances"][0]["first_held_return_date"]
         )
         self.assertAlmostEqual(sum(report["rebalances"][0]["weights"].values()), 1)
         self.assertGreater(report["strategy"]["ending_equity_index"], 0)
