@@ -56,6 +56,8 @@ def choose_budgeted_exposure(
     if any(not isfinite(w) or w < 0 for w in weights.values()):
         raise ValueError("Invalid risk-sleeve weights")
     matrix = _validate_covariance(covariance, len(symbols))
+    # Shared portfolio weights must exist before optional ES estimation.
+    w = list(weights.values())
     leverage = _fraction(maximum_requested_leverage, "maximum_requested_leverage", 1, 4)
     volcap = _fraction(max_annual_volatility, "max_annual_volatility", 0, positive=True)
     shock = _fraction(stress_decline, "stress_decline", 0, 1)
@@ -76,7 +78,6 @@ def choose_budgeted_exposure(
         )
         tail_loss = float(tail_diagnostic["daily_expected_shortfall_fraction"])
         tail_bound = daily_limit / tail_loss if tail_loss > 0 else float("inf")
-    w = list(weights.values())
     variance = sum(w[i] * matrix[i][j] * w[j]
                    for i in range(len(w)) for j in range(len(w)))
     annual_sigma = sqrt(max(0, variance))
