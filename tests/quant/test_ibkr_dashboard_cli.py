@@ -11,7 +11,7 @@ from pathlib import Path
 from atlaspm.cli import main
 from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain
 from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits
-from test_ibkr_risk_chain_audit import synthetic_chain
+from .test_ibkr_risk_chain_audit import synthetic_chain
 
 
 def write_input_reports(folder: Path):

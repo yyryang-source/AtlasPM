@@ -7,7 +7,7 @@ import unittest
 
 from atlaspm.atlas_execution_policy import assess_native_no_trade
 from atlaspm.ml_dynamic_rebalance import _select_allocation
-from test_atlas_regimenet import make_prices, run
+from .test_atlas_regimenet import make_prices, run
 
 NAMES = ["AAA", "BBB", "CCC"]
 RISKS = [.07, .08, .09]

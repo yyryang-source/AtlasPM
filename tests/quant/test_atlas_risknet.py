@@ -11,7 +11,7 @@ from atlaspm.atlas_risknet import (
 from atlaspm.atlas_regimenet import (
     MODEL_NAME, fit_atlas_regimenet, native_feature_vector,
 )
-from test_atlas_regimenet import synthetic_returns, make_prices, run
+from .test_atlas_regimenet import synthetic_returns, make_prices, run
 
 HAS_NUMPY = importlib.util.find_spec("numpy") is not None
 
