@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from atlaspm.optimizer import inverse_volatility_weights
+from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
 
@@ -42,6 +43,18 @@ def build_parser() -> argparse.ArgumentParser:
     optim.add_argument("--max-weight", type=float, default=0.60)
     optim.add_argument("--leverage", type=float, default=1.0)
     optim.add_argument("--apr", type=float, default=0.065)
+    prices = sub.add_parser("download-prices", help="Download adjusted daily prices to a local CSV")
+    prices.add_argument("--symbols", nargs="+", required=True)
+    prices.add_argument("--start", required=True, help="YYYY-MM-DD, inclusive")
+    prices.add_argument("--end", required=True, help="YYYY-MM-DD, exclusive")
+    prices.add_argument("--output", type=Path, default=Path("local_data/prices.csv"))
+    prices.add_argument("--overwrite", action="store_true")
+
+    estimate = sub.add_parser("estimate", help="Estimate annual returns and covariance from local CSV")
+    estimate.add_argument("--file", type=Path, required=True)
+    estimate.add_argument("--output", type=Path, default=Path("local_data/estimates.json"))
+    estimate.add_argument("--min-observations", type=int, default=60)
+
     return parser
 
 
@@ -58,6 +71,21 @@ def main(argv: list[str] | None = None) -> int:
                 declines=args.declines,
                 annual_margin_rate=args.apr,
             )
+        elif args.command == "download-prices":
+            report = download_yahoo_adjusted_prices(
+                args.symbols, args.start, args.end, args.output, args.overwrite
+            )
+        elif args.command == "estimate":
+            report = estimate_from_prices(args.file, min_observations=args.min_observations)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report = {
+                "written": str(args.output),
+                "metadata": report["metadata"],
+                "next_step": f"atlaspm optimize --file {args.output}",
+            }
         elif args.command == "optimize":
             assumptions = json.loads(args.file.read_text(encoding="utf-8"))
             if not isinstance(assumptions, dict):
