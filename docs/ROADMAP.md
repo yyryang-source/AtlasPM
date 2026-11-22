@@ -32,6 +32,12 @@
 - [x] Position drift, gross-leverage resets, daily financing interest and trading costs
 - [x] Research-only maintenance-breach flags (not liquidation)
 
+## v0.2.2 — risk-audit prototype (implemented)
+
+- [x] Match portfolio universes, parameter settings and daily return dates
+- [x] Report leveraged maintenance-breach dates, calendar-year returns and benchmark comparisons
+- [x] Flag model risk and refuse claims of live execution suitability
+
 ## v0.3 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
