@@ -1,0 +1,95 @@
+{
+  "_synthetic_fixture": "Completely fictional portfolio ledger values; no broker account, live quotes or recognized real collateral.",
+  "valuation_at": "2026-11-20T21:00:00Z",
+  "max_mark_age_seconds": 120,
+  "reconciliation_tolerance": 0.01,
+  "accounts": [
+    {
+      "account_id": "DEMO-CASH",
+      "account_type": "cash",
+      "currency": "USD",
+      "snapshot_at": "2026-11-20T20:59:30Z",
+      "settled_cash": 25000,
+      "margin_debt": 0,
+      "unsettled_receivable": 125,
+      "unsettled_payable": 100,
+      "accrued_financing_interest": 0,
+      "broker_reported_net_liquidation": 45525,
+      "positions": [
+        {
+          "type": "equity",
+          "identifier": "XYZ",
+          "shares": 100,
+          "mark_price": 200,
+          "mark_source": "synthetic",
+          "mark_age_seconds": 10
+        },
+        {
+          "type": "option",
+          "identifier": "XYZ-2027-01-15-P-180",
+          "underlying": "XYZ",
+          "expiration_date": "2027-01-15",
+          "right": "put",
+          "strike": 180,
+          "contracts": 1,
+          "multiplier": 100,
+          "mark_premium": 5,
+          "mark_source": "synthetic",
+          "mark_age_seconds": 20
+        }
+      ]
+    },
+    {
+      "account_id": "DEMO-MARGIN",
+      "account_type": "margin",
+      "currency": "USD",
+      "snapshot_at": "2026-11-20T20:59:20Z",
+      "settled_cash": 10000,
+      "margin_debt": 50000,
+      "unsettled_receivable": 500,
+      "unsettled_payable": 300,
+      "accrued_financing_interest": 150,
+      "broker_reported_net_liquidation": 117150,
+      "positions": [
+        {
+          "type": "equity",
+          "identifier": "QQQ",
+          "shares": 200,
+          "mark_price": 300,
+          "mark_source": "synthetic",
+          "mark_age_seconds": 5
+        },
+        {
+          "type": "treasury",
+          "identifier": "91282CDE0",
+          "face_value": 100000,
+          "clean_price_per_100": 97.5,
+          "accrued_interest_per_100": 0.4,
+          "coupon_rate": 0.04,
+          "maturity_date": "2031-11-15",
+          "modified_duration": 4.35,
+          "mark_source": "synthetic",
+          "mark_age_seconds": 18,
+          "collateral": {
+            "status": "ELIGIBLE",
+            "source": "broker",
+            "broker_recognized_value": 90000
+          }
+        },
+        {
+          "type": "option",
+          "identifier": "QQQ-2027-01-15-C-350",
+          "underlying": "QQQ",
+          "expiration_date": "2027-01-15",
+          "right": "call",
+          "strike": 350,
+          "contracts": -2,
+          "multiplier": 100,
+          "mark_premium": 4,
+          "mark_source": "synthetic",
+          "mark_age_seconds": 16
+        }
+      ]
+    }
+  ]
+}
