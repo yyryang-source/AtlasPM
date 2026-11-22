@@ -1,0 +1,52 @@
+{
+  "_synthetic_fixture": "Entirely hypothetical reverse risk thresholds; not actual Interactive Brokers positions, collateral or liquidation levels.",
+  "method": "hypothetical_reverse_margin_stress",
+  "min_excess_to_nlv_ratio": 0.15,
+  "maximum_drawdown_fraction": 1,
+  "cases": [
+    {
+      "name": "illustrative_current_maintenance",
+      "maintenance_multiplier": 1,
+      "horizon_days": 0,
+      "assumed_annual_apr": 0.065,
+      "relative_shock_multipliers": {
+        "SYN_EQ_A": 1,
+        "SYN_EQ_B": 1,
+        "SYN_EQ_C": 1
+      }
+    },
+    {
+      "name": "illustrative_doubled_maintenance",
+      "maintenance_multiplier": 2,
+      "horizon_days": 30,
+      "assumed_annual_apr": 0.075,
+      "relative_shock_multipliers": {
+        "SYN_EQ_A": 1,
+        "SYN_EQ_B": 1,
+        "SYN_EQ_C": 1
+      }
+    },
+    {
+      "name": "illustrative_maintenance_triples",
+      "maintenance_multiplier": 3,
+      "horizon_days": 365,
+      "assumed_annual_apr": 0.095,
+      "relative_shock_multipliers": {
+        "SYN_EQ_A": 1,
+        "SYN_EQ_B": 1,
+        "SYN_EQ_C": 1
+      }
+    },
+    {
+      "name": "illustrative_unshocked_positions",
+      "maintenance_multiplier": 1,
+      "horizon_days": 0,
+      "assumed_annual_apr": 0.065,
+      "relative_shock_multipliers": {
+        "SYN_EQ_A": 0,
+        "SYN_EQ_B": 0,
+        "SYN_EQ_C": 0
+      }
+    }
+  ]
+}
