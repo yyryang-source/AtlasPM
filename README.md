@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.6.3 original Atlas RiskNet v2 and a new matched paired robustness audit: check year-by-year, crash-window and circular block-resampled uncertainty without rerunning or optimizing the model. All 2000–2026 historical results remain repeatedly used model-development data, not an untouched final evaluation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
+> **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -99,6 +99,12 @@ The 2000–2026 baseline comparison at `--no-trade-band 0.05` previously showed 
 The user's independent scratch-fitted RiskNet v2 produced **305.13%** simulated cumulative total return, **1.031** zero-risk-free Sharpe, and **23.67x** cumulative trading notional over initial equity on the already-studied 2000–2026 prices, versus **216.83%**, **1.011**, and **30.71x** for the matched conventional trailing-volatility strategy. The trailing-risk model had a slightly better drawdown (**-12.48% vs -12.56%**). RiskNet's 5-day forward risk MAE was **0.04143** vs traditional **0.04397**. These are promising research observations **not yet statistically robust or independently replicated**; all model development has repeatedly viewed the same period.
 
 `atlas-native-audit` now reads existing private RiskNet and dual-head reports, rejects unequal data/fees/risk limits, and generates **year-by-year plus predefined crisis-period** performance and **paired, block-resampled exploratory uncertainty intervals** around relative daily returns and Sharpe. The audit does not retrain, change models, or issue orders. [See independent-model comparison and Windows instructions](docs/ATLAS_ROBUSTNESS_AUDIT.md).
+
+## v0.7.0: Study 30 leading models, independently build Atlas FusionNet
+
+We researched **30 credible econometric risk methods, time-series architectures, conditional uncertainty approaches and portfolio optimization frameworks** with primary paper links and explicit pros/cons; see [the model research matrix](docs/MODEL_RESEARCH_ATLAS_30.md). This does **not** mean we have trained 30 third-party AI models. GARCH/HAR, TFT, iTransformer, N-HiTS, CAViaR/EVT, DCC/shrinkage, HRP and CVaR provide *design hypotheses*, not uncredited copied implementations.
+
+New **original Atlas FusionNet** trains from scratch on shared multiasset 5/10/L-day features using our softmax-gated 3-expert model predicting **forward RMS volatility and downside RMS**. A new independently implemented past-only **correlation-shrunken risk-aware allocator** has three controlled modes (`inverse_risk`, `downside`, `shrinkage`) for falsifiable comparison. All choices must pass the unchanged 0–1x cash-account stress, historical ES, model-vol, max-name and drawdown limits, with optional risk-rechecked no-trade band. See [FusionNet architecture and Windows commands](docs/ATLAS_FUSIONNET_V1.md). The model is only an experimental architecture: its future success and 2000–2026 backtest result are **not known yet**.
 
 ## What works today
 
