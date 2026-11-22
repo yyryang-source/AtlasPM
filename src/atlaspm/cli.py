@@ -16,6 +16,7 @@ from atlaspm.audit import audit_backtests
 from atlaspm.benchmark import compare_spy
 from atlaspm.risk_budget import check_risk_budget
 from atlaspm.risk_backtest import backtest_risk_budget
+from atlaspm.institutional_gate import assess_institutional_intent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,6 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
     managed.add_argument("--tail-fraction", type=float, default=0.05,
                          help="Worst historical tail share, >0 and <=0.25")
 
+    institutional = sub.add_parser(
+        "institutional-check",
+        help="Institutional-style fail-closed paper order intent preflight",
+    )
+    institutional.add_argument("--file", type=Path, required=True)
+    institutional.add_argument(
+        "--output", type=Path, default=Path("local_data/institutional_preflight.json")
+    )
+
     return parser
 
 
@@ -128,7 +138,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "analyze":
+        if args.command == "institutional-check":
+            payload = json.loads(args.file.read_text(encoding="utf-8"))
+            report = assess_institutional_intent(payload)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report["written"] = str(args.output)
+        elif args.command == "analyze":
             payload = json.loads(args.file.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError("Input file must contain an object")
