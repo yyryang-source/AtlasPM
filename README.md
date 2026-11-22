@@ -4,6 +4,16 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Experimental: matched equal-weight stock universe comparator
+
+`stock-backtest` can now report a second, independently accounted
+equal-weight, periodically rebalanced **all price-qualified surviving tickers**
+reference alongside SPY. It uses the same completed-close decision, next-close
+execution, fee/slippage assumptions and separate risk metrics to expose whether
+factor-selected Top N beats a simple portfolio constructed from the same
+retrospective universe. This comparison **does not** remove survivorship bias.
+See [Windows example and constraints](docs/STOCK_WALKFORWARD.md).
+
 ## Experimental: 2000–2026 stock-selection walk-forward backtest
 
 `stock-backtest` repeatedly runs the technical factor screen at completed
