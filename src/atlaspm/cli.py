@@ -1742,6 +1742,10 @@ def main(argv: list[str] | None = None) -> int:
                 "disclaimer": "Heuristic baseline, not a trained AI or a trade signal.",
             }
         print(json.dumps(report, indent=2, sort_keys=True))
+        if args.command == "stock-sync-market" and report.get("stop_reason") == "USER_INTERRUPTED":
+            # A single Ctrl+C saves a partial, honest cache report first, then
+            # terminates the PowerShell orchestration instead of launching audit.
+            return 130
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"AtlasPM error: {exc}", file=sys.stderr)
