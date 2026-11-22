@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.3 synthetic multi-asset batch planner, asset ledger and paper-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.4 synthetic Paper OMS event replay, multi-asset batch planner and read-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -179,12 +179,26 @@ git pull origin main
 
 Entirely fictional market, brokerage, and order data. An internal paper-intent approval is **not** a broker approval, not a hedge performance promise and does not submit orders. Read [multi-asset basket methodology](docs/MULTI_ASSET_BATCH.md).
 
+## Offline Paper OMS event replay (v0.4.4)
+
+A read-only **paper order state machine and event replay** now sits after the multi-asset preflight. It accepts only a simulated-approved basket and local invented event records, tracks partial fills, rejection, cancel/pending cancel, unknown broker outcomes and settlement events, and independently reconciles portfolio cash, debt, stock, Treasury and long-put holdings after each event.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli oms-replay --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --events examples\paper_oms_events.json --output local_data\paper_oms_report.json
+~~~
+
+All events and brokerage previews are **entirely fictional**. This is NOT a connection to real IBKR paper trading and NEVER submits an order. See [Paper OMS design](docs/PAPER_OMS.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── PAPER_OMS.md
 │   ├── MULTI_ASSET_BATCH.md
 │   ├── EQUITY_PLANNER.md
 │   ├── INSTITUTIONAL_LEDGER.md
@@ -206,6 +220,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── paper_oms.py
 │   ├── institutional_batch.py
 │   ├── institutional_rebalance.py
 │   ├── institutional_ledger.py
