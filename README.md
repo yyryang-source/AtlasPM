@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.6.0 first ORIGINAL AtlasPM architecture (Atlas RegimeNet v1): a from-scratch trained three-expert, dual-risk-and-return multiasset model with custom loss, allocation preference, and independent hard risk gates. Previous Ridge, LightGBM, Qlib-like model-family experiments remain benchmarks only. All model fits/rebalances are offline 0–1x cash-only and NOT validated for profit or live IBKR execution. Not investment advice.
+> **Status:** v0.6.1 original AtlasPM three-expert dual-risk-and-return model, now with controlled return-head ablations, validated no-trade corridor and out-of-sample forecast comparisons against naive risk/zero return. Native v0.6.0 underperformed naive trailing-risk Sharpe and cumulative returns on a user's 2000–2026 history. None of the models is certified profitable or ready for IBKR paper/live orders; all research is offline cash-only 0–1x. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -81,6 +81,12 @@ The new `ml-model-tournament` command competes **Ridge, native LightGBM and trad
 `atlas-native-backtest` now trains the internally designed **Atlas RegimeNet v1** directly from your local history. The softmax gate and three asset-aware expert networks jointly learn expected forward realized-risk and forward-return proxies. We implemented training gradients, asymmetric risk-underprediction penalty, an original risk-adjusted allocation score, and optional extra exposure caution, all subordinated to hard concentration, volatility, ES, market shock and drawdown limits.
 
 We are using standard public mathematical operations and optional NumPy **only for arrays**, with no imported fitted LightGBM/Ridge/Qlib model and no proprietary/pretrained checkpoints. The system is still an initial research baseline, not independently proven better than those baselines, nor validated for live orders. Read [native architecture, training command, model ownership claims and no-hindsight limitations](docs/ATLAS_NATIVE_MODEL.md).
+
+## v0.6.1: Improve OUR model through falsifiable testing, not third-party wrappers
+
+Our own `atlas-native-backtest` now supports `--return-head-strength 0|1` to isolate whether the model's self-trained forward-return estimates help the allocation, and `--no-trade-band 0.05` to skip small target-weight changes **only when actual current holdings pass all rechecked risk limits**. Traditional trailing risk receives the same no-trade policy; there is no hidden execution advantage for native AI.
+
+Historical output reports learned forecast MAE versus naive trailing-volatility and zero-return predictions, and compares native vs traditional trades and costs under matching rules. The first unmodified v0.6.0 experiment yielded **198.72% simulated cumulative native return and 0.856 Sharpe vs 215.58% and 1.007 for traditional risk**; improving training loss alone did not produce investable alpha. See [our native architecture, experiment results and reproducible ablations](docs/ATLAS_NATIVE_MODEL.md).
 
 ## What works today
 
