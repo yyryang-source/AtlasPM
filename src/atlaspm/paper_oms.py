@@ -164,8 +164,6 @@ def replay_paper_orders(
             state["status"] = "UNKNOWN"
             halted = True
         elif event_type == "FILL":
-            if prior_state not in {"SUBMITTED", "ACCEPTED", "PARTIALLY_FILLED", "CANCEL_REQUESTED"}:
-                raise ValueError("Cannot apply a fill to a non-open paper order")
             execution_id = _text(e.get("execution_id"), "execution_id")
             if execution_id in seen_exec:
                 if e["leg_id"] != seen_exec[execution_id]["leg_id"] or any(
@@ -177,6 +175,8 @@ def replay_paper_orders(
                 duplicate_count += 1
                 seen_events[event_id] = dict(e)
                 continue
+            if prior_state not in {"SUBMITTED", "ACCEPTED", "PARTIALLY_FILLED", "CANCEL_REQUESTED"}:
+                raise ValueError("Cannot apply a fill to a non-open paper order")
             quantity = _number(e.get("quantity"), "fill.quantity", positive=True)
             if quantity > state["requested_quantity"] - state["filled_quantity"] + 1e-8:
                 raise ValueError("Fill quantity exceeds remaining approved order")
