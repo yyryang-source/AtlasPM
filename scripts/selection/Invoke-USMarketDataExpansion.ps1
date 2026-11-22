@@ -52,8 +52,8 @@ if ($Attempts -lt 1 -or $Attempts -gt 3) { throw "Attempts must be in 1..3" }
 $endExclusive = $decision.AddDays(1).ToString("yyyy-MM-dd", $culture)
 
 function RunAtlas {
-    param([string[]] $Args)
-    & $python -m atlaspm.cli @Args
+    param([string[]] $CommandArgs)
+    & $python -m atlaspm.cli @CommandArgs
     if ($LASTEXITCODE -ne 0) {
         throw ("AtlasPM failed with exit code {0}" -f $LASTEXITCODE)
     }
@@ -63,7 +63,7 @@ Push-Location $root
 try {
     if (-not $SkipUniverseRefresh) {
         Write-Host "1/3 Discover current US-listed equity universe (not historical PIT membership)"
-        RunAtlas @(
+        RunAtlas -CommandArgs @(
             "stock-universe", "--output", $Universe,
             "--report", $UniverseReport
         )
@@ -75,7 +75,7 @@ try {
     }
 
     Write-Host ("2/3 Sync quote history for up to {0} missing ticker(s); 0 means all" -f $MaxSymbols)
-    RunAtlas @(
+    RunAtlas -CommandArgs @(
         "stock-sync-market",
         "--universe", $Universe,
         "--start", $Start, "--end", $endExclusive,
@@ -87,7 +87,7 @@ try {
     )
 
     Write-Host "3/3 Audit actual NYSE decision close, price history and market scope"
-    RunAtlas @(
+    RunAtlas -CommandArgs @(
         "stock-market-audit",
         "--universe", $Universe,
         "--prices", $Prices,
