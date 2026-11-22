@@ -581,6 +581,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     market_sync.add_argument("--workers", type=int, default=2)
     market_sync.add_argument("--attempts", type=int, default=2)
+    market_sync.add_argument("--batch-size", type=int, default=25)
+    market_sync.add_argument("--batch-pause-seconds", type=float, default=3.0)
+    market_sync.add_argument("--max-consecutive-failures", type=int, default=12)
+    market_sync.add_argument("--max-rate-limit-errors", type=int, default=2)
+    market_sync.add_argument("--cache-only", action="store_true",
+                             help="Rebuild price CSV + coverage report using existing cache only; no provider calls")
 
     stock_backtest = sub.add_parser(
         "stock-backtest",
@@ -922,7 +928,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.universe, cache_dir, destination,
                 start=args.start, end=args.end,
                 max_symbols=args.max_symbols, workers=args.workers,
-                attempts=args.attempts,
+                attempts=args.attempts, batch_size=args.batch_size,
+                batch_pause_seconds=args.batch_pause_seconds,
+                max_consecutive_failures=args.max_consecutive_failures,
+                max_rate_limit_errors=args.max_rate_limit_errors,
+                cache_only=args.cache_only,
             )
             report_path.parent.mkdir(parents=True, exist_ok=True)
             report_path.write_text(
@@ -938,6 +948,12 @@ def main(argv: list[str] | None = None) -> int:
                 "failed_this_run": details["failed_this_run"],
                 "price_rows": details["price_rows"],
                 "full_market_coverage": details["full_market_coverage"],
+                "download_status": details["download_status"],
+                "stopped_early": details["stopped_early"],
+                "stop_reason": details["stop_reason"],
+                "attempted_downloads": details["attempted_downloads"],
+                "not_attempted_due_to_stop": details["not_attempted_due_to_stop"],
+                "provider_rate_limit_errors": details["provider_rate_limit_errors"],
                 "written": str(destination.relative_to(Path.cwd().resolve())),
                 "report": str(report_path.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
@@ -1726,6 +1742,10 @@ def main(argv: list[str] | None = None) -> int:
                 "disclaimer": "Heuristic baseline, not a trained AI or a trade signal.",
             }
         print(json.dumps(report, indent=2, sort_keys=True))
+        if args.command == "stock-sync-market" and report.get("stop_reason") == "USER_INTERRUPTED":
+            # A single Ctrl+C saves a partial, honest cache report first, then
+            # terminates the PowerShell orchestration instead of launching audit.
+            return 130
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"AtlasPM error: {exc}", file=sys.stderr)

@@ -43,6 +43,79 @@ The audit runs after each batch. The first 50-name batch should report
 The script does not register scheduled tasks or automatically start work
 in the background.
 
+## Recover from Ctrl+C or Yahoo rate limiting without losing caches
+
+If a large run was interrupted (for example 2,689 ticker CSV+JSON
+pairs from 5,830 current US-listed symbols), the previous coverage
+JSON is stale because the interrupted process never reached assembly.
+**Do not delete or rename local_data/us_equity_cache.** The exact
+input interval for existing cache remains 2024-01-01 through the
+**exclusive** end date 2026-11-21.
+
+First, reconstruct the current price CSV and completeness report
+**offline**—no new Yahoo requests, no new Nasdaq listing download:
+
+```powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\selection\Invoke-USMarketDataExpansion.ps1 `
+    -AsOf 2026-11-20 -CacheOnly -SkipUniverseRefresh
+
+$r = Get-Content local_data\us_equity_coverage.json -Raw | ConvertFrom-Json
+$r | Select-Object listing_candidates,cached_or_downloaded_symbols,missing_symbols,coverage_pct,download_status | Format-List
+
+$a = Get-Content local_data\us_market_data_audit.json -Raw | ConvertFrom-Json
+$a | Select-Object market_data_status,eligible_history_and_freshness,eligible_coverage_pct | Format-List
+```
+
+This counts **valid matching-date cached symbols**, which may differ
+from the raw CSV+JSON pair count if a file was incomplete during
+interruption. The audit may remain REVIEW_REQUIRED until enough
+current US-listed symbols qualify.
+
+After investigating the provider error messages, resume in **small
+bounded batches** rather than \`-MaxSymbols 0\` (which still attempts
+every remaining symbol until stopped by safeguards):
+
+```powershell
+# Resume at most 50 uncached symbols; submit only 10 per wave,
+# 1 worker, 5-second gap between waves, stop at first two 429 errors.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\selection\Invoke-USMarketDataExpansion.ps1 `
+    -AsOf 2026-11-20 `
+    -MaxSymbols 50 -Workers 1 -Attempts 1 `
+    -BatchSize 10 -BatchPauseSeconds 5 `
+    -MaxRateLimitErrors 2 -MaxConsecutiveFailures 10 `
+    -SkipUniverseRefresh
+
+$r = Get-Content local_data\us_equity_coverage.json -Raw | ConvertFrom-Json
+$r | Select-Object cached_or_downloaded_symbols,missing_symbols,failed_this_run,download_status,stop_reason,provider_rate_limit_errors | Format-List
+$r.failures.PSObject.Properties | Select-Object -First 10 Name,Value | Format-Table -Wrap
+```
+
+Settings can be changed after inspecting whether failures are true
+HTTP 429/rate limits, invalid symbols, or legitimately absent history.
+Continuing to retry during a confirmed rate limit is not a good
+recovery strategy. Batch pause and stop thresholds **reduce** request
+pressure; Yahoo can still throttle or deny access.
+
+New download safety behavior:
+
+- No more than \`--batch-size\` futures are submitted at once.
+- \`--batch-pause-seconds\` delays the next batch.
+- \`--max-rate-limit-errors\` stops when explicit 429/rate-limit
+  errors accumulate; these are not retried immediately.
+- \`--max-consecutive-failures\` stops if repeated missing/failed
+  histories indicate a broken/provider-throttled run.
+- A single **Ctrl+C** cancels unstarted requests in the current
+  bounded wave. It can still take time for the 1–2 active Yahoo HTTP
+  requests to finish, then writes partial price CSV and coverage JSON.
+  The CLI exits code 130 after a user interrupt; the PowerShell script
+  will **not** start the audit automatically on that interrupt.
+- \`--cache-only\` assembles cached data without fetching market data,
+  and runs the independent audit when invoked through the script.
+- \`download_status=STOPPED_EARLY\` and \`stop_reason\` are diagnostic
+  outputs, **never success or live trading permission**.
+
 ## Run locally on Windows PowerShell
 
 Use your existing AtlasPM Windows repo; do not create a new repo.
