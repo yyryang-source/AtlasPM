@@ -53,6 +53,14 @@
 - [x] Mark partial years and count full years outperforming SPY
 - [ ] Validate diagnostics against 2003–2026 real local results
 
+## v0.2.5 — pre-trade research risk budgets (implemented; awaiting full Windows validation)
+
+- [x] Read-only candidate portfolio volatility, concentration, leverage, stress loss, maintenance cushion and financing-cost checks
+- [x] Report constrained hypothetical leverage cap or infeasibility of any fully invested 1× candidate
+- [x] Offline core and CLI regression tests; source estimates from historical covariance
+- [ ] Integrate past-only risk limits inside the walk-forward rebalancing process
+- [ ] Add cash allocations under 1× and data-driven drawdown-control experiments
+
 ## v0.3 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
