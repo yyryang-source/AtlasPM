@@ -31,6 +31,7 @@ from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacte
 from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin, financing_redacted_summary
 from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_margin_console
 from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
+from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget, redacted_multiasset_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -255,6 +256,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_margin_stress.json")
     )
 
+    multiasset = sub.add_parser(
+        "ibkr-multiasset-budget",
+        help="Offline hypothetical correlation stress and financing risk-budget check",
+    )
+    multiasset.add_argument("--stress", type=Path, required=True)
+    multiasset.add_argument("--assumptions", type=Path, required=True)
+    multiasset.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_multiasset_budget.json")
+    )
+
     return parser
 
 
@@ -262,7 +273,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-stress":
+        if args.command == "ibkr-multiasset-budget":
+            destination = require_private_output(args.output)
+            prior_path = require_private_output(args.stress)
+            try:
+                prior = json.loads(prior_path.read_text(encoding="utf-8"))
+                inputs = json.loads(args.assumptions.read_text(encoding="utf-8"))
+                result = analyze_multiasset_risk_budget(prior, inputs)
+            except (ValueError, TypeError, KeyError, OSError):
+                raise ValueError(
+                    "Local multiasset risk inputs failed validation; inspect private files"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report = redacted_multiasset_summary(result, str(args.output))
+        elif args.command == "ibkr-stress":
             destination = require_private_output(args.output)
             # Historical monitor/finance reports contain account IDs and balances.
             monitor_source = require_private_output(args.monitor)

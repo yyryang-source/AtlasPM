@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.11 offline financing-cost and margin stress scenarios, layered on v0.4.10 read-only IBKR Gateway margin monitoring. Still no trained AI or order execution connectivity. The optional authenticated local Gateway is GET-only; no brokerage trades are sent. All scenarios are hypothetical and no independent financing debt proof is available. Not investment advice.
+> **Status:** v0.4.12 hypothetical multiasset correlation stress and financing risk budgets, layered on v0.4.11 offline margin stress and v0.4.10 GET-only local IBKR monitoring. No trained AI, authenticated financing evidence or trading connections. Scenarios are assumed research models, not IBKR liquidation rules. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -21,6 +21,12 @@ Run the quick start and read limitations in [v0.4.10 Margin Monitor](docs/IBKR_M
 The new `ibkr-stress` CLI ingests **private** saved v0.4.10 margin monitoring and v0.4.9 financing-claim diagnostics, requires explicit scenario assumptions and estimates illustrative NLV / equity-with-loan, margin requirements, available funds, excess liquidity and simple future borrowing cost. It never treats a claimed loan as verified, never double-subtracts existing debt from NLV, and permanently blocks order execution and institutional risk-gate entry. It does **not** implement IBKR's liquidation algorithm.
 
 Follow the [synthetic Windows PowerShell test procedure](docs/IBKR_MARGIN_STRESS.md).
+
+## v0.4.12: Multiasset correlation and financing risk budget
+
+The `ibkr-multiasset-budget` CLI uses the private prior `ibkr-stress` output and a new synthetic-only research-sleeve manifest. It computes explicitly supplied per-asset shock P&L, a 99% one-day parametric normal VaR under validated positive-semidefinite correlation matrices, simple assumed borrowing interest, and illustrative margin/buffer/concentration budget alerts. Correlation affects statistical VaR but does **not** change user-specified deterministic shocks. No AI model is trained; no brokerage orders are possible, and every trust/readiness flag stays false.
+
+See [v0.4.12 Windows instructions and assumptions](docs/IBKR_MULTI_ASSET_BUDGET.md).
 
 ## What works today
 

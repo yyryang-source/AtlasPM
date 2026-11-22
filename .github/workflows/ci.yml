@@ -57,3 +57,5 @@ jobs:
         run: python -m atlaspm.cli ibkr-margin-monitor --fixture examples/ibkr_gateway_synthetic.json --account DU1234567 --output local_data/ci_ibkr_margin_monitor.json
       - name: Smoke test v0.4.11 static financing and margin stress (synthetic, no network)
         run: python -m atlaspm.cli ibkr-stress --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --scenarios examples/ibkr_margin_stress_synthetic.json --output local_data/ci_ibkr_margin_stress.json
+      - name: Smoke test v0.4.12 multiasset correlation budget (synthetic, no network)
+        run: python -m atlaspm.cli ibkr-multiasset-budget --stress local_data/ci_ibkr_margin_stress.json --assumptions examples/ibkr_multiasset_budget_synthetic.json --output local_data/ci_ibkr_multiasset_budget.json
