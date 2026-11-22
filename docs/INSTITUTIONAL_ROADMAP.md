@@ -5,6 +5,10 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 ## Phase A — Portfolio domain and policy contracts (v0.4)
 
 - [ ] Typed stock/ETF, UST CUSIP (bills, notes, bonds), listed option, cash/debt and FX instruments.
+- [x] Initial USD read-only account ledger and synthetic instruments: stock/ETF, Treasury dirty valuation and signed listed option marks
+- [x] Independent cash and margin accounts, debt/financing-interest accounting, broker NLV reconciliation flags and quote freshness checks
+- [x] Treasury broker-recognized informational collateral tally without double counting NLV or available cash
+- [ ] Event-sourced balance/position ledger and settlement/coupon/assignment state transitions
 - [ ] Cash, margin, option and collateral ledger with cash/position/debt invariant, coupon, accrued interest, options expiry/assignment.
 - [ ] Central pure-function risk gate: no new exposure unless broker snapshot, order preview, eligibility and data freshness are valid.
 - [ ] Policy-driven risk states: NORMAL/WATCH/DE_RISK/CRITICAL/HALT with hysteresis and alert reasons.
@@ -62,9 +66,9 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 
 ## Immediate implementation order
 
-1. Publish architecture contracts, risk policy and synthetic sample; preserve previous strategy/test behavior.
-2. Build pure read-only risk gate with broker snapshot validation and block/allow rationale.
-3. Build separate multi-asset portfolio ledger and Treasury cashflow contract.
+1. [x] Publish architecture contracts, risk policy and synthetic sample; preserve previous strategy/test behavior.
+2. [x] Build pure read-only risk gate with broker snapshot validation and block/allow rationale.
+3. [partial] Build separate multi-asset portfolio ledger; coupon cashflow event engine remains pending.
 4. Build add/reduce/hedge proposal engine and paper OMS.
 5. Add options pricing/scenario/payoff model and Treasury collateral with actual broker preview.
 6. Build dashboard and more realistic out-of-sample tests before any live trading.
