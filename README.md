@@ -4,6 +4,17 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Monthly AI stock-selection engine (research only)
+
+`stock-ai-monthly` converts the stock-only V2 LightGBM ranked shortlist
+into a calendar-correct **month-end** research report with Top20/50,
+actual NYSE last-session validation, complete-close requirement,
+market-universe coverage audits, stale-model flags and tied-rank warnings.
+Windows local runner: `scripts/Invoke-MonthlyStockResearch.ps1`.
+Daily quote refresh and quarterly retraining remain **separate**;
+there is no broker connection, trading or risk action.
+See [Monthly Alpha Selection Engine](docs/MONTHLY_ALPHA_SELECTION.md).
+
 ## Experimental: learning-to-rank stock picker V2
 
 An independent `stock-ai-train-v2` model uses LightGBM
