@@ -13,12 +13,15 @@ from datetime import date
 from math import isfinite
 import json
 import os
+import re
 import sys
 from pathlib import Path
 import time
 from typing import Any, Callable
 
 from atlaspm.us_market_universe import read_market_universe
+
+_RATE_LIMIT_ERROR = re.compile(r"yfratelimit|rate[ _-]?limit|too many requests|http.?429|\b429\b", re.IGNORECASE)
 
 
 def _market_history(symbol: str, start: str, end: str) -> list[tuple[str, float]]:
@@ -28,7 +31,7 @@ def _market_history(symbol: str, start: str, end: str) -> list[tuple[str, float]
         raise ValueError("Install Yahoo market data adapter: pip install -e '.[market]'") from exc
     frame = yf.Ticker(symbol).history(
         start=start, end=end, interval="1d", auto_adjust=True,
-        actions=False, raise_errors=True,
+        actions=False, raise_errors=True, timeout=20,
     )
     if frame is None or frame.empty or "Close" not in frame.columns:
         raise ValueError("NO_HISTORY_RETURNED")
@@ -104,6 +107,11 @@ def sync_us_market_prices(
     max_symbols: int = 0,
     workers: int = 2,
     attempts: int = 2,
+    batch_size: int = 25,
+    batch_pause_seconds: float = 3.0,
+    max_consecutive_failures: int = 12,
+    max_rate_limit_errors: int = 2,
+    cache_only: bool = False,
     downloader: Callable[[str, str, str], list[tuple[str, float]]] | None = None,
 ) -> dict[str, Any]:
     """Download quote histories incrementally, then assemble all cached symbols.
@@ -111,6 +119,13 @@ def sync_us_market_prices(
     max_symbols=0 covers entire current listing; N>0 is smoke-testing or
     incremental progress, never a claim of full market coverage.
     Existing per-ticker cache is used only for the exact same date interval.
+
+    Work is submitted in BOUNDED batches (not a 5000-future queue).
+    An explicit provider-rate-limit or sustained failure streak stops
+    further scheduling. One Ctrl+C cancels pending requests in the
+    current small batch, waits for at most workers in-flight requests,
+    and assembles an honest partial cache coverage report. cache_only
+    regenerates current aggregate and QC input without network requests.
     """
     try:
         begin = date.fromisoformat(start)
@@ -123,8 +138,23 @@ def sync_us_market_prices(
         raise ValueError("max-symbols must be in 0..100000")
     if isinstance(workers, bool) or not 1 <= workers <= 8:
         raise ValueError("workers must be in 1..8")
-    if isinstance(attempts, bool) or not 1 <= attempts <= 3:
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or not 1 <= attempts <= 3:
         raise ValueError("attempts must be in 1..3")
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or not 1 <= batch_size <= 100:
+        raise ValueError("batch-size must be in 1..100")
+    if (isinstance(batch_pause_seconds, bool) or not isinstance(batch_pause_seconds, (int, float))
+            or not isfinite(batch_pause_seconds) or not 0 <= batch_pause_seconds <= 120):
+        raise ValueError("batch-pause-seconds must be in 0..120")
+    if (isinstance(max_consecutive_failures, bool) or not isinstance(max_consecutive_failures, int)
+            or not 1 <= max_consecutive_failures <= 100):
+        raise ValueError("max-consecutive-failures must be in 1..100")
+    if (isinstance(max_rate_limit_errors, bool) or not isinstance(max_rate_limit_errors, int)
+            or not 1 <= max_rate_limit_errors <= 100):
+        raise ValueError("max-rate-limit-errors must be in 1..100")
+    if not isinstance(cache_only, bool):
+        raise ValueError("cache-only must be a boolean")
+    if cache_only and max_symbols:
+        raise ValueError("cache-only and positive max-symbols cannot be combined")
     universe = read_market_universe(universe_file)
     symbols = [r["provider_symbol"] for r in universe]
     if output.resolve() == universe_file.resolve():
@@ -134,9 +164,13 @@ def sync_us_market_prices(
     fetch = downloader or _market_history
 
     uncached = [s for s in symbols if not _cached(cache_dir, s, start, end)]
-    selected = uncached[:max_symbols] if max_symbols else uncached
+    selected = [] if cache_only else (uncached[:max_symbols] if max_symbols else uncached)
     failures: dict[str, str] = {}
     succeeded = 0
+    attempted = 0
+    rate_limit_errors = 0
+    consecutive_failures = 0
+    stop_reason: str | None = None
 
     def worker(symbol: str) -> tuple[str, int, str | None]:
         last_error = "UNKNOWN_ERROR"
@@ -146,28 +180,96 @@ def sync_us_market_prices(
                 if not rows:
                     raise ValueError("NO_VALID_CLOSE_ROWS")
                 return symbol, _store(cache_dir, symbol, start, end, rows), None
-            except Exception as exc:  # Vendor/API errors must not abort thousands of symbols.
+            except Exception as exc:
+                # Errors from the remote provider are recorded, not treated
+                # as an instruction to retry thousands of symbols at once.
                 last_error = f"{type(exc).__name__}: {str(exc)[:180]}"
+                if _RATE_LIMIT_ERROR.search(last_error):
+                    # Backing off should happen at the batch level, never
+                    # hammer the same symbol immediately after a 429.
+                    break
                 if attempt + 1 < attempts:
                     time.sleep(0.75 * (attempt + 1))
         return symbol, 0, last_error
 
-    if selected:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(worker, symbol) for symbol in selected]
-            for done, future in enumerate(as_completed(futures), 1):
-                symbol, rows, error = future.result()
-                if error:
-                    failures[symbol] = error
-                else:
-                    succeeded += 1
-                if done % 25 == 0 or done == len(selected):
+    def record_result(result: tuple[str, int, str | None]) -> None:
+        nonlocal succeeded, attempted, rate_limit_errors, consecutive_failures
+        symbol, _rows, error = result
+        attempted += 1
+        if error is not None:
+            failures[symbol] = error
+            consecutive_failures += 1
+            if _RATE_LIMIT_ERROR.search(error):
+                rate_limit_errors += 1
+        else:
+            succeeded += 1
+            consecutive_failures = 0
+        if attempted % 25 == 0 or attempted == len(selected):
+            print(
+                f"[stock-sync-market] {attempted}/{len(selected)} processed, "
+                f"{succeeded} successful, {len(failures)} failed, "
+                f"{rate_limit_errors} provider rate-limit errors; "
+                "individual successful quotes cached",
+                file=sys.stderr, flush=True,
+            )
+
+    if cache_only:
+        print(
+            "[stock-sync-market] CACHE_ONLY: scanning existing ticker cache; "
+            "no Yahoo/network requests will be made",
+            file=sys.stderr, flush=True,
+        )
+
+    # Use bounded executor queues: no submission of 5,730 futures up front.
+    # This avoids large pending queues and makes a user interrupt manageable.
+    try:
+        for i in range(0, len(selected), batch_size):
+            if i and batch_pause_seconds:
+                time.sleep(batch_pause_seconds)
+            batch = selected[i:i + batch_size]
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(worker, symbol) for symbol in batch]
+                counted = set()
+                try:
+                    for future in as_completed(futures):
+                        record_result(future.result())
+                        counted.add(future)
+                except KeyboardInterrupt:
+                    stop_reason = "USER_INTERRUPTED"
+                    for future in futures:
+                        future.cancel()
                     print(
-                        f"[stock-sync-market] {done}/{len(selected)} requested, "
-                        f"{succeeded} successful, {len(failures)} failed; "
-                        "successful quotes will be cached",
+                        "[stock-sync-market] Ctrl+C received; canceled queued "
+                        "requests. Waiting for in-flight downloads to finish "
+                        "before saving partial progress.",
                         file=sys.stderr, flush=True,
                     )
+                # The pool exits after at most `workers` active requests.
+                # Capture any futures that completed while Ctrl+C was handled.
+            for future in futures:
+                if future not in counted and not future.cancelled():
+                    record_result(future.result())
+            if stop_reason is not None:
+                break
+            if rate_limit_errors >= max_rate_limit_errors:
+                stop_reason = "PROVIDER_RATE_LIMIT"
+            elif consecutive_failures >= max_consecutive_failures:
+                stop_reason = "CONSECUTIVE_DOWNLOAD_FAILURES"
+            if stop_reason is not None:
+                print(
+                    f"[stock-sync-market] STOPPED_EARLY: {stop_reason}. "
+                    "No more symbols scheduled; saving partial coverage. "
+                    "Check failures before another run.",
+                    file=sys.stderr, flush=True,
+                )
+                break
+    except KeyboardInterrupt:
+        stop_reason = "USER_INTERRUPTED"
+        print(
+            "[stock-sync-market] Interrupt received between batches; "
+            "saving cached progress without scheduling further downloads.",
+            file=sys.stderr, flush=True,
+        )
 
     # Assembly is streaming and may generate a large file for a 26-year
     # full exchange history; no 30-million-row in-memory dataframe.
@@ -213,8 +315,18 @@ def sync_us_market_prices(
         "coverage_pct": round(100.0 * covered / len(symbols), 2),
         "price_rows": rows_total,
         "new_download_successes": succeeded,
-        "attempted_downloads": len(selected),
+        "requested_downloads": len(selected),
+        "attempted_downloads": attempted,
+        "not_attempted_due_to_stop": max(0, len(selected) - attempted),
         "failed_this_run": len(failures),
+        "provider_rate_limit_errors": rate_limit_errors,
+        "stopped_early": stop_reason is not None,
+        "stop_reason": stop_reason,
+        "download_status": (
+            "CACHE_ONLY" if cache_only else
+            "STOPPED_EARLY" if stop_reason is not None else
+            "REQUESTED_BATCH_PROCESSED"
+        ),
         "failures": failures,
         "missing_tickers": missing,
         "remaining_or_failed": len(missing),
@@ -228,5 +340,6 @@ def sync_us_market_prices(
             "Adjusted data may contain survivorship and corporate-action revision biases.",
             "Price data alone do not supply verified point-in-time company fundamentals.",
             "All market data are unofficial research inputs; no trading actions.",
+            "STOPPED_EARLY or CACHE_ONLY output is incomplete until explicitly audited.",
         ],
     }
