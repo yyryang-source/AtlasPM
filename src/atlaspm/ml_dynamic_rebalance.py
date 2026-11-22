@@ -411,7 +411,7 @@ def backtest_ml_dynamic_rebalance(
                 "is_real_or_paper_broker_order":False,
             })
         moves = returns[t]
-        for state in states.values():
+        for name,state in states.items():
             state["holdings"] = [
                 h*(1+r) for h,r in zip(state["holdings"],moves)
             ]
@@ -421,9 +421,7 @@ def backtest_ml_dynamic_rebalance(
             if abs(sum(state["holdings"])+state["cash"]-state["equity"])>1e-10:
                 raise ValueError("Simulated cash and holdings ledger fails to reconcile")
             state["peak"]=max(state["peak"],state["equity"])
-            state["returns"].append(state["equity"]/initial_equities[next(
-                name for name,value in states.items() if value is state
-            )]-1)
+            state["returns"].append(state["equity"]/initial_equities[name]-1)
             state["curve"].append({
                 "date":dates[t+1].isoformat(),
                 "equity_index":state["equity"],
