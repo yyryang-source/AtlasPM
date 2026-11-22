@@ -306,6 +306,7 @@ def rank_stocks_v2(
         "candidate_universe_count": len(histories),
         "scored_count": len(candidates),
         "excluded_count": len(histories) - len(candidates),
+        "scored_symbols": sorted({r["symbol"] for r in candidates}),
         "selected": selection,
         "ranking_diagnostics": diagnostics,
         "model_diagnostics": {
