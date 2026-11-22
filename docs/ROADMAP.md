@@ -16,7 +16,7 @@
 - [x] Make cash-account maintenance requirement zero
 - [ ] Connect historical data and estimate returns/covariance with provenance
 
-## v0.2 — remaining data work
+### Remaining data work
 
 - [ ] Data import (CSV first; optional vendors later), provenance and calendar alignment
 - [ ] Total return and corporate-action handling
@@ -25,7 +25,7 @@
 
 ## v0.3 — optimization and AI experiments
 
-- [ ] Mean-variance / CVaR optimizers with turnover and max-risk constraints
+- [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
 - [ ] Out-of-sample baselines before training
 - [ ] Local ML training on Windows with reproducible seeds/configs
 - [ ] Leakage-safe validation and model cards; no unsupported return promises
