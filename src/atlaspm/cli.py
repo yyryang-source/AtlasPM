@@ -14,6 +14,7 @@ from atlaspm.portfolio import analyze_accounts, parse_accounts
 from atlaspm.backtest import backtest_walk_forward
 from atlaspm.audit import audit_backtests
 from atlaspm.benchmark import compare_spy
+from atlaspm.risk_budget import check_risk_budget
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -82,6 +83,22 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--spy", type=Path, required=True)
     benchmark.add_argument("--output", type=Path, default=Path("local_data/spy_comparison.json"))
 
+    risk = sub.add_parser("risk-check", help="Read-only pre-trade research risk budget")
+    risk.add_argument("--file", type=Path, required=True, help="Historical estimate JSON")
+    risk.add_argument("--leverage", type=float, default=2.0)
+    risk.add_argument("--risk-aversion", type=float, default=4.0)
+    risk.add_argument("--max-weight", type=float, default=0.60, help="Optimizer concentration cap")
+    risk.add_argument("--max-leverage", type=float, default=2.0)
+    risk.add_argument("--max-name-weight", type=float, default=0.60, help="Risk budget concentration cap")
+    risk.add_argument("--max-volatility", type=float, default=0.30)
+    risk.add_argument("--stress-decline", type=float, default=0.30)
+    risk.add_argument("--max-stress-loss", type=float, default=0.40)
+    risk.add_argument("--maintenance", type=float, default=0.30)
+    risk.add_argument("--min-buffer", type=float, default=0.05)
+    risk.add_argument("--apr", type=float, default=0.065)
+    risk.add_argument("--max-financing-cost", type=float, default=0.08)
+    risk.add_argument("--output", type=Path, default=Path("local_data/risk_budget.json"))
+
     return parser
 
 
@@ -113,6 +130,44 @@ def main(argv: list[str] | None = None) -> int:
                 "metadata": report["metadata"],
                 "next_step": f"atlaspm optimize --file {args.output}",
             }
+        elif args.command == "risk-check":
+            assumptions = json.loads(args.file.read_text(encoding="utf-8"))
+            if not isinstance(assumptions, dict):
+                raise ValueError("Risk input must be a JSON object")
+            candidate = optimize_mean_variance(
+                assumptions["expected_returns"],
+                assumptions["covariance"],
+                leverage=args.leverage,
+                risk_aversion=args.risk_aversion,
+                max_weight=args.max_weight,
+                annual_financing_rate=args.apr,
+            )
+            report = check_risk_budget(
+                candidate["weights"], assumptions["covariance"],
+                proposed_leverage=args.leverage,
+                max_allowed_leverage=args.max_leverage,
+                max_name_weight=args.max_name_weight,
+                max_annual_volatility=args.max_volatility,
+                stress_decline=args.stress_decline,
+                max_stress_loss_fraction=args.max_stress_loss,
+                maintenance_fraction=args.maintenance,
+                min_maintenance_excess_fraction=args.min_buffer,
+                annual_financing_rate=args.apr,
+                max_annual_financing_cost_fraction=args.max_financing_cost,
+            )
+            report["input_metadata"] = assumptions.get("metadata")
+            report["candidate_optimizer"] = {
+                "method": candidate["method"],
+                "risk_aversion": candidate["risk_aversion"],
+                "expected_net_return": candidate["expected_net_return"],
+                "is_trained_ai": False,
+                "warning": "Returns and covariance were estimated from history, not future forecasts."
+            }
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report["written"] = str(args.output)
         elif args.command == "benchmark-spy":
             report = compare_spy(args.cash, args.margin, args.spy)
             args.output.parent.mkdir(parents=True, exist_ok=True)
