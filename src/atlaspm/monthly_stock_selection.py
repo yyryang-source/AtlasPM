@@ -100,20 +100,23 @@ def monthly_candidates(
 
     full_market_count = None
     market_coverage_pct = None
+    outside_catalog = 0
     if universe_path is not None:
         catalog = read_market_universe(universe_path)
         full_market_count = len(catalog)
         catalog_symbols = {r["provider_symbol"] for r in catalog}
-        # The existing price-file universe may be only a subset of actual
-        # market listings. Do not claim US-market completeness without a manifest.
-        if rank["candidate_universe_count"] > full_market_count:
-            raise ValueError(
-                "Price-file ticker count exceeds market manifest; reconcile scope"
-            )
-        # Score results are bounded by manifest counts; the ranker itself
-        # still needs exact-match price history on the NYSE month-end date.
-        market_coverage_pct = round(100 * scored / full_market_count, 2)
+        scored_symbols = set(rank["scored_symbols"])
+        # Only ACTUAL scored ticker identities matching this snapshot count.
+        # A file of unrelated symbols must not impersonate full-US coverage.
+        outside_catalog = len(scored_symbols - catalog_symbols)
+        matched = len(scored_symbols & catalog_symbols)
+        market_coverage_pct = round(100 * matched / full_market_count, 2)
     issues: list[str] = []
+    if outside_catalog:
+        issues.append(
+            f"SYMBOLS_OUTSIDE_MANIFEST: {outside_catalog} scored quote tickers "
+            "are absent from listing snapshot; reconcile symbol mappings"
+        )
     if training_age_days > max_training_age_days:
         issues.append(
             f"STALE_MODEL: trained through {train_date.isoformat()}, "
@@ -170,6 +173,7 @@ def monthly_candidates(
             "excluded_for_missing_or_insufficient_history": rank["excluded_count"],
             "listing_manifest_count": full_market_count,
             "listed_market_coverage_pct": market_coverage_pct,
+            "scored_symbols_outside_manifest": outside_catalog,
             "scope": "provided_price_file_only" if full_market_count is None
                      else "current_US_exchange_listed_manifest",
         },
