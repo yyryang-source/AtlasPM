@@ -15,6 +15,7 @@
 - `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
 - `audit.py`: compare saved cash and margin curves and report stress warnings.
 - `tail_risk.py`: historical one-day Expected Shortfall from the worst fixed fraction of aligned trailing daily returns; optional research budget, not future prediction.
+- `oms_controls.py`: offline after-FILL marked gross/stress risk guard and locally verifiable unsigned SHA-256 event audit chain; not broker-authenticated.
 - `paper_oms.py`: offline order event replay with partial fills, idempotency, cancel/reject/unknown states, settlement and marked-account audit; no broker connectivity.
 - `institutional_batch.py`: read-only multi-asset batch with coordinated stock/UST/put/debt accounting, unsettled receivables, matching synthetic preview and per-leg deterministic RMS checks; no execution or fill state.
 - `institutional_rebalance.py`: read-only single-equity add/reduce intent, fee/cash/debt pro-forma, order-bound mock broker preview and central fail-closed risk decision; no actual orders.
