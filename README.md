@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.1 architecture, read-only multi-asset ledger and paper-only risk-control prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.2 read-only multi-asset ledger, equity proposal planner and paper-only risk prototype. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -153,12 +153,26 @@ git pull origin main
 
 The sample is **100% synthetic**. No broker API is connected. Even a reconciled example ledger is not authorization for actual margin borrowing or options. See [Ledger methodology](docs/INSTITUTIONAL_LEDGER.md).
 
+## Read-only add/reduce order planner (v0.4.2)
+
+The institutional pipeline now connects the **cash/margin accounting ledger** to the central **fail-closed policy gate** for a hypothetical stock/ETF BUY or SELL. It forecasts share count, settled cash, projected borrowing, fees and account net liquidation, while checking an order-bound simulated broker What-If preview.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli plan-equity --ledger examples\institutional_ledger.json --plan examples\institutional_equity_plan.json --output local_data\institutional_equity_plan_report.json
+~~~
+
+The example consists **entirely of invented broker and price data**. It creates neither live nor paper orders. A fictional ALLOW_PAPER_INTENT response is not real buying-power confirmation. See [equity planning documentation](docs/EQUITY_PLANNER.md) for limitations and safety controls.
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── EQUITY_PLANNER.md
 │   ├── INSTITUTIONAL_LEDGER.md
 │   ├── INSTITUTIONAL_ROADMAP.md
 │   ├── INSTITUTIONAL_ARCHITECTURE.md
@@ -178,6 +192,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── institutional_rebalance.py
 │   ├── institutional_ledger.py
 │   ├── institutional_gate.py
 │   ├── tail_risk.py
