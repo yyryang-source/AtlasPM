@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections import defaultdict
 import csv
 from datetime import date, datetime, timedelta, timezone
-from math import ceil, isfinite
+from math import isfinite
 from pathlib import Path
 import re
 from typing import Any
@@ -34,6 +34,7 @@ def audit_current_us_stock_prices(
     recent_sessions: int = 63,
     min_recent_coverage_pct: float = 85.0,
     min_month_end_coverage_pct: float = 90.0,
+    min_eligible_coverage_pct: float = 75.0,
     min_eligible_names: int = 500,
     max_manifest_age_days: int = 7,
 ) -> dict[str, Any]:
@@ -62,6 +63,7 @@ def audit_current_us_stock_prices(
     for label, pct in (
         ("min-recent-coverage-pct", min_recent_coverage_pct),
         ("min-month-end-coverage-pct", min_month_end_coverage_pct),
+        ("min-eligible-coverage-pct", min_eligible_coverage_pct),
     ):
         if isinstance(pct, bool) or not isinstance(pct, (int, float)) or not isfinite(pct) or not 0 <= pct <= 100:
             raise ValueError(f"{label} must be a finite percent in [0,100]")
@@ -204,6 +206,11 @@ def audit_current_us_stock_prices(
             f"INSUFFICIENT_DECISION_CLOSE_COVERAGE: {month_end_coverage}% "
             f"< {min_month_end_coverage_pct}%"
         )
+    if eligible_coverage < min_eligible_coverage_pct:
+        qc_reasons.append(
+            f"INSUFFICIENT_SCOREABLE_MARKET_COVERAGE: {eligible_coverage}% "
+            f"< {min_eligible_coverage_pct}%"
+        )
     if eligible_count < min_eligible_names:
         qc_reasons.append(
             f"INSUFFICIENT_WARMED_UP_STOCKS: {eligible_count} < {min_eligible_names}"
@@ -257,6 +264,7 @@ def audit_current_us_stock_prices(
         "recent_missing_sessions_examples": recent_gap[:30],
         "minimum_required_stock_names": min_eligible_names,
         "minimum_month_end_coverage_pct": float(min_month_end_coverage_pct),
+        "minimum_scoreable_coverage_pct": float(min_eligible_coverage_pct),
         "market_data_status": "REVIEW_REQUIRED" if qc_reasons else "READY_FOR_RESEARCH_REVIEW",
         "review_reasons": qc_reasons,
         "research_only": True,
