@@ -98,7 +98,7 @@ def reconcile_imported_broker_snapshot(
 
     discrepancies: list[dict[str, Any]] = []
     blockers: list[str] = []
-    if age > max_age:
+    if age > min(max_age, ledger["max_mark_age_seconds"]):
         blockers.append("IMPORTED_BROKER_EXPORT_STALE")
     if not account["account_ledger_ready_for_risk_review"]:
         blockers.append("LOCAL_LEDGER_NOT_READY_FOR_RECONCILIATION")
@@ -119,8 +119,22 @@ def reconcile_imported_broker_snapshot(
     excess_liquidity = _num(snap.get("excess_liquidity"), "excess_liquidity")
     if available_funds < 0 or excess_liquidity < 0:
         blockers.append("IMPORTED_BROKER_LIQUIDITY_NEGATIVE")
+    if imported_fields["margin_debt"] < 0 or imported_fields["unsettled_receivable"] < 0 or imported_fields["unsettled_payable"] < 0 or imported_fields["accrued_financing_interest"] < 0:
+        blockers.append("IMPORTED_BROKER_INVALID_NEGATIVE_LIABILITY")
+    if account["account_type"] == "cash" and imported_fields["settled_cash"] < 0:
+        blockers.append("IMPORTED_CASH_ACCOUNT_NEGATIVE_SETTLED_CASH")
     if account["account_type"] == "cash" and imported_fields["margin_debt"] > 0:
         blockers.append("IMPORTED_CASH_ACCOUNT_WITH_MARGIN_DEBT")
+
+    collateral_external = _nonnegative(
+        snap.get("broker_recognized_treasury_collateral_value"),
+        "broker_recognized_treasury_collateral_value",
+    )
+    _compare(
+        "broker_recognized_treasury_collateral_value",
+        account["broker_recognized_treasury_collateral_report_only"],
+        collateral_external, cash_tol, discrepancies,
+    )
 
     # Quantity-keyed comparison: an equity ticker is never silently matched
     # to a Treasury CUSIP or OCC option contract. No fuzzy symbol aliases.
@@ -150,11 +164,21 @@ def reconcile_imported_broker_snapshot(
             if multiplier <= 0 or int(multiplier) != multiplier:
                 raise ValueError("Option multiplier must be a positive integer")
         value = _num(p.get("market_value"), "broker.position.market_value")
+        if kind in {"equity", "treasury"} and value < 0:
+            raise ValueError("Long equity and Treasury marked value cannot be negative")
+        if kind == "option" and (value * quantity < -1e-8):
+            raise ValueError("Option market value sign must match signed contracts")
         imported_positions_value += value
         broker_by_key[key] = {
             "type": kind, "identifier": identifier,
             quantity_keys[kind]: quantity, "market_value": value,
-            **({"multiplier": multiplier} if kind == "option" else {}),
+            **({
+                "multiplier": multiplier,
+                "underlying": _str(p.get("underlying"), "option.underlying"),
+                "right": p.get("right"),
+                "strike": _nonnegative(p.get("strike"), "option.strike"),
+                "expiration_date": _str(p.get("expiration_date"), "option.expiration_date"),
+            } if kind == "option" else {}),
         }
 
     missing = sorted(f"{kind}:{security}" for kind, security in local_by_key.keys() - broker_by_key.keys())
@@ -176,6 +200,14 @@ def reconcile_imported_broker_snapshot(
         if kind == "option":
             _compare(f"{kind}:{identifier}:multiplier", local["multiplier"],
                      external["multiplier"], 0, discrepancies)
+            for attr in ("underlying", "right", "expiration_date"):
+                if local[attr] != external[attr]:
+                    discrepancies.append({
+                        "field": f"option:{identifier}:{attr}",
+                        "local": local[attr], "imported_broker": external[attr],
+                    })
+            _compare(f"option:{identifier}:strike", local["strike"],
+                     external["strike"], 1e-8, discrepancies)
 
     # Independently reconcile the imported broker's own claimed NLV from
     # imported cash/debt/position values before trusting comparison alone.
@@ -201,7 +233,7 @@ def reconcile_imported_broker_snapshot(
         "account_id": account_id,
         "source_claim": snap["source"],
         "snapshot_age_seconds": age,
-        "max_snapshot_age_seconds": max_age,
+        "max_snapshot_age_seconds": min(max_age, ledger["max_mark_age_seconds"]),
         "decision": "MATCHED_UNVERIFIED_EXPORT" if matched else "BLOCK_RECONCILIATION",
         "matched_account_and_positions": matched,
         "eligible_for_paper_research_only": matched,
@@ -214,6 +246,7 @@ def reconcile_imported_broker_snapshot(
         "imported_balance_sheet_reconciliation_gap": imported_arithmetic_gap,
         "imported_available_funds_report_only": available_funds,
         "imported_excess_liquidity_report_only": excess_liquidity,
+        "imported_broker_recognized_treasury_collateral_report_only": collateral_external,
         "matched_position_count": len(local_by_key.keys() & broker_by_key.keys()),
         "missing_in_import": missing,
         "unexpected_in_import": unexpected,
