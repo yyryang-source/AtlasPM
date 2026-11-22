@@ -12,7 +12,7 @@ from atlaspm.oms_controls import (
 from atlaspm.paper_oms import replay_paper_orders
 
 
-ROOT = Path(__file__).resolve().parents[1] / "examples"
+ROOT = Path(__file__).resolve().parents[2] / "examples"
 
 
 class OMSControlsTests(unittest.TestCase):

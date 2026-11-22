@@ -54,7 +54,7 @@ class OpenSourceLightGBMTests(unittest.TestCase):
     def test_lightgbm_full_dynamic_cash_rebalance_no_broker(self):
         # The existing synthetic history has 2 entirely fictional assets.
         from pathlib import Path
-        repo = Path(__file__).resolve().parents[1]
+        repo = Path(__file__).resolve().parents[2]
         data = backtest_ml_dynamic_rebalance(
             repo / "examples" / "synthetic_prices.csv",
             feature_days=20, forecast_days=5,
@@ -96,7 +96,7 @@ class OpenSourceLightGBMTests(unittest.TestCase):
 class OptionalLightGBMDependencyTests(unittest.TestCase):
     def test_no_optional_package_needed_for_regular_ridge(self):
         from pathlib import Path
-        path = Path(__file__).resolve().parents[1] / "examples/synthetic_prices.csv"
+        path = Path(__file__).resolve().parents[2] / "examples/synthetic_prices.csv"
         report = backtest_ml_dynamic_rebalance(
             path, minimum_training_samples=30, model_family="ridge"
         )
@@ -106,7 +106,7 @@ class OptionalLightGBMDependencyTests(unittest.TestCase):
 
     def test_invalid_or_unavailable_family_refused(self):
         from pathlib import Path
-        path=Path(__file__).resolve().parents[1]/"examples/synthetic_prices.csv"
+        path=Path(__file__).resolve().parents[2]/"examples/synthetic_prices.csv"
         with self.assertRaisesRegex(ValueError,"Supported supervised"):
             backtest_ml_dynamic_rebalance(path, model_family="fund-manager-secrets")
 
