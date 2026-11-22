@@ -109,8 +109,9 @@ def propose_multi_asset_batch(
         blockers.append("BROKER_SNAPSHOT_STALE")
 
     fee_total = 0.0
-    traded_risky_notional = 0.0
-    purchased_put_premiums = 0.0
+    # Independent accounting delta: compare cash/debt/position valuation
+    # against the expected fees and limit-vs-mark differences.
+    expected_nlv_delta = 0.0
     newly_borrowed = 0.0
     # The full batch is account-specific. No separate account contributes
     # spendable cash or a collateral margin credit.
@@ -148,11 +149,14 @@ def propose_multi_asset_batch(
             if action == "SELL_EQUITY":
                 # Sale settles later. Proceeds are NOT immediately spendable.
                 receivable += notional - fee
+                if fee > notional:
+                    blockers.append("SELL_FEE_EXCEEDS_PROCEEDS")
+                expected_nlv_delta += qty * (limit - mark) - fee
                 effect = "UNSETTLED_RECEIVABLE_INCREASE"
             else:
                 settled_cash -= notional + fee
+                expected_nlv_delta += qty * (mark - limit) - fee
                 effect = "SETTLED_CASH_OUTFLOW"
-            traded_risky_notional += notional
         elif action == "BUY_TREASURY":
             identifier = _id(leg.get("identifier"), f"{leg_id}.identifier")
             key = ("treasury", identifier)
@@ -169,6 +173,7 @@ def propose_multi_asset_batch(
             notional = face * dirty_limit / 100
             settled_cash -= notional + fee
             pos["face_value"] += face
+            expected_nlv_delta += face * (dirty_mark - dirty_limit) / 100 - fee
             effect = "SETTLED_CASH_OUTFLOW_NO_ADDITIONAL_COLLATERAL_CREDIT"
         elif action == "BUY_PUT":
             option_id = _id(leg.get("identifier"), f"{leg_id}.identifier")
@@ -207,7 +212,7 @@ def propose_multi_asset_batch(
             }
             source_by_key[("option", option_id)] = pos
             notional = contracts * multiplier * limit_premium
-            purchased_put_premiums += notional + fee
+            expected_nlv_delta += contracts * multiplier * (mark_premium - limit_premium) - fee
             settled_cash -= notional + fee
             effect = "LONG_PUT_PREMIUM_CASH_OUTFLOW_NO_ASSUMED_STRESS_CREDIT"
         else:
@@ -252,6 +257,16 @@ def propose_multi_asset_batch(
     if any(x.get("action") == "REPAY_MARGIN" for x in order_legs) and newly_borrowed > 0:
         blockers.append("CANNOT_REBORROW_TO_SIMULATE_MARGIN_REPAYMENT")
 
+    # For a protective put, ensure enough *remaining* long underlying shares
+    # to cover its total contract multiplier. Otherwise this is speculative
+    # long put exposure, not a covered protection overlay.
+    for (kind, option_id), raw_pos in source_by_key.items():
+        if kind == "option" and ("option", option_id) not in initial_keys:
+            underlying = raw_pos["underlying"]
+            backing = source_by_key.get(("equity", underlying))
+            if backing is None or backing["shares"] + 1e-8 < raw_pos["contracts"] * raw_pos["multiplier"]:
+                blockers.append("PROTECTIVE_PUT_EXCEEDS_UNDERLYING_SHARES")
+
     projected: list[dict[str, Any]] = []
     for (kind, identifier), raw_pos in source_by_key.items():
         if kind == "equity" and raw_pos["shares"] <= 0:
@@ -266,6 +281,10 @@ def propose_multi_asset_batch(
     )
     if proforma_nlv <= 0:
         blockers.append("NONPOSITIVE_PROFORMA_EQUITY")
+    accounting_gap = (proforma_nlv - marked_before) - expected_nlv_delta
+    ledger_balanced = abs(accounting_gap) <= max(0.01, abs(marked_before) * 1e-10)
+    if not ledger_balanced:
+        blockers.append("PRO_FORMA_LEDGER_DOES_NOT_BALANCE")
     gross_after = sum(row["gross_notional"] for row in projected)
     denominator = max(proforma_nlv, 1e-8)
     modeled_gross = gross_after / denominator
@@ -394,13 +413,10 @@ def propose_multi_asset_batch(
             "conservative_stress_loss_fraction_without_put_credit": conservative_loss,
             "broker_recognized_treasury_credit_report_only": projected_credit,
             "total_fee": fee_total,
+            "expected_net_liquidation_change_from_fees_and_price_deviation": expected_nlv_delta,
+            "net_liquidation_change_reconciliation_gap": accounting_gap,
             "positions": projected,
-            "self_financing_identity_verified": (
-                abs(proforma_nlv - (
-                    settled_cash + receivable - payable + total_value_after
-                    - debt - account["accrued_financing_interest"]
-                )) < 1e-8
-            ),
+            "self_financing_identity_verified": ledger_balanced,
         },
         "legs": leg_results,
         "leg_risk_verdicts": gate_verdicts,
