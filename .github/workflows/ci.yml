@@ -24,6 +24,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke test CLI
         run: python -m atlaspm.cli analyze --file examples/portfolio.json
+      - name: Smoke test v0.5.0 supervised ML risk forecasts and autonomous cash-only rebalancing (offline)
+        run: python -m atlaspm.cli ml-rebalance-backtest --file examples/synthetic_prices.csv --feature-days 20 --forecast-days 5 --min-train 30 --rebalance-days 10 --max-exposure 1 --output local_data/ci_ml_dynamic_rebalance.json
 
       - name: Smoke test optimizer
         run: python -m atlaspm.cli optimize --file examples/optimizer.json

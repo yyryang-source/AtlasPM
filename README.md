@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.16 private offline HTML risk dashboard, layered on v0.4.10–v0.4.15 read-only and synthetic IBKR diagnostics. All local audit hashes and saved reports are unsigned; no independently authenticated financing debt, validated broker margin controls, live orders or automated execution. Not investment advice.
+> **Status:** v0.5.0 supervised ML dynamic rebalancing research engine, built on the read-only v0.4.x risk/IBKR diagnostics. ML now trains on expanding historical windows and automatically simulates multi-asset and cash allocations. This is offline cash-account historical research only: no trained live trading model, authenticated IBKR debt, broker risk approval or order execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -51,6 +51,14 @@ See [v0.4.15 PowerShell audit comparison workflow](docs/IBKR_RISK_AUDIT_DIFF.md)
 Run `ibkr-dashboard` to create `local_data/atlaspm_dashboard.html`, then open the standalone file in a Windows browser. The dark, responsive interface summarizes five saved risk stages, hypothetical scenario counts, local audit warnings and report-diff diagnostics. It embeds **only masked state labels**—not full account details, financing balances, asset names, private scenario names or SHA-256 digests. The HTML has no scripts, remote assets, server, API calls or trading function.
 
 See [v0.4.16 Windows PowerShell quick start](docs/IBKR_DASHBOARD.md).
+
+## v0.5.0: First trained AI/ML dynamic portfolio rebalancing baseline
+
+The new `ml-rebalance-backtest` CLI fits **supervised ridge-regression risk forecasts** independently for every asset, using a strict past-only training timeline, and automatically rebalances the hypothetical portfolio across assets and cash at each simulated rebalance date. Exposure is capped by predicted volatility, historical daily tail losses, market shock budgets, and account drawdown limits. It compares trained ML to an otherwise identical untrained trailing-volatility allocator and an equal-weight buy-and-hold portfolio, including fee and slippage assumptions.
+
+This is the first trained, fully **offline** research model, *not* a proven profitable strategy, real IBKR paper order system or live AI investment manager. Initial gross exposure is restricted to 0–1x with no lending, option positions or actual Treasury coupons. Model coefficients, full decisions, realized historical returns and vendor-specific data are kept private under `local_data/`.
+
+See [v0.5.0 Windows training command, data leakage tests and non-live restrictions](docs/ML_DYNAMIC_REBALANCE.md).
 
 ## What works today
 
