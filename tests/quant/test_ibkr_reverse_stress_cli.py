@@ -14,7 +14,7 @@ from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
 from atlaspm.ibkr_margin_stress import run_margin_stress
 from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class IBKRReverseCLITests(unittest.TestCase):

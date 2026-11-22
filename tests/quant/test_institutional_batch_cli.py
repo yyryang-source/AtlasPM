@@ -10,7 +10,7 @@ from pathlib import Path
 from atlaspm.cli import main
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 
 class BasketCliTests(unittest.TestCase):

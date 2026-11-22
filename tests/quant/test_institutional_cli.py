@@ -10,7 +10,7 @@ from pathlib import Path
 from atlaspm.cli import main
 
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "institutional_scenario.json"
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "institutional_scenario.json"
 
 
 class InstitutionalCliTest(unittest.TestCase):

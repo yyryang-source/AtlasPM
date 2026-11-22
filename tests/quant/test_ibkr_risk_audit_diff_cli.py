@@ -11,7 +11,7 @@ from atlaspm.cli import main
 from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain
 from test_ibkr_risk_chain_audit import synthetic_chain
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class RiskAuditDiffCLITests(unittest.TestCase):

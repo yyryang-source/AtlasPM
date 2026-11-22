@@ -11,7 +11,7 @@ from pathlib import Path
 from atlaspm.institutional_batch import propose_multi_asset_batch
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 
 class InstitutionalBatchTests(unittest.TestCase):

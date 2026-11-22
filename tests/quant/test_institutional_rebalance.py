@@ -8,7 +8,7 @@ from pathlib import Path
 from atlaspm.institutional_rebalance import plan_equity_trade
 
 
-ROOT = Path(__file__).resolve().parents[1] / "examples"
+ROOT = Path(__file__).resolve().parents[2] / "examples"
 
 
 class InstitutionalRebalanceTests(unittest.TestCase):

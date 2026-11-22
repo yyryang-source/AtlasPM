@@ -14,7 +14,7 @@ from atlaspm.ibkr_reverse_stress import (
     _boundary, reverse_margin_stress, redacted_reverse_summary,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ACCOUNT = "DU1234567"
 
 

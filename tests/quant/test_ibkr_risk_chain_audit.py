@@ -15,7 +15,7 @@ from atlaspm.ibkr_risk_chain_audit import (
     audit_ibkr_risk_chain, redacted_audit_summary,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ACCOUNT = "DU1234567"
 
 

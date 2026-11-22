@@ -8,7 +8,7 @@ from pathlib import Path
 from atlaspm.institutional_gate import assess_institutional_intent
 
 
-SAMPLE = Path(__file__).resolve().parents[1] / "examples" / "institutional_scenario.json"
+SAMPLE = Path(__file__).resolve().parents[2] / "examples" / "institutional_scenario.json"
 
 
 class InstitutionalGateTests(unittest.TestCase):

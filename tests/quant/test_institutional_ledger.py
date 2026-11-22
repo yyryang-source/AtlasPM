@@ -8,7 +8,7 @@ from pathlib import Path
 from atlaspm.institutional_ledger import build_institutional_ledger
 
 
-SAMPLE = Path(__file__).resolve().parents[1] / "examples" / "institutional_ledger.json"
+SAMPLE = Path(__file__).resolve().parents[2] / "examples" / "institutional_ledger.json"
 
 
 class InstitutionalLedgerTests(unittest.TestCase):
