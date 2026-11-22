@@ -81,7 +81,7 @@ def backtest_walk_forward(
     fee_bps: float = 5.0,
     maintenance_fraction: float = 0.30,
 ) -> dict[str, Any]:
-    """Use closes through t for signals, hold positions from t to t+1.
+    """Use closes through t-1 for signals, trade at t close, hold t to t+1.
 
     Index begins at 1 equity unit, with no deposits/withdrawals, price data
     pre-aligned on common dates, zero cash yield and no dividends beyond adjusted
@@ -109,7 +109,7 @@ def backtest_walk_forward(
     prices = load_adjusted_prices(path)
     symbols = sorted(prices)
     common_dates = sorted(set.intersection(*(set(prices[s]) for s in symbols)))
-    if len(common_dates) <= lookback_days + 1:
+    if len(common_dates) <= lookback_days + 2:
         raise ValueError("Not enough shared dates for a training window and held-out returns")
     price_rows = [[prices[s][day] for s in symbols] for day in common_dates]
     daily_asset_returns = [
@@ -134,13 +134,13 @@ def backtest_walk_forward(
     first_margin_breach_date = None
     rate_per_day = annual_financing_rate / TRADING_DAYS_PER_YEAR
 
-    # At date[t] close, training returns end at t, next position return is t -> t+1.
-    for t in range(lookback_days, len(common_dates) - 1):
+    # Signal at t-1 close, execute t close, hold exposure until t+1 close.
+    for t in range(lookback_days + 1, len(common_dates) - 1):
         close = common_dates[t].isoformat()
         next_close = common_dates[t + 1].isoformat()
         old_equity = equity
-        if (t - lookback_days) % rebalance_days == 0:
-            window = daily_asset_returns[t - lookback_days:t]
+        if (t - lookback_days - 1) % rebalance_days == 0:
+            window = daily_asset_returns[t - lookback_days - 1:t - 1]
             expected, covariance = _sample_estimates(window, symbols)
             result = optimize_mean_variance(
                 expected, covariance, risk_aversion=risk_aversion,
@@ -154,9 +154,10 @@ def backtest_walk_forward(
             fees_paid += cost
             equity -= cost
             rebalances.append({
-                "signal_date": close,
-                "training_start_date": common_dates[t - lookback_days].isoformat(),
-                "training_last_date": close,
+                "signal_date": common_dates[t - 1].isoformat(),
+                "execution_date": close,
+                "training_start_date": common_dates[t - lookback_days - 1].isoformat(),
+                "training_last_date": common_dates[t - 1].isoformat(),
                 "first_held_return_date": next_close,
                 "weights": dict(zip(symbols, new_weights)),
                 "turnover_notional_over_equity": turnover,
@@ -204,7 +205,7 @@ def backtest_walk_forward(
         {"drawdown": point["benchmark_drawdown"]} for point in curve
     ], benchmark)
     return {
-        "method": "rolling_train_then_next_day_hold_rebalanced_long_only",
+        "method": "rolling_train_signal_t_minus_1_execute_t_close_hold_next_session",
         "is_trained_ai": False,
         "parameters": {
             "lookback_trading_days": lookback_days,
@@ -242,7 +243,7 @@ def backtest_walk_forward(
         "equity_curve": curve,
         "warnings": [
             "Research-only walk-forward simulation; historical data is not point-in-time verified.",
-            "Same-date training is limited to closes through the signal date; positions apply from the NEXT session.",
+            "Signals use closes through t-1; portfolio trades at close t, then earns return from t to t+1.",
             "Equal-weight buy-and-hold benchmark uses the same assets, with zero fees, no borrowing, and no rebalancing.",
             "Constant annual financing rate and bps trading costs are assumed; taxes, spreads, slippage, currency and cash yield are excluded.",
             "Margin thresholds are illustrative only, not broker maintenance rules; forced liquidation is not modeled.",
