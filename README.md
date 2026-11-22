@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.5.2 native optional LightGBM research models, combined with v0.5.1 supervised Ridge and historical cash-only AI dynamic rebalancing. Open-source model families are trained locally on user-supplied history, not imported proprietary investment-bank weights. No validated live strategies, authenticated IBKR debt, risk approval or broker execution. Not investment advice.
+> **Status:** v0.5.3 offline matured-only risk model tournament: rolling Ridge, native LightGBM, and trailing-volatility models compete or blend to drive historical dynamic rebalancing. All trade decisions are constrained 0–1x cash-only simulations with time-safe prediction validation, not a trained profitable or validated live investment system. No authenticated IBKR account financing or broker execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -69,6 +69,12 @@ See [v0.5.0 Windows training command, data leakage tests and non-live restrictio
 The new `--model lightgbm` choice in `ml-rebalance-backtest` uses the **actual optional LightGBM package** to train expanding-window risk forecasts, then sends them through exactly the same historical automatic rebalance, cash, risk-limit and cost calculation pipeline as existing `--model ridge`. LightGBM is also part of Microsoft's Qlib benchmarks, but the AtlasPM implementation is **not** the official Qlib/Alpha158 pipeline or a proprietary/pretrained institutional weight set. All training is offline, no broker/paper/live orders and 0–1x max equity exposure. The final trained native tree model is saved only inside ignored `local_data/`.
 
 Read [verified open-source model references, licenses and PowerShell training commands](docs/OPEN_SOURCE_MODELS.md).
+
+## v0.5.3: Dynamic multi-model selection (champion or ensemble)
+
+The new `ml-model-tournament` command competes **Ridge, native LightGBM and traditional trailing volatility** using only *completed, past-origin* forecast outcomes. A model gets promoted only if its recent validated forward-risk MAE beats traditional risk forecasts by a configured margin, otherwise the system uses the untrained baseline. `--mode champion` picks the leading model, while `--mode ensemble` blends their risk forecasts with dynamic inverse-MAE weights. Both produce **automatic simulated asset/cash rebalances** and report separate shadow performance for each candidate, equal-weight buy/hold, costs, drawdowns, and chronology. No hindsight selection by final portfolio return or Sharpe.
+
+**All validation remains research-only**: no untouched final holdout has been independently certified, and no true broker data, margin or live/paper orders. [Read the model tournament methodology, anti-leak tests and Windows PowerShell commands](docs/ML_MODEL_TOURNAMENT.md).
 
 ## What works today
 
