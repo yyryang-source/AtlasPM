@@ -31,3 +31,5 @@ jobs:
         run: python -m atlaspm.cli risk-check --file examples/optimizer.json --leverage 1 --output local_data/ci_risk_budget.json
       - name: Smoke test adaptive risk budgets (synthetic offline history)
         run: python -m atlaspm.cli backtest-risk --file examples/synthetic_prices.csv --lookback-days 40 --rebalance-days 20 --max-leverage 2 --max-volatility 0.07 --output local_data/ci_adaptive_backtest.json
+      - name: Smoke test tail-loss historical ES budget (synthetic offline)
+        run: python -m atlaspm.cli backtest-risk --file examples/synthetic_prices.csv --lookback-days 40 --rebalance-days 20 --max-leverage 2 --max-volatility 0.07 --max-daily-tail-loss 0.03 --tail-fraction 0.05 --output local_data/ci_tail_backtest.json
