@@ -199,6 +199,11 @@ def main(argv: list[str] | None = None) -> int:
                 "live_execution_enabled": report["live_execution_enabled"],
                 "duplicate_events_ignored": report["duplicate_events_ignored"],
                 "unresolved_orders": report["unresolved_orders"],
+                "post_fill_risk_breaches": report["post_fill_risk_breaches"],
+                "post_fill_risk_snapshot_count": len(report["post_fill_risk_snapshots"]),
+                "audit_root_sha256": report["audit_root_sha256"],
+                "audit_hash_chain_self_consistent": report["audit_hash_chain_self_consistent"],
+                "broker_margin_rechecked_after_fills": report["broker_margin_rechecked_after_fills"],
                 "orders": report["orders"],
                 "account_replay": {
                     key: value for key, value in report["account_replay"].items()
