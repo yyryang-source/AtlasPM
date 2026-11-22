@@ -46,6 +46,13 @@
 - [x] Offline regression tests for SPY alignment and forced-deleveraging state transitions
 - [ ] Validate 2003–2026 strategy impact with real user-downloaded SPY data and margin stress outputs
 
+## v0.2.4 — historical relative-risk diagnostics (implemented; awaiting local validation)
+
+- [x] SPY-relative Beta, correlation, tracking error and information ratio
+- [x] Calendar-year compounded returns and excess returns versus SPY
+- [x] Mark partial years and count full years outperforming SPY
+- [ ] Validate diagnostics against 2003–2026 real local results
+
 ## v0.3 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
