@@ -4,6 +4,21 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Experimental: offline multi-factor stock screener
+
+The new `stock-screen` command ranks a supplied universe of stocks by
+12–1 and 6–1 price momentum, price versus the 200-day moving average,
+volatility, drawdown, and optionally **publication-dated** ROE, revenue
+growth, debt/equity, free-cash-flow yield and EV/EBITDA. It rejects stale
+history and unsuitable candidates before scoring, supports a per-sector
+selection cap, and writes inspectable private JSON.
+
+**Important:** this is a transparent, deterministic baseline, *not* a trained
+return-prediction model. It does not automatically fetch company financials,
+screen every U.S. stock, test out-of-sample alpha or place orders. All
+historical fundamental dates require user verification. See
+[Stock screener methodology and Windows PowerShell instructions](docs/STOCK_SCREENER.md).
+
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
 Use `ibkr-financing-check` with an IBKR read-only capture, a manually reviewed conid manifest, and a separately supplied current securities-segment margin/financing statement. The tool checks loan principal claim differences, the Gateway NLV, initial/maintenance formulas, margin cushion, account IDs, and snapshot timestamps. Output is private under `local_data/`. **Every result remains non-executable and unverified:** neither cross-checked numbers nor manually supplied source labels establish authentic broker margin buying power.
