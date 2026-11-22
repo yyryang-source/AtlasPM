@@ -40,11 +40,12 @@ def write_prices(folder: str, *, final_price_changed: bool = False,
 
 
 def research_test(path:Path, **kwargs):
-    return backtest_ml_dynamic_rebalance(
-        path,feature_days=20,forecast_days=5,
-        minimum_training_samples=30,rebalance_days=8,
-        **kwargs
+    options = dict(
+        feature_days=20, forecast_days=5,
+        minimum_training_samples=30, rebalance_days=8,
     )
+    options.update(kwargs)
+    return backtest_ml_dynamic_rebalance(path, **options)
 
 
 class SupervisedDynamicRebalanceTests(unittest.TestCase):
