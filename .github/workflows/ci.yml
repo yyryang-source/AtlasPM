@@ -67,3 +67,15 @@ jobs:
         run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --compare local_data/ci_ibkr_risk_audit.json --output local_data/ci_ibkr_risk_audit_second.json
       - name: Smoke test v0.4.15 comparison of two local unsigned risk audits
         run: python -m atlaspm.cli ibkr-audit-diff --previous local_data/ci_ibkr_risk_audit.json --current local_data/ci_ibkr_risk_audit_second.json --output local_data/ci_ibkr_risk_audit_diff.json
+      - name: Smoke test offline HTML dashboard (v0.4.16, synthetic no network)
+        run: |
+          cp local_data/ci_ibkr_margin_monitor.json local_data/margin_monitor_fixture.json
+          cp local_data/ci_ibkr_financing.json local_data/ibkr_financing_check.json
+          cp local_data/ci_ibkr_margin_stress.json local_data/ibkr_margin_stress.json
+          cp local_data/ci_ibkr_multiasset_budget.json local_data/ibkr_multiasset_budget.json
+          cp local_data/ci_ibkr_reverse_stress.json local_data/ibkr_reverse_stress.json
+          cp local_data/ci_ibkr_risk_audit.json local_data/ibkr_risk_audit.json
+          cp local_data/ci_ibkr_risk_audit_second.json local_data/ibkr_risk_audit_second.json
+          cp local_data/ci_ibkr_risk_audit_diff.json local_data/ibkr_risk_audit_diff.json
+          python -m atlaspm.cli ibkr-dashboard --folder local_data --output local_data/ci_atlaspm_dashboard.html
+          test -s local_data/ci_atlaspm_dashboard.html
