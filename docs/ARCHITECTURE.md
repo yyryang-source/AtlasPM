@@ -15,6 +15,8 @@
 - `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
 - `audit.py`: compare saved cash and margin curves and report stress warnings.
 - `tail_risk.py`: historical one-day Expected Shortfall from the worst fixed fraction of aligned trailing daily returns; optional research budget, not future prediction.
+- `institutional_ledger.py`: read-only cash/margin multi-asset ledger, synthetic broker net-liquidation reconciliation, Treasury clean/dirty valuation and option liabilities; no settled cashflow or broker feed.
+- `institutional_gate.py`: deterministic broker-preview-style paper intent preflight, not executable orders.
 - `risk_backtest.py`: opt-in historical risk-budget simulation using only past covariance, a cash sleeve below 1×, and a self-financing cash/loan ledger with zero cash yield.
 - `risk_budget.py`: static pre-trade read-only hypothetical constraints; separate from dynamic backtests.
 - `backtest.py`: rolling-window close-to-next-close simulated trading with constant-rate financing, fees, drifted positions, high-water drawdowns, and benchmark; optional one-session-delayed full-deleveraging stress scenario, but no broker liquidation model.
