@@ -130,3 +130,24 @@ jobs:
         run: python -m atlaspm.cli ml-model-tournament --file examples/synthetic_prices.csv --mode champion --min-train 30 --rebalance-days 10 --min-validated-rebalances 2 --max-exposure 1 --output local_data/ci_champion_tournament.json
       - name: Smoke test ensemble portfolio allocation
         run: python -m atlaspm.cli ml-model-tournament --file examples/synthetic_prices.csv --mode ensemble --min-train 30 --rebalance-days 10 --min-validated-rebalances 2 --max-exposure 1 --output local_data/ci_ensemble_tournament.json
+
+  atlas-original-native-ai:
+    name: in-house-model-training (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install original AtlasPM NumPy-only training extra
+        run: python -m pip install -e ".[native]"
+      - name: Train scratch dual-head model and validate no-leak + risk gates
+        run: python -m unittest discover -s tests -p "test_atlas_regimenet*.py" -v
+      - name: Exercise native original model walk-forward command
+        run: python -m atlaspm.cli atlas-native-backtest --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --max-exposure 1 --output local_data/ci_atlas_native.json

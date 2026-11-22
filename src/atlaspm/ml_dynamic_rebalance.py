@@ -190,9 +190,25 @@ def _select_allocation(
     account_drawdown: float,
     account_drawdown_trigger: float,
     drawdown_exposure_cap: float,
+    sleeve_weights: dict[str, float] | None = None,
+    additional_exposure_cap: float = 1.0,
 ) -> dict[str, Any]:
-    weights_by_name = inverse_volatility_weights(
-        dict(zip(symbols, forecasts)), max_weight=maximum_name_weight,
+    # Custom in-house predictors may choose the risky-sleeve composition,
+    # but they cannot bypass the same independent risk/exposure guardrails.
+    if sleeve_weights is None:
+        weights_by_name = inverse_volatility_weights(
+            dict(zip(symbols, forecasts)), max_weight=maximum_name_weight,
+        )
+    else:
+        if set(sleeve_weights) != set(symbols):
+            raise ValueError("Native sleeve must match all risk forecast symbols")
+        weights_by_name = {s: _real(
+            sleeve_weights[s], f"sleeve_weight_{s}", 0, maximum_name_weight
+        ) for s in symbols}
+        if abs(sum(weights_by_name.values())-1.0) > 1e-8:
+            raise ValueError("Native sleeve weights must sum to 1")
+    additional_exposure_cap = _real(
+        additional_exposure_cap, "additional_exposure_cap", 0, 1
     )
     weights = [weights_by_name[s] for s in symbols]
     # Weighted standalone vol is a conservative proxy that does not rely on
@@ -201,6 +217,7 @@ def _select_allocation(
     observed_es = _historical_tail_loss(trailing_daily_returns, weights)
     caps = {
         "maximum_cash_account_exposure": maximum_gross_exposure,
+        "additional_model_exposure_cap": additional_exposure_cap,
         "forecast_volatility_cap": target_annual_volatility / max(
             SIGMA_FLOOR, conservative_annual_risk
         ),

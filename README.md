@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.5.3 offline matured-only risk model tournament: rolling Ridge, native LightGBM, and trailing-volatility models compete or blend to drive historical dynamic rebalancing. All trade decisions are constrained 0–1x cash-only simulations with time-safe prediction validation, not a trained profitable or validated live investment system. No authenticated IBKR account financing or broker execution. Not investment advice.
+> **Status:** v0.6.0 first ORIGINAL AtlasPM architecture (Atlas RegimeNet v1): a from-scratch trained three-expert, dual-risk-and-return multiasset model with custom loss, allocation preference, and independent hard risk gates. Previous Ridge, LightGBM, Qlib-like model-family experiments remain benchmarks only. All model fits/rebalances are offline 0–1x cash-only and NOT validated for profit or live IBKR execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -75,6 +75,12 @@ Read [verified open-source model references, licenses and PowerShell training co
 The new `ml-model-tournament` command competes **Ridge, native LightGBM and traditional trailing volatility** using only *completed, past-origin* forecast outcomes. A model gets promoted only if its recent validated forward-risk MAE beats traditional risk forecasts by a configured margin, otherwise the system uses the untrained baseline. `--mode champion` picks the leading model, while `--mode ensemble` blends their risk forecasts with dynamic inverse-MAE weights. Both produce **automatic simulated asset/cash rebalances** and report separate shadow performance for each candidate, equal-weight buy/hold, costs, drawdowns, and chronology. No hindsight selection by final portfolio return or Sharpe.
 
 **All validation remains research-only**: no untouched final holdout has been independently certified, and no true broker data, margin or live/paper orders. [Read the model tournament methodology, anti-leak tests and Windows PowerShell commands](docs/ML_MODEL_TOURNAMENT.md).
+
+## v0.6.0: The first AtlasPM ORIGINAL model — not an open-source-model wrapper
+
+`atlas-native-backtest` now trains the internally designed **Atlas RegimeNet v1** directly from your local history. The softmax gate and three asset-aware expert networks jointly learn expected forward realized-risk and forward-return proxies. We implemented training gradients, asymmetric risk-underprediction penalty, an original risk-adjusted allocation score, and optional extra exposure caution, all subordinated to hard concentration, volatility, ES, market shock and drawdown limits.
+
+We are using standard public mathematical operations and optional NumPy **only for arrays**, with no imported fitted LightGBM/Ridge/Qlib model and no proprietary/pretrained checkpoints. The system is still an initial research baseline, not independently proven better than those baselines, nor validated for live orders. Read [native architecture, training command, model ownership claims and no-hindsight limitations](docs/ATLAS_NATIVE_MODEL.md).
 
 ## What works today
 
