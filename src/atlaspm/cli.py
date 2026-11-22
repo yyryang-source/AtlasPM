@@ -29,6 +29,7 @@ from atlaspm.ibkr_gateway import (
 )
 from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
 from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin, financing_redacted_summary
+from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_margin_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -227,6 +228,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_financing_check.json")
     )
 
+    monitor = sub.add_parser(
+        "ibkr-margin-monitor",
+        help="GET-only local Gateway portfolio summary monitor (or synthetic fixture)",
+    )
+    monitor.add_argument("--account", required=True)
+    monitor.add_argument("--fixture", type=Path, default=None)
+    monitor.add_argument("--allow-local-gateway", action="store_true")
+    monitor.add_argument("--url", default="https://localhost:5000/v1/api")
+    monitor.add_argument("--ca-file", type=Path, default=None)
+    monitor.add_argument("--max-age-seconds", type=int, default=600)
+    monitor.add_argument("--min-buffer-ratio", type=float, default=0.15)
+    monitor.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_margin_monitor.json")
+    )
+
     return parser
 
 
@@ -234,7 +250,38 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-financing-check":
+        if args.command == "ibkr-margin-monitor":
+            destination = require_private_output(args.output)
+            if (args.fixture is None) == (not args.allow_local_gateway):
+                raise ValueError(
+                    "Choose exactly one: --fixture OR --allow-local-gateway"
+                )
+            try:
+                if args.fixture is not None:
+                    fixture_data = json.loads(args.fixture.read_text(encoding="utf-8"))
+                    transport = FixtureGatewayTransport(fixture_data)
+                    fixture_mode = True
+                else:
+                    transport = LocalGatewayTransport(
+                        args.url, ca_file=str(args.ca_file) if args.ca_file else None
+                    )
+                    fixture_mode = False
+                diagnostic = collect_ibkr_margin_monitor(
+                    transport, account_id=args.account, fixture_mode=fixture_mode,
+                    max_field_age_seconds=args.max_age_seconds,
+                    min_buffer_ratio=args.min_buffer_ratio,
+                )
+            except (OSError, ValueError, TypeError, KeyError):
+                raise ValueError(
+                    "IBKR margin monitor failed validation or transport; inspect local setup and data"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_margin_console(diagnostic, str(args.output))
+        elif args.command == "ibkr-financing-check":
             destination = require_private_output(args.output)
             try:
                 capture_payload = json.loads(args.capture.read_text(encoding="utf-8"))
