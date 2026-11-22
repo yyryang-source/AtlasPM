@@ -86,7 +86,10 @@ def allocate_fusion_sleeve(
     trailing_returns: list[list[float]],
     *,
     max_weight: float,
+    mode: str = "shrinkage",
 ) -> dict[str, Any]:
+    if mode not in ("inverse_risk","downside","shrinkage"):
+        raise ValueError("Unknown Atlas Fusion allocator ablation mode")
     n=len(symbols)
     if not 2<=n<=12 or len(set(symbols))!=n:
         raise ValueError("Fusion allocation requires 2-12 distinct assets")
@@ -105,6 +108,10 @@ def allocate_fusion_sleeve(
     inverse=[1/x for x in combined]
     normalized=[x/sum(inverse) for x in inverse]
     prior=_project_capped_simplex(normalized,max_weight)
+    inverse_risk=[1/max(.03,v) for v in risk_forecasts]
+    simple_inverse=_project_capped_simplex(
+        [v/sum(inverse_risk) for v in inverse_risk],max_weight
+    )
     # Squared-risk objective balances estimated simultaneous losses with an
     # explicit tail-risk squared penalty, plus shrink to stable prior.
     covariance=[
@@ -119,8 +126,10 @@ def allocate_fusion_sleeve(
     ]
     scale=max(1.,max(sum(abs(v) for v in row) for row in covariance))
     matrix=[[x/scale for x in row] for row in covariance]
-    current=prior[:]
-    for _ in range(ITERATIONS):
+    current=(
+        simple_inverse[:] if mode == "inverse_risk" else prior[:]
+    )
+    for _ in range(ITERATIONS if mode == "shrinkage" else 0):
         gradient=[
             2*sum(matrix[i][j]*current[j] for j in range(n))
             +2*PRIOR_DISTANCE*(current[i]-prior[i])
@@ -138,6 +147,8 @@ def allocate_fusion_sleeve(
     )
     return {
         "weights":dict(zip(symbols,current)),
+        "mode":mode,
+        "inverse_risk_prior":dict(zip(symbols,simple_inverse)),
         "inverse_risk_downside_prior":dict(zip(symbols,prior)),
         "sample_correlation_shrunk_offdiag":correlation,
         "correlation_shrinkage_fixed":CORRELATION_SHRINK,
