@@ -293,7 +293,7 @@ def backtest_walk_forward(
             "Constant annual financing rate and bps trading costs are assumed; taxes, spreads, slippage, currency and cash yield are excluded.",
             ("Margin breach action is an illustrative next-close full deleveraging rule, NOT a broker liquidation model." if margin_policy != "none" else "Margin thresholds are illustrative only, not broker maintenance rules; forced liquidation is not modeled."),
             "A breach may worsen or cause insolvency before a next-close liquidation can execute.",
-            "If the final day triggers liquidation, no later session is available and the trigger remains pending."
+            "If the final day triggers liquidation, no later session is available and the trigger remains pending.",
             "Fixed current symbol universe introduces survivorship/selection bias; model performance does not imply future returns.",
         ],
     }
