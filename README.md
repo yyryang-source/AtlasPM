@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.13 offline reverse margin stress and hypothetical drawdown-threshold diagnostics, layered on v0.4.12 multiasset risk budgets. Optional IBKR Gateway reads are GET-only. No trained AI, authenticated financing debt proof, order submission, or real liquidation forecasting. Not investment advice.
+> **Status:** v0.4.14 local five-stage risk evidence-chain audit and unsigned SHA-256 drift diagnostics, layered on v0.4.9–v0.4.13 offline IBKR research features. Optional Gateway is read-only GET; no trained AI, authenticated financing-debt proof, live order submission or real IBKR liquidation forecasting. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -33,6 +33,12 @@ See [v0.4.12 Windows instructions and assumptions](docs/IBKR_MULTI_ASSET_BUDGET.
 The new `ibkr-reverse-stress` CLI consumes the private v0.4.12 synthetic budget output and assumed interest, maintenance and correlated shock sensitivities. It analytically finds the hypothetical market decline at which a stated liquidity-buffer floor, zero maintenance excess or zero NLV is reached. Results distinguish already-at-threshold, within-range and not-reached states; they **do not** predict IBKR liquidation prices and cannot grant broker risk permissions.
 
 See [v0.4.13 PowerShell commands and modeling boundaries](docs/IBKR_REVERSE_STRESS.md).
+
+## v0.4.14: Private risk evidence-chain audit
+
+The new `ibkr-risk-audit` command reviews five saved offline reports (margin monitor, financing claims, static stress, multiasset budget and reverse stress), checks account identity, cross-stage amounts and scenario arithmetic, counts hypothetical warnings, and optionally compares unsigned SHA-256 local-file digests against a previous audit. It never independently authenticates broker provenance or grants order permission; even a mathematically consistent result remains a hypothetical report.
+
+See [v0.4.14 PowerShell walkthrough and evidence caveats](docs/IBKR_RISK_CHAIN_AUDIT.md).
 
 ## What works today
 
