@@ -9,6 +9,7 @@ from typing import Any
 
 from atlaspm.audit import _load, audit_backtests
 from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.performance import historical_spy_diagnostics
 
 
 def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str, Any]:
@@ -19,6 +20,7 @@ def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str,
     """
     audit = audit_backtests(cash_path, margin_path)
     cash = _load(cash_path)
+    margin = _load(margin_path)
     curves = cash["equity_curve"]
     executions = cash.get("rebalances", [])
     if not executions or not isinstance(executions[0].get("execution_date"), str):
@@ -68,6 +70,12 @@ def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str,
         "sharpe_zero_risk_free_assumption": sharpe,
         "ending_equity_index": equity,
     }
+    active = historical_spy_diagnostics(
+        [p["date"] for p in curves],
+        [p["equity_index"] for p in curves],
+        [p["equity_index"] for p in margin["equity_curve"]],
+        [p["equity_index"] for p in spy_curve],
+    )
     result = {
         "method": "exact_date_independent_spy_buy_and_hold_comparison",
         "strategy_universe": audit["comparison_universe"],
@@ -83,6 +91,7 @@ def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str,
             "cagr_excess_vs_spy": audit["margin"]["annualized_compounded_return"] - spy_cagr,
         },
         "spy_curve": spy_curve,
+        "active_risk": active,
         "warnings": [
             "SPY is an independent market ETF reference, not a risk-matched portfolio.",
             "SPY uses vendor adjusted close, idealized buy-and-hold and no fees, taxes or slippage.",
