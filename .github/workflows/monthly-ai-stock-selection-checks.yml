@@ -1,0 +1,31 @@
+name: Monthly AI stock-selection research checks
+
+on:
+  push:
+    branches:
+      - feature/monthly-ai-stock-selection-v1
+  pull_request:
+    paths:
+      - "src/atlaspm/monthly_stock_selection.py"
+      - "tests/test_monthly_stock_selection.py"
+      - ".github/workflows/monthly-ai-stock-selection-checks.yml"
+  workflow_dispatch:
+
+jobs:
+  monthly-selector:
+    name: Fitted model and NYSE calendar month-end research check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install LightGBM and official exchange calendar dependencies
+        run: python -m pip install -e ".[ml,calendar]"
+      - name: Verify actual monthly selector and safe research outputs
+        run: python -m unittest discover -s tests -p "test_monthly_stock_selection.py" -v
+      - name: Verify V2 learning-to-rank was not changed
+        run: python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v
