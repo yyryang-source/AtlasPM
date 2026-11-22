@@ -73,6 +73,42 @@ LightGBM model saved as text plus feature schema, metadata and SHA256
 check. Ranking refuses metadata mismatch, altered model file, wrong
 training benchmark or inference prior to validation cutoff.
 
+## Score-tie diagnostics — avoid misleading Top N
+
+Gradient boosting can assign the **same score** to many securities. Equal
+displayed predictions now get identical *competition ranks*. A deterministic
+alphabetical display order **does not** imply an AI preference within a tie.
+The saved model does NOT have to be retrained for this reporting improvement.
+
+- selected.rank: competition rank, e.g. 1, 2, 3, 3, 3
+- selected.display_position: list position only (not a different AI rank)
+- selected.tie_count and selected.tied: show indistinguishable scores
+- ranking_diagnostics: distinct displayed scores, largest tied group, how
+  many stocks are tied, and whether the requested Top N cuts through a tie
+- model_diagnostics: best_iteration, saved tree count, per-feature gain
+  and split counts (diagnostics, not guaranteed causal explanations)
+
+If ties_cross_top_n_cutoff=true, the first N output rows do not comprise
+a uniquely ranked Top N. Mark rank_quality REVIEW_REQUIRED and do not
+interpret alphabetical order as AI portfolio selection.
+
+```powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git fetch origin
+git switch --track origin/feature/ai-ranker-tie-diagnostics-v1
+# If the branch already exists, use git switch feature/ai-ranker-tie-diagnostics-v1
+.\.venv\Scripts\python.exe -m pip install -e ".[ml]"
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_ai_stock_ranker.py" -v
+
+# Re-score the existing trained model, no new training necessary
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-ai-rank --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --model local_data\atlas_ai_stock_lgbm.txt --as-of 2026-11-20 --top 20 --output local_data\atlas_ai_stock_rankings_v2.json
+
+$r = Get-Content local_data\atlas_ai_stock_rankings_v2.json -Raw | ConvertFrom-Json
+$r.ranking_diagnostics | Format-List
+$r.model_diagnostics | Format-List
+$r.selected | Select-Object rank,display_position,symbol,predicted_forward_excess_percent,tie_count | Format-Table -AutoSize
+```
+
 ## Important limits
 
 A smoke-test model trained on today's 38 surviving large caps is NOT
