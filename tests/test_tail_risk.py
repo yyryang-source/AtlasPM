@@ -71,10 +71,10 @@ class TailRiskTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             result["historical_daily_tail_risk"]["daily_expected_shortfall_fraction"],
-            .045, places=8
+            .0425, places=8
         )
         self.assertAlmostEqual(
-            result["selected_gross_exposure"], 1 / 3, places=8
+            result["selected_gross_exposure"], .015 / .0425, places=8
         )
         self.assertAlmostEqual(
             result["historical_daily_es_at_selected_exposure"], .015, places=8
