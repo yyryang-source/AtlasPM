@@ -41,3 +41,5 @@ jobs:
         run: python -m atlaspm.cli plan-equity --ledger examples/institutional_ledger.json --plan examples/institutional_equity_plan.json --output local_data/ci_equity_plan.json
       - name: Smoke test synthetic combined multi-asset basket
         run: python -m atlaspm.cli plan-basket --ledger examples/institutional_batch_ledger.json --plan examples/institutional_batch_plan.json --output local_data/ci_institutional_batch.json
+      - name: Smoke test offline Paper OMS replay (synthetic fills)
+        run: python -m atlaspm.cli oms-replay --ledger examples/institutional_batch_ledger.json --plan examples/institutional_batch_plan.json --events examples/paper_oms_events.json --output local_data/ci_paper_oms.json
