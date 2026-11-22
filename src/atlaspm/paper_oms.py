@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 from atlaspm.institutional_batch import propose_multi_asset_batch
 from atlaspm.institutional_ledger import build_institutional_ledger, _position, _timestamp
+from atlaspm.oms_controls import chain_audit_events, post_fill_risk_snapshot, verify_audit_chain
 
 
 def _map(x: object, name: str) -> dict[str, Any]:
@@ -97,9 +98,12 @@ def replay_paper_orders(
     fill_records: dict[str, dict[str, Any]] = {}
     settled_executions: set[str] = set()
     audit: list[dict[str, Any]] = []
+    post_fill_risk_snapshots: list[dict[str, Any]] = []
+    post_fill_breaches: list[str] = []
     sequence = 0
     last_time: datetime | None = None
     halted = False
+    halt_reason: str | None = None
     duplicate_count = 0
 
     def marked_equity() -> tuple[float, list[dict[str, Any]]]:
@@ -122,7 +126,7 @@ def replay_paper_orders(
             duplicate_count += 1
             continue
         if halted:
-            raise ValueError("Unknown order outcome: freeze event replay until reconciliation")
+            raise ValueError(f"{halt_reason}: freeze event replay until reconciliation")
         seq = e.get("sequence")
         if isinstance(seq, bool) or not isinstance(seq, int) or seq <= sequence:
             raise ValueError("Unique journal sequences must be strictly increasing integers")
@@ -163,6 +167,7 @@ def replay_paper_orders(
                 raise ValueError("Unknown outcome requires a nonterminal submitted order")
             state["status"] = "UNKNOWN"
             halted = True
+            halt_reason = "Unknown order outcome"
         elif event_type == "FILL":
             execution_id = _text(e.get("execution_id"), "execution_id")
             if execution_id in seen_exec:
@@ -298,10 +303,31 @@ def replay_paper_orders(
         else:
             raise ValueError(f"Unsupported paper OMS event type: {event_type}")
 
-        marked, _ = marked_equity()
+        marked, marked_positions = marked_equity()
         gap = (marked - beginning_equity) - expected_equity_change
         if abs(gap) > max(0.01, beginning_equity * 1e-10):
             raise ValueError("Paper ledger failed independent cash/debt/mark reconciliation")
+        if event_type == "FILL":
+            after_fill = post_fill_risk_snapshot(
+                marked_positions,
+                marked_net_liquidation=marked,
+                settled_cash=cash,
+                unsettled_payable=payable,
+                margin_debt=debt,
+                account_type=account["account_type"],
+                max_gross_leverage=plan["policy"]["max_gross_leverage"],
+                max_stress_loss_fraction=plan["policy"]["max_stress_loss_fraction"],
+                equity_decline_fraction=plan["stress_assumptions"]["equity_decline_fraction"],
+                treasury_decline_fraction=plan["stress_assumptions"]["treasury_decline_fraction"],
+            )
+            post_fill_risk_snapshots.append({
+                "event_id": event_id, "leg_id": leg_id,
+                **after_fill,
+            })
+            if after_fill["breaches"]:
+                post_fill_breaches.extend(after_fill["breaches"])
+                halted = True
+                halt_reason = "Post-fill risk budget breached"
         seen_events[event_id] = dict(e)
         audit.append({
             "event_id": event_id, "sequence": seq,
@@ -309,8 +335,16 @@ def replay_paper_orders(
             "type": event_type, "before_state": prior_state,
             "after_state": state["status"], "marked_net_liquidation": marked,
             "reconciliation_gap": gap,
+            "source_event": dict(e),
+            "post_fill_risk_state": (
+                post_fill_risk_snapshots[-1]["post_fill_risk_state"]
+                if event_type == "FILL" else None
+            ),
         })
     ending_nlv, marked_positions = marked_equity()
+    audit, audit_root = chain_audit_events(audit)
+    if not verify_audit_chain(audit, audit_root):
+        raise ValueError("Audit hash chain failed its self-consistency check")
     unresolved = [x["leg_id"] for x in orders.values() if x["status"] == "UNKNOWN"]
     total_credit = sum(
         x.get("broker_recognized_collateral_value", 0.0)
@@ -321,12 +355,18 @@ def replay_paper_orders(
     return {
         "method": "offline_event_replayed_paper_oms",
         "batch_id": approval["batch_id"], "account_id": account_id,
-        "decision": "HALT_RECONCILIATION" if unresolved else "PAPER_REPLAY_COMPLETED",
+        "decision": ("HALT_RECONCILIATION" if unresolved else
+                     "HALT_RISK" if post_fill_breaches else "PAPER_REPLAY_COMPLETED"),
         "live_execution_enabled": False,
         "broker_preview_is_authenticated": False,
         "approved_synthetic_preflight": True,
         "orders": list(orders.values()),
         "audit_events": audit,
+        "audit_root_sha256": audit_root,
+        "audit_hash_chain_self_consistent": True,
+        "post_fill_risk_snapshots": post_fill_risk_snapshots,
+        "post_fill_risk_breaches": sorted(set(post_fill_breaches)),
+        "broker_margin_rechecked_after_fills": False,
         "duplicate_events_ignored": duplicate_count,
         "unresolved_orders": unresolved,
         "fill_records": fill_records,
@@ -349,5 +389,7 @@ def replay_paper_orders(
             "Sale proceeds settle only via explicitly replayed SETTLE_SALE events and cannot pay earlier buys.",
             "A broker may fill orders during cancellation or after connectivity loss; UNKNOWN_OUTCOME halts replay.",
             "No real-time broker buying power, intraday margin, exchange calendar or actual execution safety is modeled.",
+            "Each fill is checked against static gross and stress budgets; a breach halts subsequent replay events.",
+            "The SHA-256 chain detects local modification of a saved audit but is unsigned; it does NOT authenticate broker origin.",
         ],
     }
