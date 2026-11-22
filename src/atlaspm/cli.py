@@ -121,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
                 encoding="utf-8",
             )
             report = {key: value for key, value in report.items() if key != "spy_curve"}
+            diagnostics = report.get("active_risk")
+            if isinstance(diagnostics, dict):
+                report["active_risk"] = {
+                    key: value for key, value in diagnostics.items()
+                    if key != "calendar_years"
+                }
+                report["active_risk"]["annual_breakdown_saved_to_file"] = True
             report["written"] = str(args.output)
         elif args.command == "audit":
             report = audit_backtests(args.cash, args.margin)
