@@ -87,7 +87,7 @@ def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str,
             "SPY is an independent market ETF reference, not a risk-matched portfolio.",
             "SPY uses vendor adjusted close, idealized buy-and-hold and no fees, taxes or slippage.",
             "Portfolio stocks were selected with hindsight; survivorship and tuning bias remain.",
-            "No broker margin liquidation is reflected in these historical strategy files.",
+            "Even when a margin scenario uses modeled deleveraging, it is NOT real broker liquidation.",
         ],
     }
     return result
