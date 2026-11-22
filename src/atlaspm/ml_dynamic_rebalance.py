@@ -501,9 +501,19 @@ def backtest_ml_dynamic_rebalance(
 
 
 def redacted_ml_console(result: dict[str, Any], output: str) -> dict[str, Any]:
+    # Absolute paths reveal Windows profile names, and JSON-escaped backslashes
+    # cannot safely be removed with a raw string replacement. Normalize first.
+    # The CLI already requires a destination under local_data/, but keep the
+    # summary function fail-closed if used independently in future code.
+    private_root = (Path.cwd() / "local_data").resolve()
+    target = Path(output).expanduser().resolve()
+    try:
+        relative_output = target.relative_to(private_root)
+    except ValueError:
+        raise ValueError("ML summary output must be in local_data/") from None
     forecast = result["forecast_validation"]
     return {
-        "written":output,
+        "written": str(Path("local_data") / relative_output),
         "method":result["method"],
         "status":result["status"],
         "model_family":result["model_family"],

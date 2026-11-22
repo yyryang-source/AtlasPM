@@ -1,4 +1,4 @@
-"""v0.5.0 CLI smoke tests: supervised ML research stays local and non-executable."""
+"""v0.5.1 cross-platform ML CLI privacy and synthetic backtest tests."""
 
 import contextlib
 import io
@@ -40,9 +40,18 @@ class MLDynamicRebalanceCLITests(unittest.TestCase):
             self.assertFalse(report["live_execution_enabled"])
             self.assertFalse(report["model_validated_for_live_trading"])
             self.assertNotIn("FAKE_A", stdout.getvalue())
-            self.assertNotIn("trained_ml_backtest.json", stdout.getvalue().replace(
-                str(output), ""
-            ))
+            # JSON escapes Windows backslashes, so never try to strip the
+            # serialized absolute path via raw str.replace(str(output), "").
+            # A safe report MAY show the output filename, but must NEVER
+            # disclose the user's absolute Windows profile path.
+            self.assertEqual(
+                summary["written"],
+                str(Path("local_data") / output.relative_to(private)),
+            )
+            self.assertFalse(Path(summary["written"]).is_absolute())
+            self.assertNotIn(str(private.resolve()), stdout.getvalue())
+            self.assertNotIn(str(output.resolve()), stdout.getvalue())
+            self.assertNotIn(str(private.resolve()), json.dumps(summary))
 
     def test_cli_rejects_public_output_and_margin_leverage(self):
         with contextlib.redirect_stderr(io.StringIO()):

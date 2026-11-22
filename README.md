@@ -52,6 +52,10 @@ Run `ibkr-dashboard` to create `local_data/atlaspm_dashboard.html`, then open th
 
 See [v0.4.16 Windows PowerShell quick start](docs/IBKR_DASHBOARD.md).
 
+## v0.5.1: Windows path privacy and ML test compatibility fix
+
+The native Windows CLI test now inspects parsed JSON instead of trying to remove a raw absolute path from escaped JSON output. The `ml-rebalance-backtest` console `written` field now always reports a project-relative `local_data/` path (no Windows username or absolute path), while complete trained-model data remain private. GitHub CI now includes a Windows Python 3.13/PowerShell regression job as well as the existing Python 3.12–3.14 Linux test matrix. No changes to the trained forecasting model or trading permissions.
+
 ## v0.5.0: First trained AI/ML dynamic portfolio rebalancing baseline
 
 The new `ml-rebalance-backtest` CLI fits **supervised ridge-regression risk forecasts** independently for every asset, using a strict past-only training timeline, and automatically rebalances the hypothetical portfolio across assets and cash at each simulated rebalance date. Exposure is capped by predicted volatility, historical daily tail losses, market shock budgets, and account drawdown limits. It compares trained ML to an otherwise identical untrained trailing-volatility allocator and an equal-weight buy-and-hold portfolio, including fee and slippage assumptions.
