@@ -23,6 +23,9 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 - [x] Initial **read-only single-equity BUY/SELL planner** connected to the reconciled ledger and central risk gate; projects share count, cash, borrowing and costs
 - [x] Require order-bound mock broker preview and reject misaligned account/side/ticker/quantity/limit price/debt
 - [x] Reserve unsettled liabilities from projected available settled cash and fail closed on missing preview or stale marks
+- [x] Research-only coordinated single-account equity, existing Treasury, long put and margin repayment basket; matched synthetic combined preview and separate per-leg RMS vetoes
+- [x] Block use of unsettled equity-sale proceeds for immediate purchases, prevent new Treasury collateral double counting and check covered puts
+- [ ] Authenticated per-leg broker What-If previews and multi-asset partial-fill/order-state orchestration
 - [ ] Full target-weight rebalancing, multi-leg collateral/option handling, broker order previews and event-sourced settled cash accounting
 - [ ] Pre- and post-trade pro forma account simulation, margin buffer and collateral encumbrance.
 - [ ] Risk budgets: VaR, ES, drawdown, liquidity, correlated-equity and yield curve stress, financing sensitivity.
