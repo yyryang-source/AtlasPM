@@ -12,7 +12,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli audit --cash local_data\backtest_cash.json --margin local_data\backtest_margin_2x.json --output local_data\risk_audit.json
 ```
 
-The audit prints a concise risk comparison and saves `local_data\risk_audit.json` with full calendar-year returns. That folder is excluded by `.gitignore`.
+The audit includes any optional modeled forced-deleveraging events and prints a concise risk comparison and saves `local_data\risk_audit.json` with full calendar-year returns. That folder is excluded by `.gitignore`.
 
 ## Outputs
 
@@ -29,6 +29,6 @@ The first reported calendar year may be incomplete. Calendar-year figures use th
 
 The audit rejects unequal date grids, different symbols, mismatched backtest settings, incorrect case labels (cash must use 1× leverage; the margin scenario must use more than 1×), inconsistent maintenance counts, or a mismatch between the final equity curve and the reported ending equity.
 
-**A run with maintenance breaches is not an investable 2× track record**: the current simulator does not model the broker's liquidation actions or changing house-margin rules. Even runs without a simulated breach are not validated for live trading.
+**A run with maintenance breaches is not an investable 2× track record**: the simulator does not model the broker's actual liquidation actions (even if an optional synthetic deleveraging rule is enabled) or changing house-margin rules. Even runs without a simulated breach are not validated for live trading.
 
 This audit does not solve survivorship bias, vendor-adjustment issues, future information in symbol selection, changing financing rates, taxes, price impact, or execution timing uncertainty. It is a tool for finding problems before moving to more realistic broker simulation and independent benchmark testing.
