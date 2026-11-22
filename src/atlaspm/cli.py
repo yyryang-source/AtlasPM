@@ -498,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
                 "executed_rebalances": result["executed_rebalances"],
                 "portfolio": result["portfolio"],
                 "benchmark": result["benchmark"],
+                "equal_weight_universe": result["equal_weight_universe"],
                 "relative": result["relative"],
                 "live_execution_enabled": False,
                 "data_caution": "Surviving ticker universe; NOT survivorship-safe or certified alpha.",
