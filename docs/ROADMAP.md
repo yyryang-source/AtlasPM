@@ -126,6 +126,18 @@
 - [x] Local example and CLI, regression tests and network-free GitHub Actions smoke run
 - [ ] Broker-authenticated What-If requests, order journal/partial fills and real options/UST data
 
+## v0.4.4 — offline paper OMS replay (committed; awaiting local Windows validation)
+
+- [x] Recheck the synthetic approved basket before accepting local paper order events
+- [x] SUBMIT/ACK/FILL/CANCEL_REQUEST/CANCELED/REJECT/UNKNOWN_OUTCOME event state machine
+- [x] Partial fills and idempotent duplicate event IDs / execution IDs
+- [x] Equity, Treasury, long put and margin repayment fill accounting
+- [x] Explicit later-date sale settlement, without instantly spending unsettled receivables
+- [x] Independent account net-liquidation reconciliation after every unique event
+- [x] Halt replay on an UNKNOWN_OUTCOME to avoid assuming a disconnected order failed
+- [x] Synthetic example, offline unit tests and CI smoke CLI
+- [ ] Real broker read-only order/position reconciliation, persisted event sourcing, true market calendar, post-fill risk repricing and access controls
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
