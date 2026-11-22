@@ -600,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
                 "scored_count": result["scored_count"],
                 "excluded_count": result["excluded_count"],
                 "selected": result["selected"],
+                "ranking_diagnostics": result["ranking_diagnostics"],
+                "model_diagnostics": result["model_diagnostics"],
                 "written": str(destination.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
             }
