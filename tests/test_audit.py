@@ -1,12 +1,14 @@
 """Risk audit checks for matching cash/margin JSON backtests."""
 
-import copy
+import contextlib
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from atlaspm.audit import audit_backtests
+from atlaspm.cli import main
 
 
 def example_report(leverage: float, breaches: bool = False) -> dict:
@@ -62,6 +64,24 @@ class AuditTest(unittest.TestCase):
             result["cash"]["calendar_year_returns"][1]["return"],
             0.95 / 0.9 - 1
         )
+
+    def test_cli_writes_complete_calendar_breakdown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cash = self._write(folder, "cash", example_report(1.0))
+            margin = self._write(folder, "margin", example_report(2.0, True))
+            output = Path(folder) / "risk_audit.json"
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                code = main([
+                    "audit", "--cash", str(cash),
+                    "--margin", str(margin), "--output", str(output),
+                ])
+            self.assertEqual(code, 0)
+            console = json.loads(printed.getvalue())
+            self.assertEqual(console["written"], str(output))
+            self.assertNotIn("calendar_year_returns", console["cash"])
+            saved = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(len(saved["cash"]["calendar_year_returns"]), 2)
 
     def test_rejects_changed_universe(self):
         with tempfile.TemporaryDirectory() as folder:
