@@ -1,0 +1,25 @@
+{
+  "_synthetic_fixture": "All fields fictional and supplied. Never a real IBKR API/statement record.",
+  "source": "synthetic_margin_fixture",
+  "account_id": "DU1234567",
+  "currency": "USD",
+  "segment": "SECURITIES",
+  "basis": "CURRENT",
+  "as_of_utc": "SAME_AS_SYNTHETIC_CAPTURE",
+  "max_age_seconds": 600,
+  "max_capture_skew_seconds": 300,
+  "min_excess_liquidity_to_nlv": 0.10,
+  "margin_summary": {
+    "NetLiquidation": 123950,
+    "EquityWithLoanValue": 110000,
+    "InitMarginReq": 50000,
+    "MaintMarginReq": 30000,
+    "AvailableFunds": 60000,
+    "ExcessLiquidity": 80000
+  },
+  "financing": {
+    "loan_principal_from_statement_usd": 49950,
+    "loan_principal_from_activity_usd": 49950,
+    "accrued_interest_from_statement_usd": 0
+  }
+}

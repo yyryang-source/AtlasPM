@@ -28,6 +28,7 @@ from atlaspm.ibkr_gateway import (
     require_private_output,
 )
 from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
+from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin, financing_redacted_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -215,6 +216,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_mapping_check.json")
     )
 
+    financing = sub.add_parser(
+        "ibkr-financing-check",
+        help="Offline IBKR financing principal and current margin summary cross-check",
+    )
+    financing.add_argument("--capture", type=Path, required=True)
+    financing.add_argument("--mapping", type=Path, required=True)
+    financing.add_argument("--statement", type=Path, required=True)
+    financing.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_financing_check.json")
+    )
+
     return parser
 
 
@@ -222,7 +234,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-map-check":
+        if args.command == "ibkr-financing-check":
+            destination = require_private_output(args.output)
+            try:
+                capture_payload = json.loads(args.capture.read_text(encoding="utf-8"))
+                mapping_payload = json.loads(args.mapping.read_text(encoding="utf-8"))
+                margin_payload = json.loads(args.statement.read_text(encoding="utf-8"))
+                diagnostic = reconcile_ibkr_financing_margin(
+                    capture_payload, mapping_payload, margin_payload
+                )
+            except (ValueError, KeyError, TypeError) as exc:
+                # Never include raw identifiers, amounts or malformed input in stderr.
+                raise ValueError("Private financing data failed validation; inspect local inputs") from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = financing_redacted_summary(diagnostic, str(args.output))
+        elif args.command == "ibkr-map-check":
             destination = require_private_output(args.output)
             capture_payload = json.loads(args.capture.read_text(encoding="utf-8"))
             mapping_payload = json.loads(args.mapping.read_text(encoding="utf-8"))
