@@ -47,6 +47,7 @@ from atlaspm.us_market_prices import sync_us_market_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
+from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -419,6 +420,28 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    alpha_gate = sub.add_parser(
+        "stock-alpha-gate",
+        help="Build rank-percentile allowlist for monthly quant research, never order permission",
+    )
+    alpha_gate.add_argument("--monthly-report", type=Path, required=True)
+    alpha_gate.add_argument("--top-percent", type=float, default=10.0)
+    alpha_gate.add_argument("--max-ranked-names", type=int, default=50)
+    alpha_gate.add_argument("--minimum-scored-names", type=int, default=500)
+    alpha_gate.add_argument("--minimum-listing-coverage-pct", type=float, default=90)
+    alpha_gate.add_argument("--maximum-model-age-days", type=int, default=180)
+    alpha_gate.add_argument("--output", type=Path, required=True)
+    alpha_gate.add_argument("--overwrite", action="store_true")
+
+    alpha_check = sub.add_parser(
+        "stock-alpha-check",
+        help="Check hypothetical NEW/INCREASE or REDUCE/CLOSE against alpha universe",
+    )
+    alpha_check.add_argument("--gate", type=Path, required=True)
+    alpha_check.add_argument("--symbol", required=True)
+    alpha_check.add_argument("--action", required=True)
+    alpha_check.add_argument("--decision-date", required=True)
+
     monthly = sub.add_parser(
         "stock-ai-monthly",
         help="Produce calendar-correct NYSE month-end pure AI stock research; no orders",
@@ -591,7 +614,44 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-ai-monthly":
+        if args.command == "stock-alpha-gate":
+            source = require_private_output(args.monthly_report)
+            destination = require_private_output(args.output)
+            if source.suffix.lower() != ".json" or destination.suffix.lower() != ".json":
+                raise ValueError("Alpha eligibility input/output must be .json under local_data")
+            if source == destination:
+                raise ValueError("Alpha gate cannot overwrite monthly input report")
+            candidate_gate = build_from_file(
+                source, top_percent=args.top_percent,
+                max_ranked_names=args.max_ranked_names,
+                minimum_scored_names=args.minimum_scored_names,
+                minimum_listing_coverage_pct=args.minimum_listing_coverage_pct,
+                maximum_model_age_days=args.maximum_model_age_days,
+            )
+            written = write_eligibility_json(
+                candidate_gate, destination, overwrite=args.overwrite
+            )
+            report = {
+                "month": candidate_gate["month"],
+                "valid_for_month": candidate_gate["valid_for_month"],
+                "eligibility_status": candidate_gate["research_eligibility_status"],
+                "eligible_count": candidate_gate["eligible_count"],
+                "blocked_reasons": candidate_gate["blocked_reasons"],
+                "eligible_symbols": candidate_gate["eligible_symbols"],
+                "written": written,
+                "live_execution_enabled": False,
+                "automated_handoff_approved": False,
+            }
+        elif args.command == "stock-alpha-check":
+            source = require_private_output(args.gate)
+            if source.suffix.lower() != ".json":
+                raise ValueError("Alpha gate must be private .json")
+            candidate_gate = json.loads(source.read_text(encoding="utf-8"))
+            report = research_action_check(
+                candidate_gate, symbol=args.symbol, action=args.action,
+                decision_date=args.decision_date,
+            )
+        elif args.command == "stock-ai-monthly":
             output_probe = require_private_output(args.output_dir / "_output_probe.json")
             model_path = require_private_output(args.model)
             output_dir = output_probe.parent
