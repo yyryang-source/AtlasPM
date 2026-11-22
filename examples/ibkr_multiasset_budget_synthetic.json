@@ -1,0 +1,117 @@
+{
+  "_synthetic_fixture": "Three fictional research sleeves totaling v0.4.11's $60,000 shockable amount; they DO NOT represent actual IBKR holdings.",
+  "method": "hypothetical_multiasset_risk_budget",
+  "assets": [
+    {
+      "id": "SYN_EQ_A",
+      "type": "equity",
+      "market_value_usd": 25000,
+      "annual_volatility": 0.25
+    },
+    {
+      "id": "SYN_EQ_B",
+      "type": "equity",
+      "market_value_usd": 20000,
+      "annual_volatility": 0.4
+    },
+    {
+      "id": "SYN_EQ_C",
+      "type": "equity",
+      "market_value_usd": 15000,
+      "annual_volatility": 0.18
+    }
+  ],
+  "base_correlation": [
+    [
+      1,
+      0.55,
+      0.15
+    ],
+    [
+      0.55,
+      1,
+      0.3
+    ],
+    [
+      0.15,
+      0.3,
+      1
+    ]
+  ],
+  "risk_limits": {
+    "max_one_day_99pct_var_fraction_of_nlv": 0.018,
+    "max_gross_exposure_to_nlv": 1,
+    "min_excess_liquidity_to_nlv": 0.15,
+    "max_assumed_annual_interest_to_nlv": 0.04
+  },
+  "scenarios": [
+    {
+      "name": "baseline_independent_policy",
+      "asset_returns": {
+        "SYN_EQ_A": 0,
+        "SYN_EQ_B": 0,
+        "SYN_EQ_C": 0
+      },
+      "maintenance_multiplier": 1,
+      "horizon_days": 0
+    },
+    {
+      "name": "correlated_drawdown_and_higher_house_margin",
+      "asset_returns": {
+        "SYN_EQ_A": -0.2,
+        "SYN_EQ_B": -0.35,
+        "SYN_EQ_C": -0.15
+      },
+      "correlation_override": [
+        [
+          1,
+          0.95,
+          0.95
+        ],
+        [
+          0.95,
+          1,
+          0.95
+        ],
+        [
+          0.95,
+          0.95,
+          1
+        ]
+      ],
+      "volatility_multiplier": 1.25,
+      "maintenance_multiplier": 1.3,
+      "horizon_days": 30,
+      "apr_additive": 0.01
+    },
+    {
+      "name": "severe_multiasset_shock",
+      "asset_returns": {
+        "SYN_EQ_A": -0.6,
+        "SYN_EQ_B": -0.8,
+        "SYN_EQ_C": -0.5
+      },
+      "correlation_override": [
+        [
+          1,
+          0.95,
+          0.95
+        ],
+        [
+          0.95,
+          1,
+          0.95
+        ],
+        [
+          0.95,
+          0.95,
+          1
+        ]
+      ],
+      "volatility_multiplier": 2,
+      "maintenance_multiplier": 3,
+      "horizon_days": 365,
+      "apr_additive": 0.03
+    }
+  ]
+}
