@@ -38,6 +38,14 @@
 - [x] Report leveraged maintenance-breach dates, calendar-year returns and benchmark comparisons
 - [x] Flag model risk and refuse claims of live execution suitability
 
+## v0.2.3 — independent benchmark and margin stress mode (implemented, awaiting local validation)
+
+- [x] Optional delayed, full deleveraging response to hypothetical maintenance breaches
+- [x] Preserve original non-liquidating scenario by default
+- [x] SPY buy-and-hold benchmark downloaded independently and aligned without forward fill
+- [x] Offline regression tests for SPY alignment and forced-deleveraging state transitions
+- [ ] Validate 2003–2026 strategy impact with real user-downloaded SPY data and margin stress outputs
+
 ## v0.3 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
