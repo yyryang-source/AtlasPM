@@ -39,6 +39,7 @@ from atlaspm.ibkr_dashboard import build_dashboard_view, render_dashboard_html, 
 from atlaspm.ml_dynamic_rebalance import backtest_ml_dynamic_rebalance, redacted_ml_console
 from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tournament_console
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
+from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -397,6 +398,16 @@ def build_parser() -> argparse.ArgumentParser:
     native.add_argument("--fee-bps", type=float, default=5.0)
     native.add_argument("--slippage-bps", type=float, default=5.0)
 
+    audit = sub.add_parser(
+        "atlas-native-audit",
+        help="RiskNet-vs-dual-vs-naive paired historical robustness audit (no training or orders)",
+    )
+    audit.add_argument("--risknet-report", type=Path, required=True)
+    audit.add_argument("--dual-report", type=Path, required=True)
+    audit.add_argument("--output", type=Path, default=Path("local_data/atlas_risknet_audit.json"))
+    audit.add_argument("--block-days", type=int, default=21)
+    audit.add_argument("--bootstrap-reps", type=int, default=500)
+
     return parser
 
 
@@ -404,7 +415,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "atlas-native-backtest":
+        if args.command == "atlas-native-audit":
+            inputs = [
+                require_private_output(args.risknet_report),
+                require_private_output(args.dual_report),
+            ]
+            destination = require_private_output(args.output)
+            if any(p.suffix.lower() != ".json" for p in [*inputs, destination]):
+                raise ValueError("Audit inputs and output must be local_data .json files")
+            if inputs[0] == inputs[1] or destination in inputs:
+                raise ValueError("Native audit needs distinct reports and cannot overwrite input")
+            report_full = audit_atlas_risknet(
+                inputs[0], inputs[1],
+                block_days=args.block_days,
+                iterations=args.bootstrap_reps,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(report_full, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = redacted_audit_console(report_full, args.output)
+        elif args.command == "atlas-native-backtest":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":
                 raise ValueError("Native Atlas model output must be private .json")
