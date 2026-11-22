@@ -18,6 +18,7 @@ from atlaspm.risk_budget import check_risk_budget
 from atlaspm.risk_backtest import backtest_risk_budget
 from atlaspm.institutional_gate import assess_institutional_intent
 from atlaspm.institutional_ledger import build_institutional_ledger
+from atlaspm.institutional_rebalance import plan_equity_trade
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,6 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/institutional_ledger_report.json")
     )
 
+    planner = sub.add_parser(
+        "plan-equity",
+        help="Read-only BUY/SELL equity proposal against ledger and RMS",
+    )
+    planner.add_argument("--ledger", type=Path, required=True)
+    planner.add_argument("--plan", type=Path, required=True)
+    planner.add_argument(
+        "--output", type=Path, default=Path("local_data/equity_trade_plan.json")
+    )
+
     return parser
 
 
@@ -147,7 +158,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ledger-report":
+        if args.command == "plan-equity":
+            ledger_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
+            plan_payload = json.loads(args.plan.read_text(encoding="utf-8"))
+            report = plan_equity_trade(ledger_payload, plan_payload)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report = {
+                "written": str(args.output),
+                "decision": report["decision"],
+                "risk_state": report["rms"]["risk_state"],
+                "client_order_id": report["client_order_id"],
+                "account_id": report["account_id"],
+                "action": report["action"],
+                "symbol": report["symbol"],
+                "shares": report["shares"],
+                "trade_notional": report["trade_notional"],
+                "estimated_fee": report["estimated_fee"],
+                "pro_forma_after_unexecuted_trade": report["pro_forma_after_unexecuted_trade"],
+                "eligible_for_paper_intent": report["eligible_for_paper_intent"],
+                "live_execution_enabled": report["live_execution_enabled"],
+                "block_reasons": report["block_reasons"],
+                "warnings": report["warnings"],
+            }
+        elif args.command == "ledger-report":
             payload = json.loads(args.file.read_text(encoding="utf-8"))
             report = build_institutional_ledger(payload)
             args.output.parent.mkdir(parents=True, exist_ok=True)
