@@ -76,6 +76,9 @@ class SpyBenchmarkTest(unittest.TestCase):
         self.assertEqual(report["spy_curve"][0]["date"], "2024-01-03")
         self.assertEqual(report["strategy_universe"], ["A", "B"])
         self.assertNotIn("SPY", report["strategy_universe"])
+        self.assertIn("active_risk", report)
+        self.assertEqual(len(report["active_risk"]["calendar_years"]), 1)
+        self.assertIn("beta_to_spy", report["active_risk"]["full_period"]["cash"])
 
     def test_missing_date_is_rejected_not_forward_filled(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -96,10 +99,13 @@ class SpyBenchmarkTest(unittest.TestCase):
                     "--spy", str(spy), "--output", str(destination)
                 ])
             self.assertEqual(code, 0)
-            self.assertNotIn("spy_curve", json.loads(stdout.getvalue()))
-            self.assertEqual(
-                len(json.loads(destination.read_text(encoding="utf-8"))["spy_curve"]), 3
-            )
+            console = json.loads(stdout.getvalue())
+            self.assertNotIn("spy_curve", console)
+            self.assertNotIn("calendar_years", console["active_risk"])
+            self.assertTrue(console["active_risk"]["annual_breakdown_saved_to_file"])
+            saved = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(len(saved["spy_curve"]), 3)
+            self.assertEqual(len(saved["active_risk"]["calendar_years"]), 1)
 
 
 if __name__ == "__main__":
