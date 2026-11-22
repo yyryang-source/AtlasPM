@@ -620,7 +620,10 @@ def backtest_atlas_native(
             "cumulative_traded_notional_over_equity": state["turnover"],
         }
     return {
-        "method": "atlaspm_original_regimenet_v1_walk_forward",
+        "method": (
+            "atlaspm_original_risknet_v2_walk_forward" if architecture == "risknet"
+            else "atlaspm_original_regimenet_v1_walk_forward"
+        ),
         "status": "OFFLINE_TRAINED_RESEARCH_ONLY",
         "model_family": RISKNET_NAME if architecture == "risknet" else MODEL_NAME,
         "architecture_choice": architecture,
