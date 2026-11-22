@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.6.2 Atlas RiskNet v2: our independently trained, three-expert **risk-only** neural model with asymmetric robust risk loss, alongside legacy Atlas RegimeNet dual-head and historical risk baselines. Native risk-only and dual-head/return-off experiments remain unvalidated for future investment performance. All simulations are 0–1x cash-only; no IBKR live or paper orders or financing. Not investment advice.
+> **Status:** v0.6.3 original Atlas RiskNet v2 and a new matched paired robustness audit: check year-by-year, crash-window and circular block-resampled uncertainty without rerunning or optimizing the model. All 2000–2026 historical results remain repeatedly used model-development data, not an untouched final evaluation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -93,6 +93,12 @@ Historical output reports learned forecast MAE versus naive trailing-volatility 
 Our `atlas-native-backtest --architecture risknet --return-head-strength 0` now trains a **new original single-output three-expert network from scratch**, with a robust asymmetric Huber loss designed specifically for future realized risk. It is **not** the old dual-head network with the return signal merely switched off. There is **no return prediction head**; reports use null rather than inventing an expected return. The original `--architecture dual` remains intact as an independent comparator. Both share the same cash ledger, 0–1x risk limits, transaction fees and optional no-trade band, as does the traditional risk benchmark.
 
 The 2000–2026 baseline comparison at `--no-trade-band 0.05` previously showed Atlas dual-head return-off historical return **220.13%** vs **216.83%** traditional, but traditional's Sharpe **1.011** beat Atlas's **0.974** and it had a slightly lower max drawdown. RiskNet v2's actual historical scores are **not known** until you run it locally. See [native RiskNet v2 specification and PowerShell commands](docs/ATLAS_RISKNET_V2.md).
+
+## v0.6.3: Test the original native model's historical edge without retraining
+
+The user's independent scratch-fitted RiskNet v2 produced **305.13%** simulated cumulative total return, **1.031** zero-risk-free Sharpe, and **23.67x** cumulative trading notional over initial equity on the already-studied 2000–2026 prices, versus **216.83%**, **1.011**, and **30.71x** for the matched conventional trailing-volatility strategy. The trailing-risk model had a slightly better drawdown (**-12.48% vs -12.56%**). RiskNet's 5-day forward risk MAE was **0.04143** vs traditional **0.04397**. These are promising research observations **not yet statistically robust or independently replicated**; all model development has repeatedly viewed the same period.
+
+`atlas-native-audit` now reads existing private RiskNet and dual-head reports, rejects unequal data/fees/risk limits, and generates **year-by-year plus predefined crisis-period** performance and **paired, block-resampled exploratory uncertainty intervals** around relative daily returns and Sharpe. The audit does not retrain, change models, or issue orders. [See independent-model comparison and Windows instructions](docs/ATLAS_ROBUSTNESS_AUDIT.md).
 
 ## What works today
 
