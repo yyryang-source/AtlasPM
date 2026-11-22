@@ -52,6 +52,12 @@ class InstitutionalLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(call["short_option_liability"], 800)
         self.assertTrue(call["requires_broker_option_margin_validation"])
 
+    def test_cash_account_rejects_negative_settled_cash(self):
+        case = copy.deepcopy(self.payload)
+        case["accounts"][0]["settled_cash"] = -1
+        with self.assertRaisesRegex(ValueError, "negative settled cash"):
+            build_institutional_ledger(case)
+
     def test_cash_account_cannot_have_margin_debt(self):
         case = copy.deepcopy(self.payload)
         case["accounts"][0]["margin_debt"] = 1
