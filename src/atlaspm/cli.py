@@ -11,6 +11,7 @@ from atlaspm.optimizer import inverse_volatility_weights
 from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
+from atlaspm.backtest import backtest_walk_forward
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +56,18 @@ def build_parser() -> argparse.ArgumentParser:
     estimate.add_argument("--output", type=Path, default=Path("local_data/estimates.json"))
     estimate.add_argument("--min-observations", type=int, default=60)
 
+    backtest = sub.add_parser("backtest", help="Walk-forward, past-only portfolio simulation")
+    backtest.add_argument("--file", type=Path, required=True)
+    backtest.add_argument("--output", type=Path, default=Path("local_data/backtest.json"))
+    backtest.add_argument("--lookback-days", type=int, default=756)
+    backtest.add_argument("--rebalance-days", type=int, default=63)
+    backtest.add_argument("--risk-aversion", type=float, default=4.0)
+    backtest.add_argument("--max-weight", type=float, default=0.60)
+    backtest.add_argument("--leverage", type=float, default=1.0)
+    backtest.add_argument("--apr", type=float, default=0.065)
+    backtest.add_argument("--fee-bps", type=float, default=5.0)
+    backtest.add_argument("--maintenance", type=float, default=0.30)
+
     return parser
 
 
@@ -85,6 +98,31 @@ def main(argv: list[str] | None = None) -> int:
                 "written": str(args.output),
                 "metadata": report["metadata"],
                 "next_step": f"atlaspm optimize --file {args.output}",
+            }
+        elif args.command == "backtest":
+            report = backtest_walk_forward(
+                args.file,
+                lookback_days=args.lookback_days,
+                rebalance_days=args.rebalance_days,
+                risk_aversion=args.risk_aversion,
+                max_weight=args.max_weight,
+                leverage=args.leverage,
+                annual_financing_rate=args.apr,
+                fee_bps=args.fee_bps,
+                maintenance_fraction=args.maintenance,
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": str(args.output),
+                "data": report["data"],
+                "parameters": report["parameters"],
+                "strategy": report["strategy"],
+                "benchmark": report["benchmark"],
+                "warnings": report["warnings"],
             }
         elif args.command == "optimize":
             assumptions = json.loads(args.file.read_text(encoding="utf-8"))
