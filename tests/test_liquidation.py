@@ -42,6 +42,9 @@ class MarginPolicyTest(unittest.TestCase):
         self.assertLess(events[0]["trigger_date"], events[0]["execution_date"])
         self.assertAlmostEqual(events[0]["debt_after_equity_index_units"], 0.0)
         self.assertEqual(protected["strategy"]["final_effective_target_leverage"], 1.0)
+        self.assertTrue(any("Fixed current symbol universe" in warning for warning in protected["warnings"]))
+        self.assertTrue(any("final day triggers liquidation" in warning for warning in protected["warnings"]))
+        self.assertFalse(any("pending.Fixed" in warning for warning in protected["warnings"]))
         self.assertGreater(
             protected["strategy"]["total_trading_fees_equity_index_units"],
             0
