@@ -20,6 +20,10 @@ This roadmap **replaces feature-by-feature backtest tinkering as the primary dir
 - [ ] Separate cash and financing account allocation with capital transfer limits.
 - [ ] Stock/ETF/Treasury/cash weights, target diversification, sector/beta limits and turnover/fees.
 - [ ] Position add/reduce/hold decision policy with hysteresis, rebalance bands, minimum holding/round lot support.
+- [x] Initial **read-only single-equity BUY/SELL planner** connected to the reconciled ledger and central risk gate; projects share count, cash, borrowing and costs
+- [x] Require order-bound mock broker preview and reject misaligned account/side/ticker/quantity/limit price/debt
+- [x] Reserve unsettled liabilities from projected available settled cash and fail closed on missing preview or stale marks
+- [ ] Full target-weight rebalancing, multi-leg collateral/option handling, broker order previews and event-sourced settled cash accounting
 - [ ] Pre- and post-trade pro forma account simulation, margin buffer and collateral encumbrance.
 - [ ] Risk budgets: VaR, ES, drawdown, liquidity, correlated-equity and yield curve stress, financing sensitivity.
 - DoD: reproducible simulated rebalance and audit trail; risk gate rejects pro forma breaches; holdings/fees/debt reconcile.
