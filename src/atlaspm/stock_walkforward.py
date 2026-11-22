@@ -53,11 +53,15 @@ def _yearly(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
                                        "portfolio_growth": 1.0, "spy_growth": 1.0})
         row["portfolio_growth"] *= current["equity_index"] / previous["equity_index"]
         row["spy_growth"] *= current["spy_index"] / previous["spy_index"]
+        row["universe_growth"] = row.get("universe_growth", 1.0) * (
+            current["universe_index"] / previous["universe_index"]
+        )
         row["sessions"] += 1
     return [{
         "year": r["year"], "sessions": r["sessions"],
         "portfolio_return": r["portfolio_growth"] - 1.0,
         "spy_return": r["spy_growth"] - 1.0,
+        "universe_return": r["universe_growth"] - 1.0,
         "excess_percentage_points": 100 * (r["portfolio_growth"] - r["spy_growth"]),
     } for r in annual.values()]
 
@@ -127,6 +131,14 @@ def backtest_stock_screener(
     equity = 1.0
     cash = 1.0
     shares: dict[str, float] = {}
+    # Independently capitalized 1x cash ledger for the entire historically
+    # price-qualified universe (no factor rank/risk threshold exclusion).
+    universe_cash = 1.0
+    universe_shares: dict[str, float] = {}
+    universe_equity = 1.0
+    universe_turnover_sum = 0.0
+    universe_cost_sum = 0.0
+    universe_executions: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
     turnover_sum = 0.0
     cost_sum = 0.0
@@ -147,6 +159,20 @@ def backtest_stock_screener(
         equity = cash + sum(quantity * marks[symbol] for symbol, quantity in shares.items())
         if not isfinite(equity) or equity <= 0:
             raise ValueError(f"Invalid equity on {observed}")
+        universe_marks: dict[str, float] = {}
+        for symbol in universe_shares:
+            price = price_history[symbol].get(observed)
+            if price is None:
+                raise ValueError(
+                    f"MISSING_UNIVERSE_HELD_PRICE: {symbol} {observed}; no forward fill"
+                )
+            universe_marks[symbol] = price
+        universe_equity = universe_cash + sum(
+            quantity * universe_marks[symbol]
+            for symbol, quantity in universe_shares.items()
+        )
+        if not isfinite(universe_equity) or universe_equity <= 0:
+            raise ValueError(f"Invalid universe baseline equity on {observed}")
 
         if pending is not None and pending["execution_index"] == i:
             chosen = pending["selected"]
@@ -186,6 +212,54 @@ def backtest_stock_screener(
                 "estimated_transaction_cost_index": fee,
                 "equity_after_cost": equity,
             })
+            # Same decision and next-close execution for the separate
+            # full-universe equal-weight comparison. No strategy ranking
+            # enters its membership or target weights.
+            universe_chosen = pending["universe_selected"]
+            for symbol in universe_chosen:
+                price = price_history[symbol].get(observed)
+                if price is None:
+                    raise ValueError(
+                        f"MISSING_UNIVERSE_EXECUTION_PRICE: {symbol} {observed}"
+                    )
+                universe_marks[symbol] = price
+            universe_fraction = 1.0 / len(universe_chosen) if universe_chosen else 0.0
+            universe_current = {
+                symbol: quantity * universe_marks[symbol] / universe_equity
+                for symbol, quantity in universe_shares.items()
+            }
+            universe_target = {symbol: universe_fraction for symbol in universe_chosen}
+            universe_turnover = sum(
+                abs(universe_target.get(s, 0.0) - universe_current.get(s, 0.0))
+                for s in set(universe_current) | set(universe_target)
+            )
+            universe_fee = universe_equity * universe_turnover * costs_per_dollar
+            if universe_fee >= universe_equity:
+                raise ValueError("Universe comparison transaction cost exceeded equity")
+            universe_after_fee = universe_equity - universe_fee
+            universe_shares = {
+                symbol: universe_after_fee * universe_fraction / universe_marks[symbol]
+                for symbol in universe_chosen
+            }
+            universe_cash = universe_after_fee - sum(
+                universe_shares[s] * universe_marks[s] for s in universe_shares
+            )
+            if universe_cash < -1e-10:
+                raise ValueError("Universe comparison exceeds 1x exposure")
+            universe_cash = max(0.0, universe_cash)
+            universe_equity = universe_cash + sum(
+                universe_shares[s] * universe_marks[s] for s in universe_shares
+            )
+            universe_turnover_sum += universe_turnover
+            universe_cost_sum += universe_fee
+            universe_executions.append({
+                "decision_date": pending["decision_date"],
+                "execution_date": observed.isoformat(),
+                "holdings_count": len(universe_chosen),
+                "turnover_ratio_at_execution": universe_turnover,
+                "estimated_transaction_cost_index": universe_fee,
+                "equity_after_cost": universe_equity,
+            })
             pending = None
 
         if i in decision_indices and i + 1 <= last_index:
@@ -197,11 +271,24 @@ def backtest_stock_screener(
                 require_decision_close=True,
             )
             chosen = [row["symbol"] for row in screen["selected"]]
+            # This comparison does not pick the top names: it equally weights
+            # *all* symbols with valid 253-close history on the decision date.
+            # Risk filters are deliberately disabled; delisted companies are
+            # still absent unless supplied in the CSV.
+            universe_screen = screen_stocks_from_prices(
+                price_history, observed.isoformat(),
+                top=len(price_history),
+                max_annual_volatility=10.0,
+                max_drawdown=1.0,
+                require_decision_close=True,
+            )
+            universe_chosen = [row["symbol"] for row in universe_screen["selected"]]
             decisions.append({
                 "date": observed.isoformat(),
                 "execution_date": dates[i+1].isoformat(),
                 "eligible_count": screen["eligible_count"],
                 "excluded_count": len(screen["excluded"]),
+                "universe_price_qualified_count": len(universe_chosen),
                 "selected": [
                     {"symbol": row["symbol"], "rank": row["rank"], "score": row["score"]}
                     for row in screen["selected"]
@@ -211,18 +298,23 @@ def backtest_stock_screener(
                 "decision_date": observed.isoformat(),
                 "execution_index": i + 1,
                 "selected": chosen,
+                "universe_selected": universe_chosen,
             }
 
         curve.append({
             "date": observed.isoformat(),
             "equity_index": equity,
             "spy_index": spy_prices[observed] / start_benchmark_price,
+            "universe_index": universe_equity,
+            "universe_holdings_count": len(universe_shares),
+            "universe_cash_weight": universe_cash / universe_equity,
             "holdings_count": len(shares),
             "cash_weight": cash / equity,
         })
 
     portfolio = _performance(curve, "equity_index")
     benchmark = _performance(curve, "spy_index")
+    universe_benchmark = _performance(curve, "universe_index")
     return {
         "method": "offline_stock_factor_walkforward_next_close_v1",
         "requested_window": {"start": start, "end": end},
@@ -247,16 +339,31 @@ def backtest_stock_screener(
         "executed_rebalances": len(orders),
         "portfolio": portfolio,
         "benchmark": benchmark,
+        "equal_weight_universe": universe_benchmark,
+        "equal_weight_universe_definition": (
+            "Every supplied ticker with at least 253 recent closes on the "
+            "decision date, no sector or volatility filter, equally weighted "
+            "and next-close rebalanced with matching fees and slippage."
+        ),
         "relative": {
             "cumulative_return_difference_percentage_points":
                 100 * (portfolio["total_return"] - benchmark["total_return"]),
             "cagr_difference_percentage_points":
                 100 * (portfolio["cagr"] - benchmark["cagr"]),
+            "cagr_minus_equal_weight_universe_percentage_points":
+                100 * (portfolio["cagr"] - universe_benchmark["cagr"]),
+            "cumulative_minus_equal_weight_universe_percentage_points":
+                100 * (portfolio["total_return"] - universe_benchmark["total_return"]),
         },
         "execution_summary": {
             "total_turnover_as_multiple_of_initial_equity": turnover_sum,
             "total_modeled_transaction_cost_as_fraction_of_initial_equity": cost_sum,
         },
+        "equal_weight_universe_execution_summary": {
+            "sum_of_execution_turnover_ratios": universe_turnover_sum,
+            "sum_of_costs_in_normalized_initial_equity_units": universe_cost_sum,
+        },
+        "equal_weight_universe_executions": universe_executions,
         "yearly_returns": _yearly(curve),
         "decisions": decisions,
         "executions": orders,
@@ -264,7 +371,9 @@ def backtest_stock_screener(
         "live_execution_enabled": False,
         "warnings": [
             "NOT a trained AI model, proof of alpha or actual/paper broker trading.",
-            "Universe is supplied surviving tickers; missing delisted names and membership history cause survivorship bias.",
+            "Both strategy and equal-weight universe use today's surviving ticker list; neither corrects survivorship bias.",
+            "Eligible universe composition evolves as stocks reach 253 recorded prices, not historical index memberships.",
+            "The full-universe comparison is 1x equal-weight, next-close rebalanced with matched turnover costs; not a free buy-and-hold portfolio.",
             "Provider-adjusted historical prices may be revised retrospectively; true vintage point-in-time data are not certified.",
             "No company fundamental dates, sector caps, liquidity/borrow/spread conditions, cash yield or tax modeling.",
             "Use untouched holdouts and genuine historically available universe snapshots before evaluating skill.",
