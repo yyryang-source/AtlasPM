@@ -15,6 +15,7 @@ from atlaspm.backtest import backtest_walk_forward
 from atlaspm.audit import audit_backtests
 from atlaspm.benchmark import compare_spy
 from atlaspm.risk_budget import check_risk_budget
+from atlaspm.risk_backtest import backtest_risk_budget
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,6 +100,23 @@ def build_parser() -> argparse.ArgumentParser:
     risk.add_argument("--max-financing-cost", type=float, default=0.08)
     risk.add_argument("--output", type=Path, default=Path("local_data/risk_budget.json"))
 
+    managed = sub.add_parser("backtest-risk", help="Past-only dynamic risk budgets with a cash sleeve")
+    managed.add_argument("--file", type=Path, required=True)
+    managed.add_argument("--output", type=Path, default=Path("local_data/risk_managed_backtest.json"))
+    managed.add_argument("--lookback-days", type=int, default=756)
+    managed.add_argument("--rebalance-days", type=int, default=63)
+    managed.add_argument("--risk-aversion", type=float, default=4.0)
+    managed.add_argument("--max-weight", type=float, default=0.60)
+    managed.add_argument("--max-leverage", type=float, default=2.0)
+    managed.add_argument("--max-volatility", type=float, default=0.30)
+    managed.add_argument("--stress-decline", type=float, default=0.30)
+    managed.add_argument("--max-stress-loss", type=float, default=0.40)
+    managed.add_argument("--maintenance", type=float, default=0.30)
+    managed.add_argument("--min-buffer", type=float, default=0.05)
+    managed.add_argument("--apr", type=float, default=0.065)
+    managed.add_argument("--max-financing-cost", type=float, default=0.08)
+    managed.add_argument("--fee-bps", type=float, default=5.0)
+
     return parser
 
 
@@ -129,6 +147,36 @@ def main(argv: list[str] | None = None) -> int:
                 "written": str(args.output),
                 "metadata": report["metadata"],
                 "next_step": f"atlaspm optimize --file {args.output}",
+            }
+        elif args.command == "backtest-risk":
+            report = backtest_risk_budget(
+                args.file,
+                lookback_days=args.lookback_days,
+                rebalance_days=args.rebalance_days,
+                risk_aversion=args.risk_aversion,
+                max_weight=args.max_weight,
+                max_leverage=args.max_leverage,
+                max_annual_volatility=args.max_volatility,
+                stress_decline=args.stress_decline,
+                max_stress_loss=args.max_stress_loss,
+                maintenance_fraction=args.maintenance,
+                minimum_maintenance_buffer=args.min_buffer,
+                annual_financing_rate=args.apr,
+                max_annual_financing_cost=args.max_financing_cost,
+                fee_bps=args.fee_bps,
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": str(args.output),
+                "method": report["method"],
+                "data": report["data"],
+                "strategy": report["strategy"],
+                "benchmark": report["benchmark"],
+                "warnings": report["warnings"],
             }
         elif args.command == "risk-check":
             assumptions = json.loads(args.file.read_text(encoding="utf-8"))
