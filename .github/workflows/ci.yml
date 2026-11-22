@@ -35,3 +35,5 @@ jobs:
         run: python -m atlaspm.cli backtest-risk --file examples/synthetic_prices.csv --lookback-days 40 --rebalance-days 20 --max-leverage 2 --max-volatility 0.07 --max-daily-tail-loss 0.03 --tail-fraction 0.05 --output local_data/ci_tail_backtest.json
       - name: Smoke test institutional paper-only risk gate
         run: python -m atlaspm.cli institutional-check --file examples/institutional_scenario.json --output local_data/ci_institutional_preflight.json
+      - name: Smoke test institutional read-only ledger (synthetic accounts)
+        run: python -m atlaspm.cli ledger-report --file examples/institutional_ledger.json --output local_data/ci_institutional_ledger.json
