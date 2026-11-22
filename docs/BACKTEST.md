@@ -24,12 +24,14 @@ The CLI prints a compact summary and saves the full daily equity curve and rebal
 
 ## Strict time ordering
 
-On the close of trading session `t`:
-1. Read only the previous `lookback_days` daily return observations; the final observation is the return ending at `t`.
+At the close of session `t-1`, the system produces a signal using strictly known information:
+1. Read only the previous `lookback_days` daily-return observations; the final observation ends at `t-1`.
 2. Estimate annualized arithmetic returns and sample covariance.
 3. Optimize long-only asset weights subject to the max-weight constraint.
-4. Trade at the signal close `t` at ideal adjusted closing prices, applying notional-proportional fees.
-5. Hold that portfolio through the **next** close `t+1`, when the first held-out return is realized.
+4. On the **next session `t`**, execute at a *hypothetical* adjusted close (the signal was already available since `t-1`), with notional-proportional fees.
+5. Hold that portfolio through session `t+1`. The first held-out return is the movement from `t` to `t+1`.
+
+This one-session execution delay avoids the unrealistic assumption that a strategy can observe the same closing price and retroactively fill its resulting order at that exact close. Actual market-on-close order execution, spreads and price impact are **still not modeled**.
 
 At the next rebalance, previous asset quantities drift with returns, so there is **no hidden daily rebalancing**. Each rebalance resets the borrowed amount to the requested target gross leverage. Annual borrowing APR is accrued to debt each trading day (`APR / 252`), including between rebalances. There is no cash interest or daily maintenance liquidation model.
 
