@@ -38,6 +38,7 @@ from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits, redacted_audi
 from atlaspm.ibkr_dashboard import build_dashboard_view, render_dashboard_html, redacted_dashboard_console
 from atlaspm.ml_dynamic_rebalance import backtest_ml_dynamic_rebalance, redacted_ml_console
 from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tournament_console
+from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -366,6 +367,30 @@ def build_parser() -> argparse.ArgumentParser:
     tournament.add_argument("--fee-bps", type=float, default=5.0)
     tournament.add_argument("--slippage-bps", type=float, default=5.0)
 
+    native = sub.add_parser(
+        "atlas-native-backtest",
+        help="Train AtlasPM's OWN gated three-expert dual-head risk/return network and simulate auto rebalances (no broker orders)",
+    )
+    native.add_argument("--file", type=Path, required=True)
+    native.add_argument("--output", type=Path, default=Path("local_data/atlas_native_backtest.json"))
+    native.add_argument("--feature-days", type=int, default=20)
+    native.add_argument("--forecast-days", type=int, default=5)
+    native.add_argument("--min-train", type=int, default=756)
+    native.add_argument("--train-window", type=int, default=504)
+    native.add_argument("--sample-stride", type=int, default=2)
+    native.add_argument("--epochs", type=int, default=40)
+    native.add_argument("--rebalance-days", type=int, default=21)
+    native.add_argument("--target-volatility", type=float, default=0.18)
+    native.add_argument("--max-weight", type=float, default=0.70)
+    native.add_argument("--max-exposure", type=float, default=1.0)
+    native.add_argument("--stress-decline", type=float, default=0.30)
+    native.add_argument("--max-stress-loss", type=float, default=0.25)
+    native.add_argument("--max-daily-tail-loss", type=float, default=0.04)
+    native.add_argument("--drawdown-trigger", type=float, default=0.10)
+    native.add_argument("--drawdown-exposure-cap", type=float, default=0.25)
+    native.add_argument("--fee-bps", type=float, default=5.0)
+    native.add_argument("--slippage-bps", type=float, default=5.0)
+
     return parser
 
 
@@ -373,7 +398,44 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ml-model-tournament":
+        if args.command == "atlas-native-backtest":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Native Atlas model output must be private .json")
+            if destination == args.file.expanduser().resolve():
+                raise ValueError("Cannot overwrite Atlas native training input")
+            try:
+                result = backtest_atlas_native(
+                    args.file,
+                    feature_days=args.feature_days,
+                    forecast_days=args.forecast_days,
+                    minimum_training_samples=args.min_train,
+                    training_window=args.train_window,
+                    sample_stride=args.sample_stride,
+                    training_epochs=args.epochs,
+                    rebalance_days=args.rebalance_days,
+                    target_annual_volatility=args.target_volatility,
+                    maximum_name_weight=args.max_weight,
+                    maximum_gross_exposure=args.max_exposure,
+                    uniform_stress_decline=args.stress_decline,
+                    maximum_uniform_stress_loss=args.max_stress_loss,
+                    maximum_daily_tail_loss=args.max_daily_tail_loss,
+                    account_drawdown_trigger=args.drawdown_trigger,
+                    drawdown_exposure_cap=args.drawdown_exposure_cap,
+                    fee_bps=args.fee_bps,
+                    slippage_bps=args.slippage_bps,
+                )
+            except (OSError, ValueError, TypeError, KeyError, OverflowError):
+                raise ValueError(
+                    "Native Atlas model training/backtest failed validation; inspect private historical inputs"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False)+"\n",
+                encoding="utf-8",
+            )
+            report = redacted_atlas_native_console(result, str(args.output))
+        elif args.command == "ml-model-tournament":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":
                 raise ValueError("Model tournament output must be a private .json file")
