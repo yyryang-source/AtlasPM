@@ -15,6 +15,7 @@
 - `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
 - `audit.py`: compare saved cash and margin curves and report stress warnings.
 - `tail_risk.py`: historical one-day Expected Shortfall from the worst fixed fraction of aligned trailing daily returns; optional research budget, not future prediction.
+- `institutional_batch.py`: read-only multi-asset batch with coordinated stock/UST/put/debt accounting, unsettled receivables, matching synthetic preview and per-leg deterministic RMS checks; no execution or fill state.
 - `institutional_rebalance.py`: read-only single-equity add/reduce intent, fee/cash/debt pro-forma, order-bound mock broker preview and central fail-closed risk decision; no actual orders.
 - `institutional_ledger.py`: read-only cash/margin multi-asset ledger, synthetic broker net-liquidation reconciliation, Treasury clean/dirty valuation and option liabilities; no settled cashflow or broker feed.
 - `institutional_gate.py`: deterministic broker-preview-style paper intent preflight, not executable orders.
