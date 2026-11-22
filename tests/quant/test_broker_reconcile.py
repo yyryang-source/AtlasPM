@@ -8,7 +8,7 @@ from pathlib import Path
 from atlaspm.broker_reconcile import reconcile_imported_broker_snapshot
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 
 class BrokerExportReconcileTests(unittest.TestCase):

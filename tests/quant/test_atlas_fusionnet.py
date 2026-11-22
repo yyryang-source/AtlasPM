@@ -18,7 +18,7 @@ from atlaspm.atlas_risknet import RISKNET_NAME
 from test_atlas_regimenet import make_prices, run, synthetic_returns
 
 HAS_NUMPY=importlib.util.find_spec("numpy") is not None
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=Path(__file__).resolve().parents[2]
 
 
 class ResearchIntegrityTests(unittest.TestCase):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from atlaspm.cli import main
 
-ROOT = Path(__file__).resolve().parents[1] / "examples"
+ROOT = Path(__file__).resolve().parents[2] / "examples"
 
 
 class BrokerReconcileCLITests(unittest.TestCase):

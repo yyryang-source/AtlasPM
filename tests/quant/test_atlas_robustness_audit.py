@@ -15,7 +15,7 @@ from pathlib import Path
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet
 from atlaspm.cli import main
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def mocked_report(*,risknet: bool) -> dict:

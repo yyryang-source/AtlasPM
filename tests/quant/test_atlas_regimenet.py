@@ -14,7 +14,7 @@ from atlaspm.atlas_regimenet import (
 )
 from atlaspm.ml_dynamic_rebalance import _select_allocation
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=Path(__file__).resolve().parents[2]
 HAVE_NUMPY=importlib.util.find_spec("numpy") is not None
 
 

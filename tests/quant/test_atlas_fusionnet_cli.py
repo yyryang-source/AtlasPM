@@ -9,7 +9,7 @@ from pathlib import Path
 
 from atlaspm.cli import main
 
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=Path(__file__).resolve().parents[2]
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy") is not None,
