@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.2 early research prototype. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.2.4 research prototype. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -72,7 +72,7 @@ Once both `backtest_cash.json` and `backtest_margin_2x.json` exist, run:
 
 The audit compares annualized returns, volatility and drawdowns, highlights benchmark underperformance and **shows every simulated maintenance breach date**. It refuses mismatched simulations and explicitly labels results as research only. [Risk audit documentation](docs/AUDIT.md).
 
-## New: SPY benchmark and margin deleveraging stress mode (v0.2.3)
+## New: SPY benchmark and margin deleveraging stress mode (v0.2.4)
 
 The 2003–2026 example has highlighted potential maintenance breaches under hypothetical 2× borrowing. The new mode allows a **next-close, full deleveraging to 1×** stress scenario. This is **not** Interactive Brokers' liquidation algorithm.
 
@@ -86,6 +86,8 @@ The 2003–2026 example has highlighted potential maintenance breaches under hyp
 # Compare with existing cash and margin scenario
 .\.venv\Scripts\python.exe -m atlaspm.cli benchmark-spy --cash local_data\backtest_cash.json --margin local_data\backtest_margin_forced.json --spy local_data\spy_prices.csv --output local_data\spy_comparison_forced.json
 ```
+
+The SPY comparison now also estimates **historical Beta, correlation, tracking error, information ratio and annual calendar-year excess returns**. Detailed yearly rows stay in `local_data/spy_comparison_forced.json`, while the CLI prints a compact summary. The figures are descriptive, not proof of alpha.
 
 See [hypothetical margin stress rules](docs/MARGIN_SIM.md) and [independent SPY benchmark](docs/BENCHMARK.md). Neither feature validates live trading or eliminates survivorship bias.
 
@@ -111,6 +113,7 @@ AtlasPM/
 │   ├── benchmark.py
 │   ├── audit.py
 │   ├── backtest.py
+│   ├── performance.py
 │   ├── historical.py
 │   ├── mean_variance.py
 │   ├── models.py
