@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.7 IBKR local Gateway GET-only capture, broker reconciliation and paper OMS research. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.8 IBKR read-only conid identity mapping and risk-trust diagnostics. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## What works today
 
@@ -233,12 +233,27 @@ git pull origin main
 
 Actual IBKR account access is **optional**, requires the user to launch the official local Gateway, log in themselves and explicitly supply --allow-local-gateway with a verified localhost TLS certificate. The complete raw output is private and restricted to the Git-ignored local_data directory, while the console is redacted. **Do not upload real snapshots, broker session information, credentials or account identifiers.** See [IBKR read-only setup and limitations](docs/IBKR_READONLY.md).
 
+## IBKR conid and instrument identity mapping diagnostic (v0.4.8)
+
+The latest local-only command **ibkr-map-check** compares IBKR conids in a previously captured portfolio snapshot with explicitly declared AtlasPM stock, U.S. Treasury and option identities. It blocks unknown contract IDs, ambiguous/non-USD data, stale snapshots, unconfirmed Treasury issuer/bond units and mismatched option terms. It does **not** infer brokerage borrowing, Treasury collateral or accrued interest from signed cash, IBKR's interest rate field, or a bond's asset class.
+
+~~~powershell
+git pull origin main
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m atlaspm.cli ibkr-readonly --fixture examples\ibkr_gateway_synthetic.json --account DU1234567 --output local_data\ibkr_fixture_capture.json
+.\.venv\Scripts\python.exe -m atlaspm.cli ibkr-map-check --capture local_data\ibkr_fixture_capture.json --mapping examples\ibkr_mapping_synthetic.json --output local_data\ibkr_mapping_check.json
+~~~
+
+Both inputs are **entirely fictional**. A completed identity mapping is still marked REVIEW_REQUIRED and can NEVER authorize brokerage risk or trading. The full mapping report stays in Git-ignored local_data and the terminal prints only a redacted summary. Read [IBKR mapping methodology](docs/IBKR_MAPPING.md).
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── IBKR_MAPPING.md
 │   ├── IBKR_READONLY.md
 │   ├── BROKER_RECONCILIATION.md
 │   ├── OMS_RISK_AUDIT.md
@@ -264,6 +279,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── ibkr_mapping.py
 │   ├── ibkr_gateway.py
 │   ├── broker_reconcile.py
 │   ├── oms_controls.py
