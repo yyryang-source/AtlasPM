@@ -364,6 +364,7 @@ def train_ai_stock_ranker(
     metadata = {
         "schema": SCHEMA,
         "model_kind": "LightGBM regression on cross-sectional next-close excess returns",
+        "benchmark_symbol": overview["benchmark_symbol"],
         "model_sha256": digest,
         "feature_names": list(FEATURE_NAMES),
         "feature_count": len(FEATURE_NAMES),
@@ -420,9 +421,8 @@ def rank_with_ai(
         raise ValueError("Model/metadata SHA256 mismatch")
     benchmark_all = load_adjusted_prices(benchmark_path)
     ticker = benchmark_symbol.strip().upper()
-    if ticker != metadata["hyperparameters"].get("benchmark_symbol", ticker):
-        # Validate explicitly requested benchmark against model metadata where available.
-        pass
+    if ticker != metadata.get("benchmark_symbol"):
+        raise ValueError("Inference benchmark differs from training benchmark")
     if ticker not in benchmark_all:
         raise ValueError(f"Benchmark {ticker} missing")
     bench = benchmark_all[ticker]
