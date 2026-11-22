@@ -13,7 +13,7 @@ from atlaspm.ibkr_gateway import (
 from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
 from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class OfflineMarginStressTests(unittest.TestCase):

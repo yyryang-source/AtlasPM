@@ -13,7 +13,7 @@ from atlaspm.ibkr_multiasset_budget import (
     _correlation_matrix, analyze_multiasset_risk_budget, redacted_multiasset_summary,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class MultiassetBudgetTests(unittest.TestCase):

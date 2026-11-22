@@ -11,7 +11,7 @@ from atlaspm.cli import main
 from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class IBKRMapCLITests(unittest.TestCase):

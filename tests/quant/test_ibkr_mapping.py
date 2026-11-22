@@ -10,7 +10,7 @@ from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_
 from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
 
 
-ROOT = Path(__file__).resolve().parents[1] / "examples"
+ROOT = Path(__file__).resolve().parents[2] / "examples"
 
 
 class IBKRMappingTests(unittest.TestCase):

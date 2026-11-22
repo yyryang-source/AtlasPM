@@ -12,7 +12,7 @@ from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin
 from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
 from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class StressCLITests(unittest.TestCase):

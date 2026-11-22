@@ -11,7 +11,7 @@ from atlaspm.ibkr_margin_monitor import (
     collect_ibkr_margin_monitor, normalize_ibkr_margin_summary, redacted_margin_console,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ACCOUNT = "DU1234567"
 ENDPOINT = f"/portfolio/{ACCOUNT}/summary"
 

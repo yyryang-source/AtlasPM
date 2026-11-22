@@ -13,7 +13,7 @@ from atlaspm.ibkr_gateway import (
 )
 
 
-SAMPLE = Path(__file__).resolve().parents[1] / "examples" / "ibkr_gateway_synthetic.json"
+SAMPLE = Path(__file__).resolve().parents[2] / "examples" / "ibkr_gateway_synthetic.json"
 ACCOUNT = "DU1234567"
 
 
