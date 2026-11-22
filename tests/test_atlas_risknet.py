@@ -75,6 +75,7 @@ class OriginalRiskNetTests(unittest.TestCase):
             result = run(make_prices(folder),architecture="risknet",
                          return_head_strength=0,no_trade_band=.05)
         self.assertEqual(result["model_family"],RISKNET_NAME)
+        self.assertEqual(result["method"],"atlaspm_original_risknet_v2_walk_forward")
         self.assertEqual(result["architecture_choice"],"risknet")
         self.assertFalse(result["return_prediction_head_trained"])
         self.assertEqual(
