@@ -197,7 +197,6 @@ def backtest_risk_budget(
     fees_total = 0.0
     interest_total = 0.0
     breach_dates: list[str] = []
-    risk_limit_failures_after_hold: list[str] = []
 
     for t in range(lookback_days + 1, len(dates) - 1):
         old_equity = account_equity
