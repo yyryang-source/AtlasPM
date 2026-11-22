@@ -47,6 +47,51 @@ The download start is inclusive, end **exclusive**. Vendor data are unofficial
 and may fail or be revised. Do not upload `local_data/` or broker account
 data to GitHub.
 
+## Matched-cost full-universe comparison (new)
+
+Each completed decision close also constructs a **separate** 1× equal-weight
+portfolio of **all supplied stocks with valid 253-close history** on that day,
+including those rejected by the factor strategy's volatility/drawdown gate.
+Membership never depends on the top-N factor rank. For every scheduled decision:
+
+- The strategy and universe comparison both use the same completed decision
+  date, following-session close for hypothetical execution, 21/42/63-session
+  frequency, per-dollar fee/slippage, 0% cash interest and no borrowing.
+- Newly listed stocks become eligible once their 253-close history is
+  sufficient. The comparison does not backfill them to 2000.
+- Missing future execution or held price for *either* strategy triggers an
+  error, not a fictional mark or silent exclusion.
+- Outputs add `equal_weight_universe` CAGR, cumulative return, zero-risk-free
+  Sharpe, volatility, drawdown, its execution costs, daily
+  `universe_index`, annual `universe_return`, and
+  `relative.cagr_minus_equal_weight_universe_percentage_points`.
+
+To compare with the new in-file benchmark, rerun the identical backtest:
+
+```powershell
+git fetch origin
+git switch --track origin/feature/stock-universe-benchmark-v1
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_stock*.py" -v
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --start 2000-01-01 --end 2026-11-20 --top 10 --rebalance-days 21 --fee-bps 5 --slippage-bps 5 --output local_data\stock_with_equal_weight.json
+$r = Get-Content local_data\stock_with_equal_weight.json -Raw | ConvertFrom-Json
+[PSCustomObject]@{
+  Start = $r.actual_window.start
+  End = $r.actual_window.end
+  FactorCAGR = [math]::Round($r.portfolio.cagr * 100, 2)
+  UniverseCAGR = [math]::Round($r.equal_weight_universe.cagr * 100, 2)
+  SPYCAGR = [math]::Round($r.benchmark.cagr * 100, 2)
+  FactorMinusUniversePP = [math]::Round($r.relative.cagr_minus_equal_weight_universe_percentage_points, 2)
+} | Format-List
+```
+
+**Interpretation:** The comparison tests factor selection/risk filtering
+**relative to this same surviving-ticker universe**, not whether the selected
+universe is representative of everything investable in past decades. Both
+strategies share substantial survivor, availability and corporate-action
+data biases. Also this is **periodic rebalanced equal-weight**, NOT a
+one-time buy-and-hold benchmark.
+
 ## Methodology: avoid same-close P&L lookahead
 
 1. **Warm up 253 closes** on SPY's trading calendar; the first decision is
