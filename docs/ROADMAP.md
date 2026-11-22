@@ -73,6 +73,16 @@
 - [ ] Test sensitivity across genuinely unseen time periods and independent symbol universes
 - [ ] Replace historical fixed APR and simple liquidation rules with realistically sourced financing schedules and conservative fills
 
+## v0.3.1 — historical tail-risk budgeting (implemented; awaiting Windows validation)
+
+- [x] Empirical one-day worst-tail Expected Shortfall estimator from prior returns
+- [x] Optional `--max-daily-tail-loss` cap on risky exposure at scheduled rebalances
+- [x] Preserve baseline behavior with the flag omitted
+- [x] Report which periods the ES cap binds, and log the training sample and tail count
+- [x] Offline regression tests for numeric calculations, input validation and leakage
+- [ ] Compare 2003–2026 outcomes with an unchanged v0.3.0 baseline and SPY
+- [ ] Out-of-sample model selection and direct CVaR asset-weight optimization
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
