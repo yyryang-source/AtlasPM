@@ -4,6 +4,15 @@
 
 > **Status:** v0.7.0 experimental Atlas FusionNet: an original multiscale, cross-asset gated network trained to predict overall and downside risk (no return/alpha head) with separate inverse-risk/downside/correlation-aware portfolio ablations. Based on **30 primary-source-researched methods**, not 30 external models installed or copied. Legacy RiskNet v2 stays frozen as primary reference. Existing historical data are repeatedly examined research samples, not untouched validation. Offline 0–1x cash-only, no IBKR paper/live orders or financing. Not investment advice.
 
+## Codebase navigation
+
+For AI stock selection, see [`src/atlaspm/selection/`](src/atlaspm/selection/)
+and the [selection documentation](docs/selection/).
+For RiskNet, FusionNet, portfolio quant and broker risk research, see
+[`src/atlaspm/quant/`](src/atlaspm/quant/) and [quant documentation](docs/quant/).
+The stock-to-quant alpha gate is a **research allowlist only** and does
+not submit orders or authorize trades.
+
 ## Alpha candidate eligibility threshold (research, not broker permission)
 
 The optional `stock-alpha-gate` CLI converts a month-end V2 AI stock
@@ -14,7 +23,7 @@ coverage, stale models, or ambiguous score-tie boundaries. The companion
 `stock-alpha-check` examines `OPEN`, `INCREASE`, `HOLD`, `REDUCE`,
 `CLOSE` without placing an order. Reductions and closures remain outside
 this alpha filter. No real optimizer or brokerage integration is connected.
-See [Alpha Eligibility Gate documentation](docs/ALPHA_ELIGIBILITY_GATE.md).
+See [Alpha Eligibility Gate documentation](docs/selection/ALPHA_ELIGIBILITY_GATE.md).
 
 ## Monthly AI stock-selection engine (research only)
 
@@ -22,10 +31,10 @@ See [Alpha Eligibility Gate documentation](docs/ALPHA_ELIGIBILITY_GATE.md).
 into a calendar-correct **month-end** research report with Top20/50,
 actual NYSE last-session validation, complete-close requirement,
 market-universe coverage audits, stale-model flags and tied-rank warnings.
-Windows local runner: `scripts/Invoke-MonthlyStockResearch.ps1`.
+Windows local runner: `scripts/selection/Invoke-MonthlyStockResearch.ps1`.
 Daily quote refresh and quarterly retraining remain **separate**;
 there is no broker connection, trading or risk action.
-See [Monthly Alpha Selection Engine](docs/MONTHLY_ALPHA_SELECTION.md).
+See [Monthly Alpha Selection Engine](docs/selection/MONTHLY_ALPHA_SELECTION.md).
 
 ## Experimental: learning-to-rank stock picker V2
 
@@ -35,7 +44,7 @@ forward-performance relevance, rather than predicting false-precision
 percentage returns. `stock-ai-rank-v2` publishes ordinal candidate
 scores with tied-rank diagnostics, not broker orders. It must demonstrate
 genuine test-IC improvement over the regression baseline before replacement.
-See [V2 design and Windows commands](docs/AI_STOCK_RANKER_V2.md).
+See [V2 design and Windows commands](docs/selection/AI_STOCK_RANKER_V2.md).
 
 ## Experimental: Qlib-inspired AI stock ranking (LightGBM)
 
@@ -48,7 +57,7 @@ It is original AtlasPM code informed by public research in Microsoft Qlib,
 not a copied or pretrained Wall Street alpha model. This module only ranks
 candidate stocks, never changes the existing Atlas RiskNet/RegimeNet/FusionNet,
 IBKR or trading-risk controls. For Windows commands and documented research
-limits, see [AI stock ranker](docs/AI_STOCK_RANKER.md).
+limits, see [AI stock ranker](docs/selection/AI_STOCK_RANKER.md).
 
 ## Experimental: discover all CURRENT US-listed stocks for screening
 
@@ -60,7 +69,7 @@ existing `stock-screen` ranking. The screener only chooses candidates; AtlasPM
 RiskNet/RegimeNet/FusionNet and independent portfolio risk/trading controls
 remain separate. This current listings snapshot cannot reconstruct all stocks
 listed or delisted between 2000–2026. See [US market screener and Windows
-commands](docs/US_MARKET_SCREENER.md).
+commands](docs/selection/US_MARKET_SCREENER.md).
 
 ## Experimental: matched equal-weight stock universe comparator
 
@@ -70,7 +79,7 @@ reference alongside SPY. It uses the same completed-close decision, next-close
 execution, fee/slippage assumptions and separate risk metrics to expose whether
 factor-selected Top N beats a simple portfolio constructed from the same
 retrospective universe. This comparison **does not** remove survivorship bias.
-See [Windows example and constraints](docs/STOCK_WALKFORWARD.md).
+See [Windows example and constraints](docs/selection/STOCK_WALKFORWARD.md).
 
 ## Experimental: 2000–2026 stock-selection walk-forward backtest
 
@@ -81,7 +90,7 @@ Full normalized equity, annual performance and model decisions remain inside
 private `local_data/`. It is a survivor-biased research simulation—not trained
 AI, out-of-sample proof, or broker/paper/live trading. The first simulated
 year may begin after 2000 because a 253-close warmup is mandatory.
-See [Windows commands, methodology and limitations](docs/STOCK_WALKFORWARD.md).
+See [Windows commands, methodology and limitations](docs/selection/STOCK_WALKFORWARD.md).
 
 ## Experimental: offline multi-factor stock screener
 
@@ -96,55 +105,55 @@ selection cap, and writes inspectable private JSON.
 return-prediction model. It does not automatically fetch company financials,
 screen every U.S. stock, test out-of-sample alpha or place orders. All
 historical fundamental dates require user verification. See
-[Stock screener methodology and Windows PowerShell instructions](docs/STOCK_SCREENER.md).
+[Stock screener methodology and Windows PowerShell instructions](docs/selection/STOCK_SCREENER.md).
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
 Use `ibkr-financing-check` with an IBKR read-only capture, a manually reviewed conid manifest, and a separately supplied current securities-segment margin/financing statement. The tool checks loan principal claim differences, the Gateway NLV, initial/maintenance formulas, margin cushion, account IDs, and snapshot timestamps. Output is private under `local_data/`. **Every result remains non-executable and unverified:** neither cross-checked numbers nor manually supplied source labels establish authentic broker margin buying power.
 
-See [v0.4.9 PowerShell commands and accounting limits](docs/IBKR_FINANCING.md).
+See [v0.4.9 PowerShell commands and accounting limits](docs/quant/IBKR_FINANCING.md).
 
 ## v0.4.10: Read-only IBKR margin monitoring
 
 `ibkr-margin-monitor` reads an authenticated **local** IBKR Client Portal Gateway `GET /portfolio/{accountId}/summary` (or entirely synthetic fixture) and checks securities-segment NLV, EquityWithLoanValue, initial/maintenance margin, available funds, excess liquidity, account IDs, currency restrictions, timestamps, and basic margin risk buffers. It reports redacted `NORMAL`, `WATCH`, `CRITICAL`, or `BLOCKED_DATA` states. No live margin financing principal is independently verified, and no broker/paper orders can be placed.
 
-Run the quick start and read limitations in [v0.4.10 Margin Monitor](docs/IBKR_MARGIN_MONITOR.md).
+Run the quick start and read limitations in [v0.4.10 Margin Monitor](docs/quant/IBKR_MARGIN_MONITOR.md).
 
 ## v0.4.11: Hypothetical margin shock and financing cost
 
 The new `ibkr-stress` CLI ingests **private** saved v0.4.10 margin monitoring and v0.4.9 financing-claim diagnostics, requires explicit scenario assumptions and estimates illustrative NLV / equity-with-loan, margin requirements, available funds, excess liquidity and simple future borrowing cost. It never treats a claimed loan as verified, never double-subtracts existing debt from NLV, and permanently blocks order execution and institutional risk-gate entry. It does **not** implement IBKR's liquidation algorithm.
 
-Follow the [synthetic Windows PowerShell test procedure](docs/IBKR_MARGIN_STRESS.md).
+Follow the [synthetic Windows PowerShell test procedure](docs/quant/IBKR_MARGIN_STRESS.md).
 
 ## v0.4.12: Multiasset correlation and financing risk budget
 
 The `ibkr-multiasset-budget` CLI uses the private prior `ibkr-stress` output and a new synthetic-only research-sleeve manifest. It computes explicitly supplied per-asset shock P&L, a 99% one-day parametric normal VaR under validated positive-semidefinite correlation matrices, simple assumed borrowing interest, and illustrative margin/buffer/concentration budget alerts. Correlation affects statistical VaR but does **not** change user-specified deterministic shocks. No AI model is trained; no brokerage orders are possible, and every trust/readiness flag stays false.
 
-See [v0.4.12 Windows instructions and assumptions](docs/IBKR_MULTI_ASSET_BUDGET.md).
+See [v0.4.12 Windows instructions and assumptions](docs/quant/IBKR_MULTI_ASSET_BUDGET.md).
 
 ## v0.4.13: Reverse margin and liquidity buffer stress
 
 The new `ibkr-reverse-stress` CLI consumes the private v0.4.12 synthetic budget output and assumed interest, maintenance and correlated shock sensitivities. It analytically finds the hypothetical market decline at which a stated liquidity-buffer floor, zero maintenance excess or zero NLV is reached. Results distinguish already-at-threshold, within-range and not-reached states; they **do not** predict IBKR liquidation prices and cannot grant broker risk permissions.
 
-See [v0.4.13 PowerShell commands and modeling boundaries](docs/IBKR_REVERSE_STRESS.md).
+See [v0.4.13 PowerShell commands and modeling boundaries](docs/quant/IBKR_REVERSE_STRESS.md).
 
 ## v0.4.14: Private risk evidence-chain audit
 
 The new `ibkr-risk-audit` command reviews five saved offline reports (margin monitor, financing claims, static stress, multiasset budget and reverse stress), checks account identity, cross-stage amounts and scenario arithmetic, counts hypothetical warnings, and optionally compares unsigned SHA-256 local-file digests against a previous audit. It never independently authenticates broker provenance or grants order permission; even a mathematically consistent result remains a hypothetical report.
 
-See [v0.4.14 PowerShell walkthrough and evidence caveats](docs/IBKR_RISK_CHAIN_AUDIT.md).
+See [v0.4.14 PowerShell walkthrough and evidence caveats](docs/quant/IBKR_RISK_CHAIN_AUDIT.md).
 
 ## v0.4.15: Offline risk audit differences
 
 The `ibkr-audit-diff` command compares two private v0.4.14 audit JSON files for the same account, detects SHA-256 local source-fingerprint changes and hypothetical alert-count shifts, and reports review-required states for inconsistent or changed inputs. A decline in simulated alerts is **not** verification of risk reduction. All inputs/output remain in `local_data/` and the CLI displays a redacted summary.
 
-See [v0.4.15 PowerShell audit comparison workflow](docs/IBKR_RISK_AUDIT_DIFF.md).
+See [v0.4.15 PowerShell audit comparison workflow](docs/quant/IBKR_RISK_AUDIT_DIFF.md).
 
 ## v0.4.16: Offline browser-based risk dashboard
 
 Run `ibkr-dashboard` to create `local_data/atlaspm_dashboard.html`, then open the standalone file in a Windows browser. The dark, responsive interface summarizes five saved risk stages, hypothetical scenario counts, local audit warnings and report-diff diagnostics. It embeds **only masked state labels**—not full account details, financing balances, asset names, private scenario names or SHA-256 digests. The HTML has no scripts, remote assets, server, API calls or trading function.
 
-See [v0.4.16 Windows PowerShell quick start](docs/IBKR_DASHBOARD.md).
+See [v0.4.16 Windows PowerShell quick start](docs/quant/IBKR_DASHBOARD.md).
 
 ## v0.5.1: Windows path privacy and ML test compatibility fix
 
@@ -156,7 +165,7 @@ The new `ml-rebalance-backtest` CLI fits **supervised ridge-regression risk fore
 
 This is the first trained, fully **offline** research model, *not* a proven profitable strategy, real IBKR paper order system or live AI investment manager. Initial gross exposure is restricted to 0–1x with no lending, option positions or actual Treasury coupons. Model coefficients, full decisions, realized historical returns and vendor-specific data are kept private under `local_data/`.
 
-See [v0.5.0 Windows training command, data leakage tests and non-live restrictions](docs/ML_DYNAMIC_REBALANCE.md).
+See [v0.5.0 Windows training command, data leakage tests and non-live restrictions](docs/quant/ML_DYNAMIC_REBALANCE.md).
 
 ## v0.5.2: Train open-source LightGBM dynamic allocation forecasts
 
@@ -168,37 +177,37 @@ Read [verified open-source model references, licenses and PowerShell training co
 
 The new `ml-model-tournament` command competes **Ridge, native LightGBM and traditional trailing volatility** using only *completed, past-origin* forecast outcomes. A model gets promoted only if its recent validated forward-risk MAE beats traditional risk forecasts by a configured margin, otherwise the system uses the untrained baseline. `--mode champion` picks the leading model, while `--mode ensemble` blends their risk forecasts with dynamic inverse-MAE weights. Both produce **automatic simulated asset/cash rebalances** and report separate shadow performance for each candidate, equal-weight buy/hold, costs, drawdowns, and chronology. No hindsight selection by final portfolio return or Sharpe.
 
-**All validation remains research-only**: no untouched final holdout has been independently certified, and no true broker data, margin or live/paper orders. [Read the model tournament methodology, anti-leak tests and Windows PowerShell commands](docs/ML_MODEL_TOURNAMENT.md).
+**All validation remains research-only**: no untouched final holdout has been independently certified, and no true broker data, margin or live/paper orders. [Read the model tournament methodology, anti-leak tests and Windows PowerShell commands](docs/quant/ML_MODEL_TOURNAMENT.md).
 
 ## v0.6.0: The first AtlasPM ORIGINAL model — not an open-source-model wrapper
 
 `atlas-native-backtest` now trains the internally designed **Atlas RegimeNet v1** directly from your local history. The softmax gate and three asset-aware expert networks jointly learn expected forward realized-risk and forward-return proxies. We implemented training gradients, asymmetric risk-underprediction penalty, an original risk-adjusted allocation score, and optional extra exposure caution, all subordinated to hard concentration, volatility, ES, market shock and drawdown limits.
 
-We are using standard public mathematical operations and optional NumPy **only for arrays**, with no imported fitted LightGBM/Ridge/Qlib model and no proprietary/pretrained checkpoints. The system is still an initial research baseline, not independently proven better than those baselines, nor validated for live orders. Read [native architecture, training command, model ownership claims and no-hindsight limitations](docs/ATLAS_NATIVE_MODEL.md).
+We are using standard public mathematical operations and optional NumPy **only for arrays**, with no imported fitted LightGBM/Ridge/Qlib model and no proprietary/pretrained checkpoints. The system is still an initial research baseline, not independently proven better than those baselines, nor validated for live orders. Read [native architecture, training command, model ownership claims and no-hindsight limitations](docs/quant/ATLAS_NATIVE_MODEL.md).
 
 ## v0.6.1: Improve OUR model through falsifiable testing, not third-party wrappers
 
 Our own `atlas-native-backtest` now supports `--return-head-strength 0|1` to isolate whether the model's self-trained forward-return estimates help the allocation, and `--no-trade-band 0.05` to skip small target-weight changes **only when actual current holdings pass all rechecked risk limits**. Traditional trailing risk receives the same no-trade policy; there is no hidden execution advantage for native AI.
 
-Historical output reports learned forecast MAE versus naive trailing-volatility and zero-return predictions, and compares native vs traditional trades and costs under matching rules. The first unmodified v0.6.0 experiment yielded **198.72% simulated cumulative native return and 0.856 Sharpe vs 215.58% and 1.007 for traditional risk**; improving training loss alone did not produce investable alpha. See [our native architecture, experiment results and reproducible ablations](docs/ATLAS_NATIVE_MODEL.md).
+Historical output reports learned forecast MAE versus naive trailing-volatility and zero-return predictions, and compares native vs traditional trades and costs under matching rules. The first unmodified v0.6.0 experiment yielded **198.72% simulated cumulative native return and 0.856 Sharpe vs 215.58% and 1.007 for traditional risk**; improving training loss alone did not produce investable alpha. See [our native architecture, experiment results and reproducible ablations](docs/quant/ATLAS_NATIVE_MODEL.md).
 
 ## v0.6.2: Atlas RiskNet v2 — independently trained risk-only AI
 
 Our `atlas-native-backtest --architecture risknet --return-head-strength 0` now trains a **new original single-output three-expert network from scratch**, with a robust asymmetric Huber loss designed specifically for future realized risk. It is **not** the old dual-head network with the return signal merely switched off. There is **no return prediction head**; reports use null rather than inventing an expected return. The original `--architecture dual` remains intact as an independent comparator. Both share the same cash ledger, 0–1x risk limits, transaction fees and optional no-trade band, as does the traditional risk benchmark.
 
-The 2000–2026 baseline comparison at `--no-trade-band 0.05` previously showed Atlas dual-head return-off historical return **220.13%** vs **216.83%** traditional, but traditional's Sharpe **1.011** beat Atlas's **0.974** and it had a slightly lower max drawdown. RiskNet v2's actual historical scores are **not known** until you run it locally. See [native RiskNet v2 specification and PowerShell commands](docs/ATLAS_RISKNET_V2.md).
+The 2000–2026 baseline comparison at `--no-trade-band 0.05` previously showed Atlas dual-head return-off historical return **220.13%** vs **216.83%** traditional, but traditional's Sharpe **1.011** beat Atlas's **0.974** and it had a slightly lower max drawdown. RiskNet v2's actual historical scores are **not known** until you run it locally. See [native RiskNet v2 specification and PowerShell commands](docs/quant/ATLAS_RISKNET_V2.md).
 
 ## v0.6.3: Test the original native model's historical edge without retraining
 
 The user's independent scratch-fitted RiskNet v2 produced **305.13%** simulated cumulative total return, **1.031** zero-risk-free Sharpe, and **23.67x** cumulative trading notional over initial equity on the already-studied 2000–2026 prices, versus **216.83%**, **1.011**, and **30.71x** for the matched conventional trailing-volatility strategy. The trailing-risk model had a slightly better drawdown (**-12.48% vs -12.56%**). RiskNet's 5-day forward risk MAE was **0.04143** vs traditional **0.04397**. These are promising research observations **not yet statistically robust or independently replicated**; all model development has repeatedly viewed the same period.
 
-`atlas-native-audit` now reads existing private RiskNet and dual-head reports, rejects unequal data/fees/risk limits, and generates **year-by-year plus predefined crisis-period** performance and **paired, block-resampled exploratory uncertainty intervals** around relative daily returns and Sharpe. The audit does not retrain, change models, or issue orders. [See independent-model comparison and Windows instructions](docs/ATLAS_ROBUSTNESS_AUDIT.md).
+`atlas-native-audit` now reads existing private RiskNet and dual-head reports, rejects unequal data/fees/risk limits, and generates **year-by-year plus predefined crisis-period** performance and **paired, block-resampled exploratory uncertainty intervals** around relative daily returns and Sharpe. The audit does not retrain, change models, or issue orders. [See independent-model comparison and Windows instructions](docs/quant/ATLAS_ROBUSTNESS_AUDIT.md).
 
 ## v0.7.0: Study 30 leading models, independently build Atlas FusionNet
 
-We researched **30 credible econometric risk methods, time-series architectures, conditional uncertainty approaches and portfolio optimization frameworks** with primary paper links and explicit pros/cons; see [the model research matrix](docs/MODEL_RESEARCH_ATLAS_30.md). This does **not** mean we have trained 30 third-party AI models. GARCH/HAR, TFT, iTransformer, N-HiTS, CAViaR/EVT, DCC/shrinkage, HRP and CVaR provide *design hypotheses*, not uncredited copied implementations.
+We researched **30 credible econometric risk methods, time-series architectures, conditional uncertainty approaches and portfolio optimization frameworks** with primary paper links and explicit pros/cons; see [the model research matrix](docs/quant/MODEL_RESEARCH_ATLAS_30.md). This does **not** mean we have trained 30 third-party AI models. GARCH/HAR, TFT, iTransformer, N-HiTS, CAViaR/EVT, DCC/shrinkage, HRP and CVaR provide *design hypotheses*, not uncredited copied implementations.
 
-New **original Atlas FusionNet** trains from scratch on shared multiasset 5/10/L-day features using our softmax-gated 3-expert model predicting **forward RMS volatility and downside RMS**. A new independently implemented past-only **correlation-shrunken risk-aware allocator** has three controlled modes (`inverse_risk`, `downside`, `shrinkage`) for falsifiable comparison. All choices must pass the unchanged 0–1x cash-account stress, historical ES, model-vol, max-name and drawdown limits, with optional risk-rechecked no-trade band. See [FusionNet architecture and Windows commands](docs/ATLAS_FUSIONNET_V1.md). The model is only an experimental architecture: its future success and 2000–2026 backtest result are **not known yet**.
+New **original Atlas FusionNet** trains from scratch on shared multiasset 5/10/L-day features using our softmax-gated 3-expert model predicting **forward RMS volatility and downside RMS**. A new independently implemented past-only **correlation-shrunken risk-aware allocator** has three controlled modes (`inverse_risk`, `downside`, `shrinkage`) for falsifiable comparison. All choices must pass the unchanged 0–1x cash-account stress, historical ES, model-vol, max-name and drawdown limits, with optional risk-rechecked no-trade band. See [FusionNet architecture and Windows commands](docs/quant/ATLAS_FUSIONNET_V1.md). The model is only an experimental architecture: its future success and 2000–2026 backtest result are **not known yet**.
 
 ## What works today
 
@@ -256,7 +265,7 @@ A **past-only rolling** backtest is available. This avoids fitting once on the w
 .\.venv\Scripts\python.exe -m atlaspm.cli backtest --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.6 --leverage 1 --fee-bps 5 --output local_data\backtest_cash.json
 ```
 
-The command prints a summary and saves full daily-equity and rebalance histories locally. It compares against **same-universe equal-weight buy-and-hold**, not SPY, and is a simulation with simplified fees, financing and execution. See [walk-forward methodology](docs/BACKTEST.md) before interpreting its performance.
+The command prints a summary and saves full daily-equity and rebalance histories locally. It compares against **same-universe equal-weight buy-and-hold**, not SPY, and is a simulation with simplified fees, financing and execution. See [walk-forward methodology](docs/quant/BACKTEST.md) before interpreting its performance.
 
 ## Compare cash and margin backtests (risk audit)
 
@@ -266,7 +275,7 @@ Once both `backtest_cash.json` and `backtest_margin_2x.json` exist, run:
 .\.venv\Scripts\python.exe -m atlaspm.cli audit --cash local_data\backtest_cash.json --margin local_data\backtest_margin_2x.json --output local_data\risk_audit.json
 ```
 
-The audit compares annualized returns, volatility and drawdowns, highlights benchmark underperformance and **shows every simulated maintenance breach date**. It refuses mismatched simulations and explicitly labels results as research only. [Risk audit documentation](docs/AUDIT.md).
+The audit compares annualized returns, volatility and drawdowns, highlights benchmark underperformance and **shows every simulated maintenance breach date**. It refuses mismatched simulations and explicitly labels results as research only. [Risk audit documentation](docs/quant/AUDIT.md).
 
 ## New: SPY benchmark and margin deleveraging stress mode (v0.2.4)
 
@@ -285,7 +294,7 @@ The 2003–2026 example has highlighted potential maintenance breaches under hyp
 
 The SPY comparison now also estimates **historical Beta, correlation, tracking error, information ratio and annual calendar-year excess returns**. Detailed yearly rows stay in `local_data/spy_comparison_forced.json`, while the CLI prints a compact summary. The figures are descriptive, not proof of alpha.
 
-See [hypothetical margin stress rules](docs/MARGIN_SIM.md) and [independent SPY benchmark](docs/BENCHMARK.md). Neither feature validates live trading or eliminates survivorship bias.
+See [hypothetical margin stress rules](docs/quant/MARGIN_SIM.md) and [independent SPY benchmark](docs/quant/BENCHMARK.md). Neither feature validates live trading or eliminates survivorship bias.
 
 ## Pre-trade portfolio risk budget (v0.2.5)
 
@@ -295,7 +304,7 @@ The new read-only `risk-check` command evaluates a **hypothetical** optimized po
 .\.venv\Scripts\python.exe -m atlaspm.cli risk-check --file local_data\estimates.json --leverage 2 --risk-aversion 4 --max-weight 0.6 --max-name-weight 0.6 --max-volatility 0.30 --stress-decline 0.30 --max-stress-loss 0.40 --maintenance 0.30 --min-buffer 0.05 --output local_data\risk_budget_2x.json
 ```
 
-If the modeled 2× candidate fails, it reports **which constraints failed** and whether any fully invested exposure of 1× or more could satisfy the assumptions. This is **not** broker-approved buying power and does not change live orders or past backtests. See [risk-budget methodology](docs/RISK_BUDGET.md).
+If the modeled 2× candidate fails, it reports **which constraints failed** and whether any fully invested exposure of 1× or more could satisfy the assumptions. This is **not** broker-approved buying power and does not change live orders or past backtests. See [risk-budget methodology](docs/quant/RISK_BUDGET.md).
 
 ## Dynamic cash and margin risk budgets (v0.3.0)
 
@@ -307,7 +316,7 @@ If the modeled 2× candidate fails, it reports **which constraints failed** and 
 .\.venv\Scripts\python.exe -m atlaspm.cli benchmark-spy --cash local_data\backtest_cash.json --margin local_data\backtest_risk_managed.json --spy local_data\spy_prices.csv --output local_data\spy_comparison_risk_managed.json
 ```
 
-The second `--margin` parameter is merely the name of the second comparison case; the adaptive strategy may use no margin at many dates. **Do not interpret in-sample risk rules or results as future Alpha.** Read [adaptive risk methodology](docs/ADAPTIVE_RISK.md) and the strategy's caveats.
+The second `--margin` parameter is merely the name of the second comparison case; the adaptive strategy may use no margin at many dates. **Do not interpret in-sample risk rules or results as future Alpha.** Read [adaptive risk methodology](docs/quant/ADAPTIVE_RISK.md) and the strategy's caveats.
 
 ## Optional rolling historical tail-loss budget (v0.3.1)
 
@@ -317,11 +326,11 @@ Extend `backtest-risk` with an empirical historical **one-day 5%-tail Expected S
 .\.venv\Scripts\python.exe -m atlaspm.cli backtest-risk --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.60 --max-leverage 2 --max-volatility 0.30 --stress-decline 0.30 --max-stress-loss 0.40 --maintenance 0.30 --min-buffer 0.05 --apr 0.065 --max-financing-cost 0.08 --fee-bps 5 --max-daily-tail-loss 0.03 --tail-fraction 0.05 --output local_data\backtest_tail_3pct.json
 ```
 
-Only past observations are used at each scheduled rebalance. An empirical 3% worst-tail average loss bound is **not** a maximum drawdown or crash-protection guarantee. Omitting `--max-daily-tail-loss` retains the previous behavior. This initial feature scales total exposure, not weights. Read [tail-loss methodology](docs/TAIL_RISK.md).
+Only past observations are used at each scheduled rebalance. An empirical 3% worst-tail average loss bound is **not** a maximum drawdown or crash-protection guarantee. Omitting `--max-daily-tail-loss` retains the previous behavior. This initial feature scales total exposure, not weights. Read [tail-loss methodology](docs/quant/TAIL_RISK.md).
 
 ## Institutional architecture (v0.4.0 contract milestone)
 
-AtlasPM is being redesigned toward an **institutional PMS + RMS + collateral + hedge + OMS** stack. Read [Institutional architecture](docs/INSTITUTIONAL_ARCHITECTURE.md) and the [Phased institutional roadmap](docs/INSTITUTIONAL_ROADMAP.md).
+AtlasPM is being redesigned toward an **institutional PMS + RMS + collateral + hedge + OMS** stack. Read [Institutional architecture](docs/quant/INSTITUTIONAL_ARCHITECTURE.md) and the [Phased institutional roadmap](docs/quant/INSTITUTIONAL_ROADMAP.md).
 
 The first integrated building block is a **fail-closed, paper-only trade-intent risk gate**. It handles NORMAL/WATCH/DE_RISK/CRITICAL/HALT states, separate cash/margin account constraints, source freshness and reconciliation, broker-style hypothetical What-If preview, verified-vs-unknown Treasury collateral credits, and protective option premium and permissions. It produces audit reasons; it **never connects to a real broker, fetches real account data or places trades**.
 
@@ -347,7 +356,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli ledger-report --file examples\institutional_ledger.json --output local_data\institutional_ledger_report.json
 ~~~
 
-The sample is **100% synthetic**. No broker API is connected. Even a reconciled example ledger is not authorization for actual margin borrowing or options. See [Ledger methodology](docs/INSTITUTIONAL_LEDGER.md).
+The sample is **100% synthetic**. No broker API is connected. Even a reconciled example ledger is not authorization for actual margin borrowing or options. See [Ledger methodology](docs/quant/INSTITUTIONAL_LEDGER.md).
 
 ## Read-only add/reduce order planner (v0.4.2)
 
@@ -360,7 +369,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli plan-equity --ledger examples\institutional_ledger.json --plan examples\institutional_equity_plan.json --output local_data\institutional_equity_plan_report.json
 ~~~
 
-The example consists **entirely of invented broker and price data**. It creates neither live nor paper orders. A fictional ALLOW_PAPER_INTENT response is not real buying-power confirmation. See [equity planning documentation](docs/EQUITY_PLANNER.md) for limitations and safety controls.
+The example consists **entirely of invented broker and price data**. It creates neither live nor paper orders. A fictional ALLOW_PAPER_INTENT response is not real buying-power confirmation. See [equity planning documentation](docs/quant/EQUITY_PLANNER.md) for limitations and safety controls.
 
 ## Integrated stock, Treasury, protective-put and margin basket (v0.4.3)
 
@@ -373,7 +382,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli plan-basket --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --output local_data\institutional_batch_report.json
 ~~~
 
-Entirely fictional market, brokerage, and order data. An internal paper-intent approval is **not** a broker approval, not a hedge performance promise and does not submit orders. Read [multi-asset basket methodology](docs/MULTI_ASSET_BATCH.md).
+Entirely fictional market, brokerage, and order data. An internal paper-intent approval is **not** a broker approval, not a hedge performance promise and does not submit orders. Read [multi-asset basket methodology](docs/quant/MULTI_ASSET_BATCH.md).
 
 ## Offline Paper OMS event replay (v0.4.4)
 
@@ -386,7 +395,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli oms-replay --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --events examples\paper_oms_events.json --output local_data\paper_oms_report.json
 ~~~
 
-All events and brokerage previews are **entirely fictional**. This is NOT a connection to real IBKR paper trading and NEVER submits an order. See [Paper OMS design](docs/PAPER_OMS.md).
+All events and brokerage previews are **entirely fictional**. This is NOT a connection to real IBKR paper trading and NEVER submits an order. See [Paper OMS design](docs/quant/PAPER_OMS.md).
 
 ## After-fill portfolio guard and replay audit (v0.4.5)
 
@@ -399,7 +408,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli oms-replay --ledger examples\institutional_batch_ledger.json --plan examples\institutional_batch_plan.json --events examples\paper_oms_events.json --output local_data\paper_oms_report.json
 ~~~
 
-Both features operate **offline with fabricated broker data**. A hash chain is not a signature, and static post-fill limits are not a broker margin recheck. No real or broker-paper orders are placed. See [OMS risk and audit notes](docs/OMS_RISK_AUDIT.md).
+Both features operate **offline with fabricated broker data**. A hash chain is not a signature, and static post-fill limits are not a broker margin recheck. No real or broker-paper orders are placed. See [OMS risk and audit notes](docs/quant/OMS_RISK_AUDIT.md).
 
 ## Offline broker-export versus portfolio-ledger reconciliation (v0.4.6)
 
@@ -412,7 +421,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli broker-reconcile --ledger examples\institutional_batch_ledger.json --snapshot examples\broker_export_synthetic.json --output local_data\broker_reconciliation.json
 ~~~
 
-The demonstration uses **two invented local JSON files**, NOT an authenticated export from IBKR. A matching result remains explicitly labeled MATCHED_UNVERIFIED_EXPORT; it neither confirms true brokerage buying power nor enables orders. See [broker snapshot reconciliation contracts](docs/BROKER_RECONCILIATION.md).
+The demonstration uses **two invented local JSON files**, NOT an authenticated export from IBKR. A matching result remains explicitly labeled MATCHED_UNVERIFIED_EXPORT; it neither confirms true brokerage buying power nor enables orders. See [broker snapshot reconciliation contracts](docs/quant/BROKER_RECONCILIATION.md).
 
 ## IBKR Client Portal Gateway — guarded read-only ingestion (v0.4.7)
 
@@ -427,7 +436,7 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli ibkr-readonly --fixture examples\ibkr_gateway_synthetic.json --account DU1234567 --output local_data\ibkr_fixture_capture.json
 ~~~
 
-Actual IBKR account access is **optional**, requires the user to launch the official local Gateway, log in themselves and explicitly supply --allow-local-gateway with a verified localhost TLS certificate. The complete raw output is private and restricted to the Git-ignored local_data directory, while the console is redacted. **Do not upload real snapshots, broker session information, credentials or account identifiers.** See [IBKR read-only setup and limitations](docs/IBKR_READONLY.md).
+Actual IBKR account access is **optional**, requires the user to launch the official local Gateway, log in themselves and explicitly supply --allow-local-gateway with a verified localhost TLS certificate. The complete raw output is private and restricted to the Git-ignored local_data directory, while the console is redacted. **Do not upload real snapshots, broker session information, credentials or account identifiers.** See [IBKR read-only setup and limitations](docs/quant/IBKR_READONLY.md).
 
 ## IBKR conid and instrument identity mapping diagnostic (v0.4.8)
 
@@ -441,65 +450,49 @@ git pull origin main
 .\.venv\Scripts\python.exe -m atlaspm.cli ibkr-map-check --capture local_data\ibkr_fixture_capture.json --mapping examples\ibkr_mapping_synthetic.json --output local_data\ibkr_mapping_check.json
 ~~~
 
-Both inputs are **entirely fictional**. A completed identity mapping is still marked REVIEW_REQUIRED and can NEVER authorize brokerage risk or trading. The full mapping report stays in Git-ignored local_data and the terminal prints only a redacted summary. Read [IBKR mapping methodology](docs/IBKR_MAPPING.md).
+Both inputs are **entirely fictional**. A completed identity mapping is still marked REVIEW_REQUIRED and can NEVER authorize brokerage risk or trading. The full mapping report stays in Git-ignored local_data and the terminal prints only a redacted summary. Read [IBKR mapping methodology](docs/quant/IBKR_MAPPING.md).
 
-## Example structure
+## Project structure — quant and stock selection separated
 
 ```text
 AtlasPM/
-├── .github/workflows/ci.yml
-├── docs/
-│   ├── IBKR_MAPPING.md
-│   ├── IBKR_READONLY.md
-│   ├── BROKER_RECONCILIATION.md
-│   ├── OMS_RISK_AUDIT.md
-│   ├── PAPER_OMS.md
-│   ├── MULTI_ASSET_BATCH.md
-│   ├── EQUITY_PLANNER.md
-│   ├── INSTITUTIONAL_LEDGER.md
-│   ├── INSTITUTIONAL_ROADMAP.md
-│   ├── INSTITUTIONAL_ARCHITECTURE.md
-│   ├── TAIL_RISK.md
-│   ├── ADAPTIVE_RISK.md
-│   ├── RISK_BUDGET.md
-│   ├── MARGIN_SIM.md
-│   ├── BENCHMARK.md
-│   ├── AUDIT.md
-│   ├── BACKTEST.md
-│   ├── DATA.md
-│   ├── ARCHITECTURE.md
-│   ├── RISK_POLICY.md
-│   └── ROADMAP.md
-├── examples/portfolio.json
-├── examples/optimizer.json
 ├── src/atlaspm/
-│   ├── __init__.py
-│   ├── cli.py
-│   ├── ibkr_mapping.py
-│   ├── ibkr_gateway.py
-│   ├── broker_reconcile.py
-│   ├── oms_controls.py
-│   ├── paper_oms.py
-│   ├── institutional_batch.py
-│   ├── institutional_rebalance.py
-│   ├── institutional_ledger.py
-│   ├── institutional_gate.py
-│   ├── tail_risk.py
-│   ├── risk_backtest.py
-│   ├── risk_budget.py
-│   ├── benchmark.py
-│   ├── audit.py
-│   ├── backtest.py
-│   ├── performance.py
-│   ├── historical.py
-│   ├── mean_variance.py
-│   ├── models.py
-│   ├── optimizer.py
-│   └── portfolio.py
+│   ├── cli.py                     # One stable command-line entrypoint
+│   ├── selection/                 # Stock screening, AI V1/V2, market data
+│   │   ├── ai_stock_ranker.py
+│   │   ├── ai_stock_ranker_v2.py
+│   │   ├── alpha_eligibility.py
+│   │   ├── monthly_stock_selection.py
+│   │   ├── stock_screener.py
+│   │   ├── stock_walkforward.py
+│   │   ├── us_market_prices.py
+│   │   └── us_market_universe.py
+│   ├── quant/                     # RiskNet/FusionNet, portfolios, IBKR
+│   │   ├── atlas_risknet.py
+│   │   ├── atlas_fusionnet.py
+│   │   ├── portfolio.py
+│   │   ├── optimizer.py
+│   │   └── ...                    # Other quant/risk/OMS/broker modules
+│   └── *.py                       # Thin legacy import aliases
 ├── tests/
-├── pyproject.toml
-└── SECURITY.md
+│   ├── selection/                 # Stock-selection regression tests
+│   ├── quant/                     # Quantitative and risk regression tests
+│   └── test_cli.py                # Shared entrypoint checks
+├── docs/
+│   ├── selection/                 # Stock research, market, monthly, gates
+│   ├── quant/                     # Quant, risk, broker/OMS documentation
+│   └── ARCHITECTURE.md            # Cross-cutting project architecture
+├── scripts/
+│   └── selection/                 # Monthly stock research PowerShell runner
+├── examples/                     # Existing synthetic example inputs
+└── local_data/                    # Private, gitignored models and data
 ```
+
+**Compatibility:** imports like `from atlaspm.ai_stock_ranker_v2 import rank_stocks_v2`
+and the existing `python -m atlaspm.cli ...` remain supported. The root
+`src/atlaspm/*.py` import aliases are deliberately tiny. Edit implementations
+in `selection/` or `quant/`, not those aliases. This organization does not
+connect stock eligibility to real broker execution.
 
 ## Important distinctions
 

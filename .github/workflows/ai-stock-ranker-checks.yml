@@ -3,11 +3,12 @@ name: AI stock ranker fitted-model checks
 on:
   push:
     branches:
-      - feature/ai-stock-ranker-lightgbm-v1
+      - main
+      - refactor/separate-quant-and-stock-selection
   pull_request:
     paths:
-      - "src/atlaspm/ai_stock_ranker.py"
-      - "tests/test_ai_stock_ranker.py"
+      - "src/atlaspm/selection/ai_stock_ranker.py"
+      - "tests/selection/test_ai_stock_ranker.py"
       - ".github/workflows/ai-stock-ranker-checks.yml"
   workflow_dispatch:
 

@@ -3,14 +3,14 @@ name: Monthly AI stock-selection research checks
 on:
   push:
     branches:
-      - feature/monthly-ai-stock-selection-v1
-      - feature/ai-alpha-eligibility-gate-v1
+      - main
+      - refactor/separate-quant-and-stock-selection
   pull_request:
     paths:
-      - "src/atlaspm/monthly_stock_selection.py"
-      - "tests/test_monthly_stock_selection.py"
-      - "src/atlaspm/alpha_eligibility.py"
-      - "tests/test_alpha_eligibility.py"
+      - "src/atlaspm/selection/monthly_stock_selection.py"
+      - "tests/selection/test_monthly_stock_selection.py"
+      - "src/atlaspm/selection/alpha_eligibility.py"
+      - "tests/selection/test_alpha_eligibility.py"
       - ".github/workflows/monthly-ai-stock-selection-checks.yml"
   workflow_dispatch:
 

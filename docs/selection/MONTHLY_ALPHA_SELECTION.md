@@ -90,7 +90,7 @@ only when intentionally replacing an old research snapshot.
 A ready-to-run **Windows PowerShell script** is included:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Invoke-MonthlyStockResearch.ps1 -Month 2026-10
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\selection\Invoke-MonthlyStockResearch.ps1 -Month 2026-10
 ```
 
 If \`-Month\` is omitted, it targets the **previous calendar month**.
