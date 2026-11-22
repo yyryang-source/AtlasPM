@@ -46,6 +46,7 @@ from atlaspm.us_market_universe import build_us_listed_universe
 from atlaspm.us_market_prices import sync_us_market_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
+from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -418,6 +419,25 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    monthly = sub.add_parser(
+        "stock-ai-monthly",
+        help="Produce calendar-correct NYSE month-end pure AI stock research; no orders",
+    )
+    monthly.add_argument("--prices", type=Path, required=True)
+    monthly.add_argument("--benchmark-prices", type=Path, required=True)
+    monthly.add_argument("--model", type=Path, required=True)
+    monthly.add_argument("--month", required=True, help="Calendar month YYYY-MM")
+    monthly.add_argument("--universe", type=Path, default=None,
+                         help="Optional listing manifest for real full-market coverage audit")
+    monthly.add_argument("--benchmark-symbol", default="SPY")
+    monthly.add_argument("--min-scored", type=int, default=20)
+    monthly.add_argument("--min-market-coverage-pct", type=float, default=90)
+    monthly.add_argument("--max-training-age-days", type=int, default=365)
+    monthly.add_argument("--output-dir", type=Path,
+                         default=Path("local_data/monthly_stock_research"))
+    monthly.add_argument("--overwrite", action="store_true",
+                         help="Explicitly replace previous month's research snapshot")
+
     ai_train_v2 = sub.add_parser(
         "stock-ai-train-v2",
         help="Train a pure stock learning-to-rank LightGBM rank_xendcg model",
@@ -571,7 +591,46 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-ai-train-v2":
+        if args.command == "stock-ai-monthly":
+            output_probe = require_private_output(args.output_dir / "_output_probe.json")
+            model_path = require_private_output(args.model)
+            output_dir = output_probe.parent
+            source_paths = {
+                args.prices.expanduser().resolve(),
+                args.benchmark_prices.expanduser().resolve(),
+                model_path,
+                model_path.with_suffix(model_path.suffix + ".meta.json"),
+            }
+            if args.universe is not None:
+                source_paths.add(args.universe.expanduser().resolve())
+            if any(p == output_dir or p.is_relative_to(output_dir)
+                   for p in source_paths):
+                raise ValueError("Monthly output directory must not contain input/model files")
+            result = monthly_candidates(
+                args.prices, args.benchmark_prices, model_path,
+                month=args.month, benchmark_symbol=args.benchmark_symbol,
+                universe_path=args.universe, min_scored=args.min_scored,
+                min_market_coverage_pct=args.min_market_coverage_pct,
+                max_training_age_days=args.max_training_age_days,
+            )
+            artifacts = write_monthly_research(
+                result, output_dir, overwrite=args.overwrite
+            )
+            report = {
+                "month": result["month"],
+                "as_of_nyse_session": result["as_of_nyse_session"],
+                "report_status": result["report_status"],
+                "review_reasons": result["review_reasons"],
+                "data_quality": result["data_quality"],
+                "top20_returned": result["top_20"]["returned"],
+                "top50_returned": result["top_50"]["returned"],
+                "top20_ambiguous": result["top_20"]["boundary_tied"],
+                "top50_ambiguous": result["top_50"]["boundary_tied"],
+                "artifacts": artifacts,
+                "research_only": True,
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-train-v2":
             destination = require_private_output(args.model_output)
             report_path = require_private_output(args.report)
             if destination.suffix.lower() != ".txt" or report_path.suffix.lower() != ".json":
