@@ -112,7 +112,7 @@ class AuditMethodologyTests(unittest.TestCase):
                          ["sessions"],0)
         self.assertEqual(first["diagnostics"]["risknet"]
                          ["predefined_market_windows"]["stock_bond_2022"]
-                         ["sessions"],100)
+                         ["sessions"],98) # 2022-12-31 is excluded by the preset end date
         for key in ("risknet_minus_traditional","risknet_minus_dual"):
             boot=first["paired_uncertainty"][key]
             self.assertEqual(boot["resamples"],100)
