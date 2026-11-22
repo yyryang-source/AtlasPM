@@ -24,3 +24,6 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke test CLI
         run: python -m atlaspm.cli analyze --file examples/portfolio.json
+
+      - name: Smoke test optimizer
+        run: python -m atlaspm.cli optimize --file examples/optimizer.json
