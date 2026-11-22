@@ -55,3 +55,5 @@ jobs:
         run: python -m atlaspm.cli ibkr-financing-check --capture local_data/ci_ibkr_private_capture.json --mapping examples/ibkr_mapping_synthetic.json --statement examples/ibkr_financing_synthetic.json --output local_data/ci_ibkr_financing.json
       - name: Smoke test read-only IBKR securities margin monitor (synthetic, no network)
         run: python -m atlaspm.cli ibkr-margin-monitor --fixture examples/ibkr_gateway_synthetic.json --account DU1234567 --output local_data/ci_ibkr_margin_monitor.json
+      - name: Smoke test v0.4.11 static financing and margin stress (synthetic, no network)
+        run: python -m atlaspm.cli ibkr-stress --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --scenarios examples/ibkr_margin_stress_synthetic.json --output local_data/ci_ibkr_margin_stress.json
