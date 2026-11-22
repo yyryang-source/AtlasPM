@@ -61,21 +61,33 @@
 - [ ] Integrate past-only risk limits inside the walk-forward rebalancing process
 - [ ] Add cash allocations under 1× and data-driven drawdown-control experiments
 
-## v0.3 — optimization and AI experiments
+## v0.3.0 — dynamic past-only risk budgets (implemented; awaiting full local validation)
+
+- [x] Independent opt-in `backtest-risk` engine; original baseline results remain unchanged
+- [x] Window-local sample volatility to cap leverage at each quarter's rebalance
+- [x] Cash allocation for modeled exposure below 1×; borrowing accounting above 1×
+- [x] Stress-loss, hypothetical maintenance-buffer, fee, APR and concentration budgets
+- [x] Read-only signals one close before execution; explicit cash/borrow/debt ledger reconciliation
+- [x] Offline regression and CLI smoke tests
+- [ ] Validate 2003–2026 risk-managed results locally against baseline and SPY
+- [ ] Test sensitivity across genuinely unseen time periods and independent symbol universes
+- [ ] Replace historical fixed APR and simple liquidation rules with realistically sourced financing schedules and conservative fills
+
+## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
 - [ ] Out-of-sample baselines before training
 - [ ] Local ML training on Windows with reproducible seeds/configs
 - [ ] Leakage-safe validation and model cards; no unsupported return promises
 
-## v0.4 — broker sandbox
+## v0.5 — broker sandbox
 
 - [ ] Read-only positions and balances adapter
 - [ ] Broker-supported simulated/paper order routing
 - [ ] Reconciliation, audit logs, rate limits, idempotency
 - [ ] Live trading permanently off by default; explicit permissions and safety review required
 
-## v0.5 — interface
+## v0.6 — interface
 
 - [ ] Browser dashboard for balances, portfolios and risk explanations
 - [ ] Scenario comparison, cash/margin account selection and approval workflow
