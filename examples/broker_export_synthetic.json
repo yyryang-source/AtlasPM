@@ -1,0 +1,34 @@
+{
+  "_synthetic_fixture": "This is NOT exported by a real broker. All figures and account identifiers are invented.",
+  "source": "imported_broker_export",
+  "account_id": "DEMO-MARGIN",
+  "account_type": "margin",
+  "currency": "USD",
+  "captured_at": "2026-11-20T20:59:45Z",
+  "max_snapshot_age_seconds": 120,
+  "cash_tolerance_usd": 0.01,
+  "position_value_tolerance_usd": 0.01,
+  "equity_quantity_tolerance": 0.000001,
+  "settled_cash": 16000,
+  "unsettled_receivable": 500,
+  "unsettled_payable": 300,
+  "margin_debt": 50000,
+  "accrued_financing_interest": 150,
+  "net_liquidation": 123950,
+  "available_funds": 55000,
+  "excess_liquidity": 40000,
+  "positions": [
+    {
+      "type": "equity",
+      "identifier": "QQQ",
+      "shares": 200,
+      "market_value": 60000
+    },
+    {
+      "type": "treasury",
+      "identifier": "91282CDE0",
+      "face_value": 100000,
+      "market_value": 97900
+    }
+  ]
+}
