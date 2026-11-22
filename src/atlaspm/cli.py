@@ -44,6 +44,7 @@ from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
 from atlaspm.us_market_universe import build_us_listed_universe
 from atlaspm.us_market_prices import sync_us_market_prices
+from atlaspm.selection.us_market_quality import audit_current_us_stock_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
@@ -541,6 +542,22 @@ def build_parser() -> argparse.ArgumentParser:
     market_universe.add_argument("--nasdaq-file", type=Path, default=None)
     market_universe.add_argument("--other-file", type=Path, default=None)
 
+    market_audit = sub.add_parser(
+        "stock-market-audit",
+        help="Audit whole-US-stock quote CSV against current listings and real NYSE sessions",
+    )
+    market_audit.add_argument("--universe", type=Path, required=True)
+    market_audit.add_argument("--prices", type=Path, required=True)
+    market_audit.add_argument("--as-of", required=True, help="Actual NYSE session YYYY-MM-DD")
+    market_audit.add_argument("--min-history-sessions", type=int, default=253)
+    market_audit.add_argument("--recent-sessions", type=int, default=63)
+    market_audit.add_argument("--min-recent-coverage-pct", type=float, default=85)
+    market_audit.add_argument("--min-month-end-coverage-pct", type=float, default=90)
+    market_audit.add_argument("--min-eligible-names", type=int, default=500)
+    market_audit.add_argument("--max-manifest-age-days", type=int, default=7)
+    market_audit.add_argument("--output", type=Path,
+                              default=Path("local_data/us_market_data_audit.json"))
+
     market_sync = sub.add_parser(
         "stock-sync-market",
         help="Resume-safe quote download for every symbol in a market universe",
@@ -846,6 +863,44 @@ def main(argv: list[str] | None = None) -> int:
                 "report": str(report_path.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
                 "warning": "Current listings only, NOT historical all stocks.",
+            }
+        elif args.command == "stock-market-audit":
+            destination = require_private_output(args.output)
+            source_paths = {
+                args.universe.expanduser().resolve(),
+                args.prices.expanduser().resolve(),
+            }
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Market audit output must be a private .json")
+            if destination in source_paths:
+                raise ValueError("Market audit may not overwrite source price/universe files")
+            details = audit_current_us_stock_prices(
+                universe_path=args.universe,
+                prices_path=args.prices,
+                as_of=args.as_of,
+                min_history_sessions=args.min_history_sessions,
+                recent_sessions=args.recent_sessions,
+                min_recent_coverage_pct=args.min_recent_coverage_pct,
+                min_month_end_coverage_pct=args.min_month_end_coverage_pct,
+                min_eligible_names=args.min_eligible_names,
+                max_manifest_age_days=args.max_manifest_age_days,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(details, indent=2, ensure_ascii=False, sort_keys=True,
+                           allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "market_data_status": details["market_data_status"],
+                "listed_stock_universe_count": details["listed_stock_universe_count"],
+                "stocks_with_exact_decision_close": details["stocks_with_exact_decision_close"],
+                "decision_close_coverage_pct": details["decision_close_coverage_pct"],
+                "eligible_history_and_freshness": details["eligible_history_and_freshness"],
+                "review_reasons": details["review_reasons"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "research_only": True,
+                "live_execution_enabled": False,
             }
         elif args.command == "stock-sync-market":
             destination = require_private_output(args.output)
