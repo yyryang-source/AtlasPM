@@ -15,6 +15,7 @@
 - `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
 - `audit.py`: compare saved cash and margin curves and report stress warnings.
 - `tail_risk.py`: historical one-day Expected Shortfall from the worst fixed fraction of aligned trailing daily returns; optional research budget, not future prediction.
+- `ibkr_gateway.py`: optional explicit-opt-in GET-only localhost HTTPS Client Portal Gateway capture, verified TLS, raw private output, no account-to-risk authorization mapping.
 - `broker_reconcile.py`: offline, unauthenticated imported broker export vs ledger comparison with fail-closed NLV/cash/positions/collateral checks; no API calls.
 - `oms_controls.py`: offline after-FILL marked gross/stress risk guard and locally verifiable unsigned SHA-256 event audit chain; not broker-authenticated.
 - `paper_oms.py`: offline order event replay with partial fills, idempotency, cancel/reject/unknown states, settlement and marked-account audit; no broker connectivity.
