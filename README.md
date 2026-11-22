@@ -29,6 +29,7 @@ py -m venv .venv
 
 .\.venv\Scripts\python.exe -m atlaspm.cli analyze --file examples\portfolio.json --declines 0.10 0.20 0.30 --apr 0.065
 .\.venv\Scripts\python.exe -m atlaspm.cli allocate --vol QQQ=0.24 NVDA=0.50 AAPL=0.30 GOOGL=0.28 --max-weight 0.45
+.\.venv\Scripts\python.exe -m atlaspm.cli optimize --file examples\optimizer.json --risk-aversion 4 --max-weight 0.6 --leverage 1
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
@@ -44,6 +45,7 @@ AtlasPM/
 │   ├── RISK_POLICY.md
 │   └── ROADMAP.md
 ├── examples/portfolio.json
+├── examples/optimizer.json
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
@@ -58,7 +60,7 @@ AtlasPM/
 
 ## Important distinctions
 
-This project does **not** connect to a broker in v0.1. A maintenance rate supplied in the example is only an **illustrative assumption**; a broker's house requirements, concentration rules and liquidation timing can change without notice. The model does not predict actual margin calls or execution. Market stress is simplified (all positions move down by the same fraction, cash and debt held constant).
+This project does **not** connect to a broker in v0.2. A maintenance rate supplied in the example is only an **illustrative assumption**; a broker's house requirements, concentration rules and liquidation timing can change without notice. The model does not predict actual margin calls or execution. Market stress is simplified (all positions move down by the same fraction, cash and debt held constant).
 
 The mean-variance example uses made-up expected returns and covariance and must **not** be treated as a prediction or a broker margin check. Cash accounts have no margin maintenance requirement.
 
