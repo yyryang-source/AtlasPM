@@ -1,0 +1,25 @@
+{
+  "_synthetic_fixture": "Entirely invented IBKR conids and local securities. Manual flags are fictional and do not authenticate the broker or position units.",
+  "account_id": "DU1234567",
+  "max_capture_age_seconds": 600,
+  "contracts": [
+    {
+      "conid": 101010,
+      "ibkr_asset_class": "STK",
+      "atlaspm_type": "equity",
+      "identifier": "QQQ",
+      "quantity_units": "SHARES",
+      "manually_reviewed": true,
+      "units_confirmed": true
+    },
+    {
+      "conid": 202020,
+      "ibkr_asset_class": "BOND",
+      "atlaspm_type": "treasury",
+      "identifier": "91282CDE0",
+      "quantity_units": "FACE_USD",
+      "manually_reviewed": true,
+      "units_confirmed": true
+    }
+  ]
+}
