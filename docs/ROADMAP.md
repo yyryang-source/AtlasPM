@@ -21,8 +21,16 @@
 - [x] Strict CSV schema, common-date calendar alignment and source metadata
 - [ ] Additional vetted data providers and corporate-action validation
 - [ ] Total return and corporate-action handling
-- [ ] Walk-forward backtesting, look-ahead/leakage checks, realistic fees and slippage
+- [x] Walk-forward rolling backtest with no future-return exposure, fee and financing assumptions, drawdowns and same-universe benchmark
+- [ ] Improve slippage, exchange-calendar handling, broker-specific margin requirements and forced-liquidation modeling
 - [ ] Historical multi-asset covariance, factor and drawdown risk reports
+
+## v0.2.1 — backtest prototype (implemented)
+
+- [x] 3-year rolling lookback and quarterly rebalance defaults
+- [x] Buy-and-hold equal-weight benchmark on matching dates
+- [x] Position drift, gross-leverage resets, daily financing interest and trading costs
+- [x] Research-only maintenance-breach flags (not liquidation)
 
 ## v0.3 — optimization and AI experiments
 
