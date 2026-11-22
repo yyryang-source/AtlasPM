@@ -2,13 +2,19 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.4.9 offline IBKR financing and margin account-summary cross-check, layered on v0.4.8 conid mapping. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
+> **Status:** v0.4.10 GET-only IBKR account margin summary monitor and risk diagnostics, layered on the v0.4.9 financing cross-check. Still no trained AI or live brokerage connectivity. Analysis and hypothetical stress tests only. No live broker access or trading, and no machine-learning model has been trained yet. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
 Use `ibkr-financing-check` with an IBKR read-only capture, a manually reviewed conid manifest, and a separately supplied current securities-segment margin/financing statement. The tool checks loan principal claim differences, the Gateway NLV, initial/maintenance formulas, margin cushion, account IDs, and snapshot timestamps. Output is private under `local_data/`. **Every result remains non-executable and unverified:** neither cross-checked numbers nor manually supplied source labels establish authentic broker margin buying power.
 
 See [v0.4.9 PowerShell commands and accounting limits](docs/IBKR_FINANCING.md).
+
+## v0.4.10: Read-only IBKR margin monitoring
+
+`ibkr-margin-monitor` reads an authenticated **local** IBKR Client Portal Gateway `GET /portfolio/{accountId}/summary` (or entirely synthetic fixture) and checks securities-segment NLV, EquityWithLoanValue, initial/maintenance margin, available funds, excess liquidity, account IDs, currency restrictions, timestamps, and basic margin risk buffers. It reports redacted `NORMAL`, `WATCH`, `CRITICAL`, or `BLOCKED_DATA` states. No live margin financing principal is independently verified, and no broker/paper orders can be placed.
+
+Run the quick start and read limitations in [v0.4.10 Margin Monitor](docs/IBKR_MARGIN_MONITOR.md).
 
 ## What works today
 
