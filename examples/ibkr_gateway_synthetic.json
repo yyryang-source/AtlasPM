@@ -51,6 +51,104 @@
         "timestamp": 1795220000,
         "mktValue": 97900
       }
-    ]
+    ],
+    "/portfolio/DU1234567/summary": {
+      "accountcode": {
+        "amount": 0,
+        "currency": null,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": "DU1234567"
+      },
+      "netliquidation": {
+        "amount": 123950,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "netliquidation-s": {
+        "amount": 123950,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "netliquidation-c": {
+        "amount": 0,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "equitywithloanvalue-s": {
+        "amount": 110000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "initmarginreq-s": {
+        "amount": 50000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "maintmarginreq-s": {
+        "amount": 30000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "availablefunds-s": {
+        "amount": 60000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "excessliquidity-s": {
+        "amount": 80000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "lookaheadexcessliquidity-s": {
+        "amount": 78000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "lookaheadinitmarginreq-s": {
+        "amount": 52000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      },
+      "lookaheadmaintmarginreq-s": {
+        "amount": 32000,
+        "currency": 1.1,
+        "isNull": false,
+        "severity": 0,
+        "timestamp": "SYNTHETIC_NOW",
+        "value": null
+      }
+    }
   }
 }
