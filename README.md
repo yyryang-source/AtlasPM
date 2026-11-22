@@ -2,7 +2,7 @@
 
 **AtlasPM** is an open-source, local-first portfolio analysis and research toolkit for cash and margin accounts. The long-term roadmap includes AI-assisted allocation, backtesting, broker integrations, and a web dashboard.
 
-> **Status:** v0.5.0 supervised ML dynamic rebalancing research engine, built on the read-only v0.4.x risk/IBKR diagnostics. ML now trains on expanding historical windows and automatically simulates multi-asset and cash allocations. This is offline cash-account historical research only: no trained live trading model, authenticated IBKR debt, broker risk approval or order execution. Not investment advice.
+> **Status:** v0.5.2 native optional LightGBM research models, combined with v0.5.1 supervised Ridge and historical cash-only AI dynamic rebalancing. Open-source model families are trained locally on user-supplied history, not imported proprietary investment-bank weights. No validated live strategies, authenticated IBKR debt, risk approval or broker execution. Not investment advice.
 
 ## New in v0.4.9: Offline IBKR financing and margin checks
 
@@ -63,6 +63,12 @@ The new `ml-rebalance-backtest` CLI fits **supervised ridge-regression risk fore
 This is the first trained, fully **offline** research model, *not* a proven profitable strategy, real IBKR paper order system or live AI investment manager. Initial gross exposure is restricted to 0–1x with no lending, option positions or actual Treasury coupons. Model coefficients, full decisions, realized historical returns and vendor-specific data are kept private under `local_data/`.
 
 See [v0.5.0 Windows training command, data leakage tests and non-live restrictions](docs/ML_DYNAMIC_REBALANCE.md).
+
+## v0.5.2: Train open-source LightGBM dynamic allocation forecasts
+
+The new `--model lightgbm` choice in `ml-rebalance-backtest` uses the **actual optional LightGBM package** to train expanding-window risk forecasts, then sends them through exactly the same historical automatic rebalance, cash, risk-limit and cost calculation pipeline as existing `--model ridge`. LightGBM is also part of Microsoft's Qlib benchmarks, but the AtlasPM implementation is **not** the official Qlib/Alpha158 pipeline or a proprietary/pretrained institutional weight set. All training is offline, no broker/paper/live orders and 0–1x max equity exposure. The final trained native tree model is saved only inside ignored `local_data/`.
+
+Read [verified open-source model references, licenses and PowerShell training commands](docs/OPEN_SOURCE_MODELS.md).
 
 ## What works today
 
