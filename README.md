@@ -72,12 +72,31 @@ Once both `backtest_cash.json` and `backtest_margin_2x.json` exist, run:
 
 The audit compares annualized returns, volatility and drawdowns, highlights benchmark underperformance and **shows every simulated maintenance breach date**. It refuses mismatched simulations and explicitly labels results as research only. [Risk audit documentation](docs/AUDIT.md).
 
+## New: SPY benchmark and margin deleveraging stress mode (v0.2.3)
+
+The 2003–2026 example has highlighted potential maintenance breaches under hypothetical 2× borrowing. The new mode allows a **next-close, full deleveraging to 1×** stress scenario. This is **not** Interactive Brokers' liquidation algorithm.
+
+```powershell
+# 2× with a one-session delayed deleveraging rule after a simulated breach
+.\.venv\Scripts\python.exe -m atlaspm.cli backtest --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.6 --leverage 2 --apr 0.065 --fee-bps 5 --maintenance 0.30 --margin-policy next_close_deleverage_to_1x --output local_data\backtest_margin_forced.json
+
+# Download independent SPY prices WITHOUT changing the optimizer universe
+.\.venv\Scripts\python.exe -m atlaspm.cli download-prices --symbols SPY --start 2000-01-01 --end 2026-11-23 --output local_data\spy_prices.csv
+
+# Compare with existing cash and margin scenario
+.\.venv\Scripts\python.exe -m atlaspm.cli benchmark-spy --cash local_data\backtest_cash.json --margin local_data\backtest_margin_forced.json --spy local_data\spy_prices.csv --output local_data\spy_comparison_forced.json
+```
+
+See [hypothetical margin stress rules](docs/MARGIN_SIM.md) and [independent SPY benchmark](docs/BENCHMARK.md). Neither feature validates live trading or eliminates survivorship bias.
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── MARGIN_SIM.md
+│   ├── BENCHMARK.md
 │   ├── AUDIT.md
 │   ├── BACKTEST.md
 │   ├── DATA.md
@@ -89,6 +108,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── benchmark.py
 │   ├── audit.py
 │   ├── backtest.py
 │   ├── historical.py
