@@ -17,6 +17,7 @@ from atlaspm.benchmark import compare_spy
 from atlaspm.risk_budget import check_risk_budget
 from atlaspm.risk_backtest import backtest_risk_budget
 from atlaspm.institutional_gate import assess_institutional_intent
+from atlaspm.institutional_ledger import build_institutional_ledger
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -131,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/institutional_preflight.json")
     )
 
+    ledger = sub.add_parser(
+        "ledger-report", help="Read-only cash, stock, Treasury and option accounting"
+    )
+    ledger.add_argument("--file", type=Path, required=True)
+    ledger.add_argument(
+        "--output", type=Path, default=Path("local_data/institutional_ledger_report.json")
+    )
+
     return parser
 
 
@@ -138,7 +147,34 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "institutional-check":
+        if args.command == "ledger-report":
+            payload = json.loads(args.file.read_text(encoding="utf-8"))
+            report = build_institutional_ledger(payload)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": str(args.output),
+                "method": report["method"],
+                "valuation_at": report["valuation_at"],
+                "consolidated": report["consolidated"],
+                "accounts": [
+                    {
+                        "account_id": account["account_id"],
+                        "account_type": account["account_type"],
+                        "net_liquidation_calculated": account["net_liquidation_calculated"],
+                        "broker_reported_net_liquidation": account["broker_reported_net_liquidation"],
+                        "reconciliation_difference": account["reconciliation_difference"],
+                        "account_ledger_ready_for_risk_review": account["account_ledger_ready_for_risk_review"],
+                        "alerts": account["alerts"],
+                    }
+                    for account in report["accounts"]
+                ],
+                "warnings": report["warnings"],
+            }
+        elif args.command == "institutional-check":
             payload = json.loads(args.file.read_text(encoding="utf-8"))
             report = assess_institutional_intent(payload)
             args.output.parent.mkdir(parents=True, exist_ok=True)
