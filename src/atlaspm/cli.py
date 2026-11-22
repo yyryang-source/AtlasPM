@@ -32,6 +32,7 @@ from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin, financing_re
 from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_margin_console
 from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
 from atlaspm.ibkr_multiasset_budget import analyze_multiasset_risk_budget, redacted_multiasset_summary
+from atlaspm.ibkr_reverse_stress import reverse_margin_stress, redacted_reverse_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,6 +267,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/ibkr_multiasset_budget.json")
     )
 
+    reverse = sub.add_parser(
+        "ibkr-reverse-stress",
+        help="Offline reverse stress: assumed market decline needed to hit margin and buffer limits",
+    )
+    reverse.add_argument("--budget", type=Path, required=True)
+    reverse.add_argument("--assumptions", type=Path, required=True)
+    reverse.add_argument(
+        "--output", type=Path, default=Path("local_data/ibkr_reverse_stress.json")
+    )
+
     return parser
 
 
@@ -273,7 +284,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "ibkr-multiasset-budget":
+        if args.command == "ibkr-reverse-stress":
+            destination = require_private_output(args.output)
+            upstream_path = require_private_output(args.budget)
+            try:
+                upstream = json.loads(upstream_path.read_text(encoding="utf-8"))
+                assumptions = json.loads(args.assumptions.read_text(encoding="utf-8"))
+                result = reverse_margin_stress(upstream, assumptions)
+            except (OSError, ValueError, KeyError, TypeError):
+                raise ValueError(
+                    "Local reverse stress inputs are invalid; review only private files"
+                ) from None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            report = redacted_reverse_summary(result, str(args.output))
+        elif args.command == "ibkr-multiasset-budget":
             destination = require_private_output(args.output)
             prior_path = require_private_output(args.stress)
             try:
