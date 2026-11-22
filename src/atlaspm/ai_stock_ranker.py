@@ -288,8 +288,11 @@ def _load_lightgbm() -> Any:
     return lgb
 
 
-def _matrix(rows: list[dict[str, Any]]) -> list[list[float]]:
-    return [row["features"] for row in rows]
+def _matrix(rows: list[dict[str, Any]]) -> Any:
+    # LightGBM 4.x/4.7+ needs a NumPy ndarray, not list[list[float]].
+    # NumPy is a transitive dependency of optional lightgbm [ml].
+    import numpy as np
+    return np.asarray([row["features"] for row in rows], dtype=np.float64)
 
 
 def train_ai_stock_ranker(
