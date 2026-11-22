@@ -379,6 +379,8 @@ def build_parser() -> argparse.ArgumentParser:
     native.add_argument("--train-window", type=int, default=504)
     native.add_argument("--sample-stride", type=int, default=2)
     native.add_argument("--epochs", type=int, default=40)
+    native.add_argument("--architecture", choices=["dual", "risknet"], default="dual",
+                        help="dual trains risk+return, risknet trains independently risk-only from scratch")
     native.add_argument("--return-head-strength", type=float, default=1.0,
                         help="0 disables return forecasts in allocation; 1 is v0.6.0 setting")
     native.add_argument("--no-trade-band", type=float, default=0.0,
@@ -417,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
                     training_window=args.train_window,
                     sample_stride=args.sample_stride,
                     training_epochs=args.epochs,
+                    architecture=args.architecture,
                     return_head_strength=args.return_head_strength,
                     no_trade_band=args.no_trade_band,
                     rebalance_days=args.rebalance_days,
