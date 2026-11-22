@@ -104,6 +104,17 @@
 - [ ] Treasury coupon settlement journal and real broker read-only ingestion
 - [ ] Option expiry/assignment/payoff engine, plus robust broker margin validation
 
+## v0.4.2 — read-only account-aware equity add/reduce planner (implemented; awaiting Windows validation)
+
+- [x] Paper-only BUY / SELL of existing long stock/ETF positions with client-order intent IDs
+- [x] Pro-forma settled cash, unsettled liability reserve, debt, shares and net liquidation
+- [x] Match mock broker What-If preview to account, identifier, side, quantity, price and financing debt
+- [x] Reject stale marks, mismatched ledger/broker NLV, understated gross and stress exposures
+- [x] Integrate centralized institutional risk gate and block orders on unreconciled accounts
+- [x] Synthetic fixtures, offline regression tests and CLI smoke workflow
+- [ ] Multi-order portfolio target rebalancer with held-out cost data and trade event journal
+- [ ] Broker-authenticated account and What-If adapters; live orders remain disabled
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
