@@ -1,0 +1,52 @@
+{
+  "_synthetic_fixture": "All numbers are invented. Broker preview/collateral records are fictional for offline tests; they do not establish buying power.",
+  "account": {
+    "type": "margin",
+    "net_liquidation": 200000,
+    "margin_debt": 50000,
+    "available_funds": 60000,
+    "excess_liquidity": 48000,
+    "data_age_seconds": 15,
+    "reconciled": true
+  },
+  "risk_observation": {
+    "current_drawdown_fraction": 0.04,
+    "pro_forma_stress_loss_fraction": 0.26,
+    "pro_forma_gross_leverage": 1.5
+  },
+  "market": {
+    "oldest_quote_age_seconds": 10
+  },
+  "policy": {
+    "max_data_age_seconds": 60,
+    "max_gross_leverage": 1.75,
+    "max_stress_loss_fraction": 0.4,
+    "min_excess_liquidity_fraction": 0.1,
+    "max_single_order_fraction": 0.1,
+    "max_option_premium_fraction": 0.015,
+    "watch_drawdown_fraction": 0.1,
+    "reduce_drawdown_fraction": 0.2,
+    "critical_drawdown_fraction": 0.3
+  },
+  "intent": {
+    "action": "ADD_EQUITY",
+    "notional": 8000,
+    "relies_on_treasury_collateral": false
+  },
+  "broker_preview": {
+    "accepted": true,
+    "age_seconds": 12,
+    "available_funds_after": 52000,
+    "excess_liquidity_after": 40000,
+    "margin_debt_after": 58000
+  },
+  "treasury_collateral": [
+    {
+      "_note": "Simulated broker-recognized credit, not computed from a generic fixed haircut",
+      "source": "broker",
+      "broker_eligible": true,
+      "broker_recognized_collateral_value": 39000,
+      "quote_age_seconds": 18
+    }
+  ]
+}
