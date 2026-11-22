@@ -367,18 +367,22 @@ def backtest_atlas_native(
     return_head_strength = _real(
         return_head_strength, "return_head_strength", 0, 1
     )
-    if architecture not in ("dual","risknet"):
-        raise ValueError("Atlas native architecture must be dual or risknet")
-    if architecture == "risknet" and return_head_strength != 0:
+    if architecture not in ("dual","risknet","fusion"):
+        raise ValueError("Atlas native architecture must be dual, risknet, or fusion")
+    if architecture in ("risknet","fusion") and return_head_strength != 0:
         raise ValueError(
-            "Atlas RiskNet has no return head: --return-head-strength must be 0"
+            "Risk-only Atlas model has no return head: --return-head-strength must be 0"
         )
     if architecture == "risknet":
-        # Imported only for explicit risk-only research; it shares standard
-        # historical features, not dual-head trained weights or loss.
         from atlaspm.atlas_risknet import (
             RISKNET_NAME, fit_atlas_risknet, predict_atlas_risknet,
         )
+    if architecture == "fusion":
+        from atlaspm.atlas_fusionnet import (
+            FUSION_NAME, _downside_rms, fit_atlas_fusionnet,
+            fusion_feature_vector, predict_atlas_fusionnet,
+        )
+        from atlaspm.atlas_fusion_allocator import allocate_fusion_sleeve
 
     _numpy()
     prices = load_adjusted_prices(path)
@@ -426,7 +430,20 @@ def backtest_atlas_native(
         signal = t-1
         before = {key: state["equity"] for key, state in states.items()}
         if (t-first_exec) % rebalance_days == 0:
-            if architecture == "risknet":
+            if architecture == "fusion":
+                fitted = fit_atlas_fusionnet(
+                    per_asset, signal, feature_days, forecast_days,
+                    minimum_training_samples, train_window=training_window,
+                    sample_stride=sample_stride, epochs=training_epochs,
+                )
+                outputs = [
+                    predict_atlas_fusionnet(
+                        fitted, fusion_feature_vector(
+                            per_asset, signal, j, feature_days
+                        )
+                    ) for j in range(len(symbols))
+                ]
+            elif architecture == "risknet":
                 fitted = fit_atlas_risknet(
                     per_asset, signal, feature_days, forecast_days,
                     minimum_training_samples, train_window=training_window,
@@ -457,6 +474,10 @@ def backtest_atlas_native(
             original_alpha = [
                 out["annualized_arithmetic_return_forecast"] for out in outputs
             ]
+            downside = [
+                out.get("annualized_downside_rms_risk_forecast")
+                for out in outputs
+            ]
             # A risk-only network has NO trained return signal. Zero is only a
             # neutral allocation constant, never an inferred return forecast.
             alpha = [0.0 if value is None else value for value in original_alpha]
@@ -466,14 +487,24 @@ def backtest_atlas_native(
             ]
             # In-house, risk-adjusted positive preference, not mean-variance
             # or a packaged optimizer. Relative signals affect sleeve weights.
-            desirability = [
-                (1/max(v, .03)) * exp(
-                    .35*return_head_strength*max(-2.0, min(2.0, a/max(v, .08)))
+            trailing = daily[signal-feature_days:signal]
+            fusion_allocator = None
+            if architecture == "fusion":
+                fusion_allocator = allocate_fusion_sleeve(
+                    symbols, vol, downside, trailing,
+                    max_weight=maximum_name_weight,
                 )
-                for v, a in zip(vol, alpha)
-            ]
-            weights = _capped_native_weights(desirability, maximum_name_weight)
-            native_sleeve = dict(zip(symbols, weights))
+                native_sleeve = fusion_allocator["weights"]
+                weights = [native_sleeve[s] for s in symbols]
+            else:
+                desirability = [
+                    (1/max(v, .03)) * exp(
+                        .35*return_head_strength*max(-2.0, min(2.0, a/max(v, .08)))
+                    )
+                    for v, a in zip(vol, alpha)
+                ]
+                weights = _capped_native_weights(desirability, maximum_name_weight)
+                native_sleeve = dict(zip(symbols, weights))
             expected_sleeve_annual = sum(w*a for w, a in zip(weights, alpha))
             # The return head may only REDUCE an independent risk cap, never
             # increase exposure past a hard broker-independent risk guard.
@@ -482,7 +513,6 @@ def backtest_atlas_native(
                     1.0, 1.0 + return_head_strength*expected_sleeve_annual/.15
                 )
             )
-            trailing = daily[signal-feature_days:signal]
             allocations = {}
             execution_decisions = {}
             for label, sigma, override, extra_cap in (
@@ -560,6 +590,10 @@ def backtest_atlas_native(
                         "signal_date": dates[signal].isoformat(),
                         "asset": symbol,
                         "annualized_risk_forecast": vol[j],
+                        "annualized_downside_rms_forecast": downside[j],
+                        "realized_forward_downside_rms": (
+                            _downside_rms(observed) if architecture == "fusion" else None
+                        ),
                         "baseline_trailing_risk_forecast": naive_vol[j],
                         "annualized_return_forecast": original_alpha[j],
                         "realized_forward_annual_rms": _rms(observed),
@@ -578,6 +612,8 @@ def backtest_atlas_native(
                 "training_initial_loss": fitted["initial_data_loss"],
                 "training_final_loss": fitted["final_data_loss"],
                 "annualized_risk_forecasts": dict(zip(symbols, vol)),
+                "annualized_downside_risk_forecasts": dict(zip(symbols, downside)),
+                "fusion_allocator_diagnostics": fusion_allocator,
                 "annualized_return_forecasts": dict(zip(symbols, original_alpha)),
                 "latent_expert_probabilities": {
                     s: o["latent_expert_probabilities"]
@@ -621,13 +657,18 @@ def backtest_atlas_native(
         }
     return {
         "method": (
-            "atlaspm_original_risknet_v2_walk_forward" if architecture == "risknet"
+            "atlaspm_original_fusionnet_v1_walk_forward" if architecture == "fusion"
+            else "atlaspm_original_risknet_v2_walk_forward" if architecture == "risknet"
             else "atlaspm_original_regimenet_v1_walk_forward"
         ),
         "status": "OFFLINE_TRAINED_RESEARCH_ONLY",
-        "model_family": RISKNET_NAME if architecture == "risknet" else MODEL_NAME,
+        "model_family": (
+            FUSION_NAME if architecture == "fusion" else
+            RISKNET_NAME if architecture == "risknet" else MODEL_NAME
+        ),
         "architecture_choice": architecture,
         "return_prediction_head_trained": architecture == "dual",
+        "downside_risk_head_trained": architecture == "fusion",
         "trained_from_scratch": True,
         "pretrained_weights_used": False,
         "is_official_qlib_pipeline": False,
@@ -673,6 +714,10 @@ def backtest_atlas_native(
                 abs(p["annualized_risk_forecast"] -
                     p["realized_forward_annual_rms"]) for p in predictions
             ) if predictions else None,
+            "downside_rms_mae_annualized": fmean(
+                abs(p["annualized_downside_rms_forecast"] -
+                    p["realized_forward_downside_rms"]) for p in predictions
+            ) if predictions and architecture == "fusion" else None,
             "naive_trailing_risk_mae_annualized": fmean(
                 abs(p["baseline_trailing_risk_forecast"] -
                     p["realized_forward_annual_rms"]) for p in predictions
@@ -709,6 +754,7 @@ def backtest_atlas_native(
         "live_execution_enabled": False,
         "warnings": [
             "This is our own shared softmax-gated three-expert dual-target architecture and trained parameters, not imported pre-trained Ridge/LightGBM/Qlib weights. It uses standard published ML primitives.",
+            "Atlas FusionNet is a proposed original multiscale overall/downside-risk network and shrinkage-correlation allocation; 30 external references are research influences, NOT models installed or fitted here.",
             "Atlas RiskNet is separately fitted with a risk-only objective and has no return head; absent forecasts are null, not false alpha predictions.",
             "Return head is optional for allocation ablation, and zero-return MAE baseline is provided; training loss improvement is not evidence of investable alpha.",
             "No-trade bands revalidate actual holdings against all hard risk caps before skipping; fewer trades are not a guaranteed performance gain.",
@@ -735,6 +781,7 @@ def redacted_atlas_native_console(result: dict[str, Any], output: str) -> dict[s
         "model_family": result["model_family"],
         "architecture": result["architecture_choice"],
         "return_prediction_head_trained": result["return_prediction_head_trained"],
+        "downside_risk_head_trained": result["downside_risk_head_trained"],
         "trained_from_scratch": result["trained_from_scratch"],
         "asset_count": len(result["data"]["symbols"]),
         "held_out_trading_sessions":
