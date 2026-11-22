@@ -169,6 +169,17 @@
 - [ ] IBKR conid/CUSIP/OCC mapping, financing debit interpretation, option risk and true margin/collateral validation
 - [ ] Authenticated read-only position reconciliation and genuine What-If margin preview before any order pathway
 
+## v0.4.8 — IBKR security identity mapping diagnostic (committed; awaiting Windows validation)
+
+- [x] Read a local private Gateway capture and explicitly listed conid-to-AtlasPM equity, U.S. Treasury and option mappings
+- [x] Reject stale/unmapped/duplicate contract IDs, wrong asset classes, unconfirmed bond units/issuer and option contract problems
+- [x] Compare mktValue/marketValue aliases; never invent missing security marks or bond face-value conventions
+- [x] Identify USD settled cash / position-market-value / reported NLV gap without inventing a margin debt balance
+- [x] Do NOT misinterpret IBKR's documented USD.interest RATE as accrued financing interest liability
+- [x] Redact CLI output and save detailed mapping results under ignored local_data/
+- [x] Synthetic mapping fixture, comprehensive unit tests and no-network CLI smoke
+- [ ] Authenticated broker account financing summary, precise conid-CUSIP-OCC matching and collateral/What-If risk model
+
 ## v0.4 — optimization and AI experiments
 
 - [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
