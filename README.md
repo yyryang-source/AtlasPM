@@ -13,6 +13,7 @@
 - Download and align historical adjusted daily prices; estimate sample annualized returns/covariance.
 - Optimize hypothetical mean-variance allocations from user-supplied expected returns and covariance, with capped weights and assumed financing costs.
 - Generate baseline **inverse-volatility** allocations with per-asset concentration caps. This is a non-AI baseline, not an optimal-return guarantee.
+- Run past-only rolling-window backtests with turnover costs, simple financing interest, drawdown metrics and a same-universe benchmark.
 - Run dependency-light unit tests and GitHub Actions CI.
 
 ## Windows PowerShell quick start
@@ -51,12 +52,23 @@ The default example requests 2000–2026 prices, including the dot-com bust, fin
 
 This uses Yahoo Finance via optional yfinance as a **research data source**, saves data **locally** (ignored by Git), aligns common price dates without forward-filling, and computes annualized historical sample means and covariance. Historical sample means are **not forecasts**. See [data methodology and limitations](docs/DATA.md).
 
+## Walk-forward backtesting (research prototype)
+
+A **past-only rolling** backtest is available. This avoids fitting once on the whole 2000–2026 dataset and calling those fitted results realized performance:
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli backtest --file local_data\prices.csv --lookback-days 756 --rebalance-days 63 --risk-aversion 4 --max-weight 0.6 --leverage 1 --fee-bps 5 --output local_data\backtest_cash.json
+```
+
+The command prints a summary and saves full daily-equity and rebalance histories locally. It compares against **same-universe equal-weight buy-and-hold**, not SPY, and is a simulation with simplified fees, financing and execution. See [walk-forward methodology](docs/BACKTEST.md) before interpreting its performance.
+
 ## Example structure
 
 ```text
 AtlasPM/
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── BACKTEST.md
 │   ├── DATA.md
 │   ├── ARCHITECTURE.md
 │   ├── RISK_POLICY.md
@@ -66,6 +78,7 @@ AtlasPM/
 ├── src/atlaspm/
 │   ├── __init__.py
 │   ├── cli.py
+│   ├── backtest.py
 │   ├── historical.py
 │   ├── mean_variance.py
 │   ├── models.py
