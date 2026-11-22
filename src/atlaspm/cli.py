@@ -21,6 +21,7 @@ from atlaspm.institutional_ledger import build_institutional_ledger
 from atlaspm.institutional_rebalance import plan_equity_trade
 from atlaspm.institutional_batch import propose_multi_asset_batch
 from atlaspm.paper_oms import replay_paper_orders
+from atlaspm.broker_reconcile import reconcile_imported_broker_snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,6 +175,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=Path, default=Path("local_data/paper_oms_replay.json")
     )
 
+    reconcile = sub.add_parser(
+        "broker-reconcile",
+        help="Offline, read-only broker-export vs local ledger reconciliation",
+    )
+    reconcile.add_argument("--ledger", type=Path, required=True)
+    reconcile.add_argument("--snapshot", type=Path, required=True)
+    reconcile.add_argument(
+        "--output", type=Path,
+        default=Path("local_data/broker_reconciliation.json"),
+    )
+
     return parser
 
 
@@ -181,7 +193,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "oms-replay":
+        if args.command == "broker-reconcile":
+            ledger_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
+            broker_payload = json.loads(args.snapshot.read_text(encoding="utf-8"))
+            report = reconcile_imported_broker_snapshot(
+                ledger_payload, broker_payload
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "written": str(args.output),
+                "method": report["method"],
+                "account_id": report["account_id"],
+                "decision": report["decision"],
+                "matched_position_count": report["matched_position_count"],
+                "missing_in_import": report["missing_in_import"],
+                "unexpected_in_import": report["unexpected_in_import"],
+                "local_net_liquidation": report["local_net_liquidation"],
+                "imported_net_liquidation": report["imported_net_liquidation"],
+                "imported_balance_sheet_reconciliation_gap": report[
+                    "imported_balance_sheet_reconciliation_gap"
+                ],
+                "snapshot_age_seconds": report["snapshot_age_seconds"],
+                "block_reasons": report["block_reasons"],
+                "differences": report["differences"],
+                "source_authentication_verified": report["source_authentication_verified"],
+                "broker_order_margin_preview_verified": report["broker_order_margin_preview_verified"],
+                "live_execution_enabled": report["live_execution_enabled"],
+                "warnings": report["warnings"],
+            }
+        elif args.command == "oms-replay":
             base_payload = json.loads(args.ledger.read_text(encoding="utf-8"))
             plan_payload = json.loads(args.plan.read_text(encoding="utf-8"))
             event_payload = json.loads(args.events.read_text(encoding="utf-8"))
