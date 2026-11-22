@@ -42,6 +42,8 @@ from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
+from atlaspm.us_market_universe import build_us_listed_universe
+from atlaspm.us_market_prices import sync_us_market_prices
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -414,6 +416,42 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--block-days", type=int, default=21)
     audit.add_argument("--bootstrap-reps", type=int, default=500)
 
+    market_universe = sub.add_parser(
+        "stock-universe",
+        help="Discover current all-US-exchange-listed equity candidates from Nasdaq Trader",
+    )
+    market_universe.add_argument(
+        "--output", type=Path, default=Path("local_data/us_equity_universe.csv")
+    )
+    market_universe.add_argument(
+        "--report", type=Path, default=Path("local_data/us_equity_universe_report.json")
+    )
+    market_universe.add_argument("--nasdaq-file", type=Path, default=None)
+    market_universe.add_argument("--other-file", type=Path, default=None)
+
+    market_sync = sub.add_parser(
+        "stock-sync-market",
+        help="Resume-safe quote download for every symbol in a market universe",
+    )
+    market_sync.add_argument("--universe", type=Path, required=True)
+    market_sync.add_argument("--start", default="2024-01-01")
+    market_sync.add_argument("--end", default="2026-11-21")
+    market_sync.add_argument(
+        "--cache-dir", type=Path, default=Path("local_data/us_equity_cache")
+    )
+    market_sync.add_argument(
+        "--output", type=Path, default=Path("local_data/us_equity_prices.csv")
+    )
+    market_sync.add_argument(
+        "--report", type=Path, default=Path("local_data/us_equity_coverage.json")
+    )
+    market_sync.add_argument(
+        "--max-symbols", type=int, default=0,
+        help="0=all uncovered symbols; positive integer=quick trial batch",
+    )
+    market_sync.add_argument("--workers", type=int, default=2)
+    market_sync.add_argument("--attempts", type=int, default=2)
+
     stock_backtest = sub.add_parser(
         "stock-backtest",
         help="Long-only 2000-2026 walk-forward stock ranking vs adjusted SPY, no orders",
@@ -464,7 +502,71 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-backtest":
+        if args.command == "stock-universe":
+            destination = require_private_output(args.output)
+            report_path = require_private_output(args.report)
+            if destination.suffix.lower() != ".csv" or report_path.suffix.lower() != ".json":
+                raise ValueError("Universe needs .csv output and .json report under local_data")
+            if destination == report_path:
+                raise ValueError("Universe CSV and report paths must differ")
+            sources = {
+                p.expanduser().resolve() for p in (args.nasdaq_file, args.other_file) if p is not None
+            }
+            if destination in sources or report_path in sources:
+                raise ValueError("Refusing to overwrite universe source file")
+            report = build_us_listed_universe(
+                destination, nasdaq_file=args.nasdaq_file, other_file=args.other_file,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            report = {
+                "listing_count": report["listing_count"],
+                "unverified_issue_count": report["unverified_issue_count"],
+                "snapshot_utc": report["snapshot_utc"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+                "warning": "Current listings only, NOT historical all stocks.",
+            }
+        elif args.command == "stock-sync-market":
+            destination = require_private_output(args.output)
+            report_path = require_private_output(args.report)
+            cache_probe = require_private_output(args.cache_dir / "_atlaspm_probe.json")
+            cache_dir = cache_probe.parent
+            if destination.suffix.lower() != ".csv" or report_path.suffix.lower() != ".json":
+                raise ValueError("Quote output needs .csv and report .json under local_data")
+            if len({destination, report_path}) != 2:
+                raise ValueError("Quote output and report must differ")
+            universe_file = args.universe.expanduser().resolve()
+            if destination == universe_file or report_path == universe_file:
+                raise ValueError("Refusing to overwrite stock universe manifest")
+            if destination.is_relative_to(cache_dir) or report_path.is_relative_to(cache_dir):
+                raise ValueError("Quote output/report must not be inside ticker cache")
+            details = sync_us_market_prices(
+                args.universe, cache_dir, destination,
+                start=args.start, end=args.end,
+                max_symbols=args.max_symbols, workers=args.workers,
+                attempts=args.attempts,
+            )
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(
+                json.dumps(details, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "listing_candidates": details["listing_candidates"],
+                "covered": details["cached_or_downloaded_symbols"],
+                "missing": details["missing_symbols"],
+                "coverage_pct": details["coverage_pct"],
+                "new_successes": details["new_download_successes"],
+                "failed_this_run": details["failed_this_run"],
+                "price_rows": details["price_rows"],
+                "full_market_coverage": details["full_market_coverage"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "report": str(report_path.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-backtest":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":
                 raise ValueError("Stock backtest output must be private local_data .json")
