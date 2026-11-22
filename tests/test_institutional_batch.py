@@ -45,6 +45,34 @@ class InstitutionalBatchTests(unittest.TestCase):
         self.assertEqual(positions["option", "QQQ-2027-01-15-P-280"]["market_value"], 500)
         self.assertEqual(len(positions), 3)
 
+    def test_put_contracts_must_not_exceed_remaining_stock(self):
+        self.plan["legs"][2]["contracts"] = 3
+        self.plan["basket_preview"]["order_legs"] = copy.deepcopy(self.plan["legs"])
+        report = propose_multi_asset_batch(self.ledger, self.plan)
+        self.assertEqual(report["decision"], "BLOCK")
+        self.assertIn("PROTECTIVE_PUT_EXCEEDS_UNDERLYING_SHARES", report["block_reasons"])
+
+    def test_independent_reconciliation_when_treasury_limit_differs_from_mark(self):
+        # A purchase at 97.80 against a 97.90 dirty mark adds $10 of
+        # hypothetical marked gain, minus $5 total transaction costs.
+        self.plan["legs"][1]["dirty_price_per_100"] = 97.8
+        self.plan["basket_preview"]["order_legs"] = copy.deepcopy(self.plan["legs"])
+        self.plan["basket_preview"]["net_liquidation_after"] = 123955
+        report = propose_multi_asset_batch(self.ledger, self.plan)
+        self.assertEqual(report["decision"], "ALLOW_PAPER_INTENT")
+        self.assertAlmostEqual(
+            report["pro_forma_unexecuted"]["net_liquidation"], 123955
+        )
+        self.assertAlmostEqual(
+            report["pro_forma_unexecuted"][
+                "expected_net_liquidation_change_from_fees_and_price_deviation"
+            ], 5
+        )
+        self.assertAlmostEqual(
+            report["pro_forma_unexecuted"]["net_liquidation_change_reconciliation_gap"],
+            0, places=7,
+        )
+
     def test_sale_proceeds_not_redeployed_before_settlement(self):
         case = copy.deepcopy(self.plan)
         case["legs"][1]["face_value"] = 15000
