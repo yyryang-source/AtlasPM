@@ -15,7 +15,7 @@ orders. Adjusted close executions and future prices are research assumptions.
 
 from __future__ import annotations
 
-from math import exp, isfinite, sqrt
+from math import exp, isfinite, log, sqrt
 from pathlib import Path
 from statistics import fmean
 from typing import Any
@@ -130,6 +130,8 @@ def fit_atlas_regimenet(
         raise ValueError("Insufficient fully matured native training labels")
     start = max(lookback, latest - train_window + 1)
     times = list(range(start, latest + 1, sample_stride))
+    if times and times[-1] != latest:
+        times.append(latest)
     if len(times) < 20:
         raise ValueError("Too few distinct training timestamps")
     features: list[list[float]] = []
@@ -139,7 +141,7 @@ def fit_atlas_regimenet(
             features.append(native_feature_vector(by_asset, i, j, lookback))
             future = returns[i:i+horizon]
             labels.append([
-                float(__import__("math").log(max(SIGMA_FLOOR, _rms(future)))),
+                float(log(max(SIGMA_FLOOR, _rms(future)))),
                 float(fmean(future) * TRADING_DAYS_PER_YEAR),
             ])
     x = np.asarray(features, dtype=np.float64)
