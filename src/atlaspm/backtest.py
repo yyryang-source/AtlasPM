@@ -80,6 +80,7 @@ def backtest_walk_forward(
     annual_financing_rate: float = 0.065,
     fee_bps: float = 5.0,
     maintenance_fraction: float = 0.30,
+    margin_policy: str = "none",
 ) -> dict[str, Any]:
     """Use closes through t-1 for signals, trade at t close, hold t to t+1.
 
@@ -105,6 +106,11 @@ def backtest_walk_forward(
             raise ValueError(f"{name} must be finite")
         if value < lo or (name in {"risk_aversion", "max_weight", "maintenance_fraction"} and value == 0) or (hi is not None and value > hi):
             raise ValueError(f"{name} is outside the supported range")
+
+    if margin_policy not in {"none", "next_close_deleverage_to_1x"}:
+        raise ValueError("margin_policy must be none or next_close_deleverage_to_1x")
+    if margin_policy != "none" and leverage <= 1:
+        raise ValueError("Margin liquidation policy requires leverage > 1")
 
     prices = load_adjusted_prices(path)
     symbols = sorted(prices)
@@ -132,6 +138,9 @@ def backtest_walk_forward(
     financing_paid = 0.0
     margin_breach_days = 0
     first_margin_breach_date = None
+    forced_deleveraging_events: list[dict[str, Any]] = []
+    pending_liquidation_trigger: str | None = None
+    effective_leverage = leverage
     rate_per_day = annual_financing_rate / TRADING_DAYS_PER_YEAR
 
     # Signal at t-1 close, execute t close, hold exposure until t+1 close.
@@ -139,17 +148,17 @@ def backtest_walk_forward(
         close = common_dates[t].isoformat()
         next_close = common_dates[t + 1].isoformat()
         old_equity = equity
-        if (t - lookback_days - 1) % rebalance_days == 0:
+        if pending_liquidation_trigger is None and (t - lookback_days - 1) % rebalance_days == 0:
             window = daily_asset_returns[t - lookback_days - 1:t - 1]
             expected, covariance = _sample_estimates(window, symbols)
             result = optimize_mean_variance(
                 expected, covariance, risk_aversion=risk_aversion,
-                max_weight=max_weight, leverage=leverage,
+                max_weight=max_weight, leverage=effective_leverage,
                 annual_financing_rate=annual_financing_rate,
             )
             new_weights = [result["weights"][s] for s in symbols]
             holdings, debt, cost, turnover = _rebalance(
-                holdings, equity, new_weights, leverage, fee_bps / 10000.0
+                holdings, equity, new_weights, effective_leverage, fee_bps / 10000.0
             )
             fees_paid += cost
             equity -= cost
@@ -174,6 +183,43 @@ def backtest_walk_forward(
                 f"Simulated account equity depleted by {next_close}; "
                 "reduce leverage or change assumptions"
             )
+        # Observe risk at the new close. If a breach was observed at a prior
+        # close, sell proportionally at THIS close (one full-session lag).
+        maint_before_liquidation = maintenance_fraction * sum(holdings) if debt > 0 else 0.0
+        excess_before_liquidation = equity - maint_before_liquidation
+        breached_before_liquidation = debt > 0 and excess_before_liquidation < 0
+        if breached_before_liquidation:
+            margin_breach_days += 1
+            if first_margin_breach_date is None:
+                first_margin_breach_date = next_close
+        maintenance_excess_after = excess_before_liquidation
+        if pending_liquidation_trigger is not None:
+            pre_debt = debt
+            pre_equity = equity
+            pre_holdings = sum(holdings)
+            proportion = [h / pre_holdings for h in holdings]
+            holdings, debt, liquidation_fee, liquidation_turnover = _rebalance(
+                holdings, equity, proportion, 1.0, fee_bps / 10000.0
+            )
+            fees_paid += liquidation_fee
+            equity -= liquidation_fee
+            effective_leverage = 1.0
+            maintenance_excess_after = equity
+            forced_deleveraging_events.append({
+                "trigger_date": pending_liquidation_trigger,
+                "execution_date": next_close,
+                "debt_before_equity_index_units": pre_debt,
+                "debt_after_equity_index_units": debt,
+                "gross_exposure_before_equity_index_units": pre_holdings,
+                "equity_before_fee_equity_index_units": pre_equity,
+                "transaction_fee_equity_index_units": liquidation_fee,
+                "transaction_notional_over_equity": liquidation_turnover,
+                "post_liquidation_target_leverage": 1.0,
+                "simulation_rule": "sell_proportionally_at_next_close_then_remain_unlevered",
+            })
+            pending_liquidation_trigger = None
+        elif margin_policy == "next_close_deleverage_to_1x" and breached_before_liquidation:
+            pending_liquidation_trigger = next_close
         strategy_daily.append(equity / old_equity - 1.0)
         peak = max(peak, equity)
         drawdown = equity / peak - 1.0
@@ -184,21 +230,15 @@ def backtest_walk_forward(
         benchmark = sum(benchmark_holdings)
         benchmark_daily.append(benchmark / prev_benchmark - 1.0)
         benchmark_peak = max(benchmark_peak, benchmark)
-        maint = maintenance_fraction * sum(holdings) if leverage > 1 else 0.0
-        excess = equity - maint
-        breach = leverage > 1 and excess < 0
-        if breach:
-            margin_breach_days += 1
-            if first_margin_breach_date is None:
-                first_margin_breach_date = next_close
         curve.append({
             "date": next_close,
             "equity_index": equity,
             "benchmark_equity_index": benchmark,
             "drawdown": drawdown,
             "benchmark_drawdown": benchmark / benchmark_peak - 1,
-            "maintenance_excess_equity_index_units": excess,
-            "below_assumed_maintenance": breach,
+            "maintenance_excess_equity_index_units": maintenance_excess_after,
+            "below_assumed_maintenance": breached_before_liquidation,
+            "maintenance_breach_before_liquidation": breached_before_liquidation,
         })
 
     bench_metrics = _metrics(benchmark_daily, [
@@ -216,6 +256,7 @@ def backtest_walk_forward(
             "annual_margin_interest_rate_assumption": annual_financing_rate,
             "trading_cost_basis_points_each_side": fee_bps,
             "assumed_maintenance_fraction": maintenance_fraction,
+            "margin_policy": margin_policy,
         },
         "data": {
             "source_file": str(path),
@@ -234,19 +275,23 @@ def backtest_walk_forward(
             "total_financing_interest_equity_index_units": financing_paid,
             "below_assumed_maintenance_days": margin_breach_days,
             "first_assumed_maintenance_breach_date": first_margin_breach_date,
+            "forced_deleveraging_event_count": len(forced_deleveraging_events),
+            "final_effective_target_leverage": effective_leverage,
         },
         "benchmark": {
             "type": "equal_weight_buy_and_hold_same_symbols_no_costs",
             **bench_metrics,
         },
         "rebalances": rebalances,
+        "forced_deleveraging_events": forced_deleveraging_events,
         "equity_curve": curve,
         "warnings": [
             "Research-only walk-forward simulation; historical data is not point-in-time verified.",
             "Signals use closes through t-1; portfolio trades at close t, then earns return from t to t+1.",
             "Equal-weight buy-and-hold benchmark uses the same assets, with zero fees, no borrowing, and no rebalancing.",
             "Constant annual financing rate and bps trading costs are assumed; taxes, spreads, slippage, currency and cash yield are excluded.",
-            "Margin thresholds are illustrative only, not broker maintenance rules; forced liquidation is not modeled.",
+            ("Margin breach action is an illustrative next-close full deleveraging rule, NOT a broker liquidation model." if margin_policy != "none" else "Margin thresholds are illustrative only, not broker maintenance rules; forced liquidation is not modeled."),
+            "A breach may worsen or cause insolvency before a next-close liquidation can execute.",
             "Fixed current symbol universe introduces survivorship/selection bias; model performance does not imply future returns.",
         ],
     }
