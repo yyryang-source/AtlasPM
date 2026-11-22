@@ -19,6 +19,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+market = ["yfinance>=1.8.0,<2.0"]
+
 [project.scripts]
 atlaspm = "atlaspm.cli:main"
 
