@@ -158,3 +158,25 @@ non-overlapping/appropriately purged forward-return labels, and
 compare V2 against the momentum baseline on untouched future windows.
 Do not repeatedly optimize against the same 2026 test period.
 
+
+
+## Large-universe price ingestion (memory optimization)
+
+Both V1 and V2 stock-ranker paths now share
+`atlaspm.selection.price_arrays.load_stock_price_arrays` for the
+**stock** CSV. It reads a long-form `date,symbol,adjusted_close` file
+straight into date/price lists, instead of allocating a separate date-keyed
+dictionary per symbol and then copying that dictionary into lists. Already
+chronological ticker histories are not sorted again; out-of-order symbols
+are sorted and checked for nonadjacent duplicate dates.
+
+This is an **ingestion/peak-memory improvement**, not a modification of
+the 9 input factors, labels, training scheme, ranks, top-N tie policy or
+historical performance. The generic `load_adjusted_prices` function is
+unchanged for portfolio uses. Regression tests compare prices with the old
+strict loader on ticker-major, date-major and shuffled files, including
+duplicate and bad-price rejection. No real brokerage permissions change.
+
+Do not interpret this as resolving 5,000-stock survivorship bias,
+corporate-action audit gaps, the previously negative V2 test IC, or
+missing true future out-of-sample validation.

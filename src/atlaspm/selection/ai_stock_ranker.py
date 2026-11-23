@@ -22,6 +22,7 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.selection.price_arrays import load_stock_price_arrays
 
 
 FEATURE_NAMES = (
@@ -140,7 +141,7 @@ def create_training_rows(
     start_date, stop_date = date.fromisoformat(start), date.fromisoformat(test_end)
     if start_date >= stop_date:
         raise ValueError("Training start must be earlier than test end")
-    prices = load_adjusted_prices(prices_path)
+    prices = load_stock_price_arrays(prices_path)
     benchmark_all = load_adjusted_prices(benchmark_path)
     benchmark_symbol = benchmark_symbol.strip().upper()
     if benchmark_symbol not in benchmark_all:
@@ -154,7 +155,7 @@ def create_training_rows(
     end_index = len(benchmark_days) - 2 - horizon_sessions
     if start_index > end_index:
         raise ValueError("Not enough benchmark sessions for warmup and labels")
-    histories = _history_arrays(prices)
+    histories = prices  # Already chronological arrays; no redundant dict-to-list copy.
     rows = []
     cohorts = 0
     for i in range(start_index, end_index + 1, sample_every_sessions):
@@ -505,9 +506,8 @@ def rank_with_ai(
     bench_days = sorted(d for d in bench if d <= cutoff)
     if not bench_days or bench_days[-1] != cutoff:
         raise ValueError("as-of must be a completed benchmark trading close")
-    prices = load_adjusted_prices(prices_path)
-    prices.pop(ticker, None)
-    history = _history_arrays(prices)
+    history = load_stock_price_arrays(prices_path)
+    history.pop(ticker, None)
     rows = _candidate_rows(
         history, bench_days, bench,
         len(bench_days) - 1, horizon=None,
