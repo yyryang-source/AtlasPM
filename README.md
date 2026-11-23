@@ -6,6 +6,9 @@
 
 ## Codebase navigation
 
+See the [current feature inventory](docs/FUNCTIONS.md) for the CLI
+commands, browser tools, and verification scope.
+
 For AI stock selection, see [`src/atlaspm/selection/`](src/atlaspm/selection/)
 and the [selection documentation](docs/selection/).
 For RiskNet, FusionNet, portfolio quant and broker risk research, see
