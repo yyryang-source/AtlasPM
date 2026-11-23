@@ -103,3 +103,48 @@ without `--refresh`. The local existing raw file is reused. Inspect
 `excluded_ambiguous_5m_buckets`, the `quarantine` path, and
 `market-db hf-5m-status` afterward. Do not delete the original data until
 you have validated the monthly sample and legal rights.
+
+## Validate each month before research or AI selection
+
+A successful Parquet conversion is not a benchmark coverage certificate.
+The audit below only reads local files, uses NYSE's official trading
+calendar, and writes a JSON QC report to the ignored local_data folder.
+It does not fetch Hugging Face data, upload price records, or authorize
+training/trading.
+
+~~~powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git switch main
+git pull --ff-only origin main
+$py = ".\.venv\Scripts\python.exe"
+& $py -m pip install -e ".[lake,calendar,hf]"
+& $py -m unittest discover -s tests -p "test_hf_stock5m_audit.py" -v
+& $py -m atlaspm.cli market-db hf-5m-audit --month 2026-03 --session rth
+~~~
+
+Review the private audit JSON file at:
+local_data/stock_5m/huggingface/quality/audits/session=rth/2026-03.json
+
+Key fields:
+
+- five_minute_bars, unique_symbols, first/last trade dates.
+- nyse_expected_sessions, missing_whole_trading_dates and
+  unexpected_trading_dates (the latter is a structural failure in RTH).
+- invalid_five_minute_bars, duplicate_symbol_timestamp_rows,
+  out_of_nyse_session_bars (structural failures).
+- sparse_five_minute_buckets measures buckets with fewer than
+  five source minutes, but a low-liquidity security can legitimately
+  have no trading activity in many minutes; missing slots are not filled.
+- benchmark_coverage has SPY, QQQ, AAPL, MSFT, NVDA, GOOGL, AMZN, META.
+  Its denominator is the NYSE expected regular-session 5m slots;
+  thinly traded days or missing vendor data can lower the ratio.
+- ambiguous_buckets_quarantined counts the earlier duplicate-minute
+  buckets rejected from the prices file.
+
+quality_status will stay REVIEW_REQUIRED even if no structural error
+is found: there is no independent certification of corporate actions,
+ticker identity, listing/delisting membership, historical bias,
+data usage rights, or point-in-time availability. No model is approved
+for training or live trading by the audit.
+
+This is a local research data inspection, not a performance backtest.
