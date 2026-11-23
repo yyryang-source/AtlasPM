@@ -55,6 +55,10 @@ engines or enable live broker execution.
 
 Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatibility with existing tests and external scripts. **New code should use `atlaspm.quant.*` and `atlaspm.selection.*`.**
 
+## Local market database
+
+An offline, gitignored SQLite warehouse now accepts the existing equity adjusted-close CSV, Massive option contract/day/5m/1m candle CSVs and US Treasury FiscalData auction CSVs. Use `python -m atlaspm.cli market-db init`, then `market-db import-stocks`, and inspect `market-db status`. See [Windows market database guide](docs/MARKET_DATABASE.md). No real market data are uploaded to GitHub; no live trading is enabled.
+
 ## Primary workflows
 
 | Goal | Entry point | Scope |
