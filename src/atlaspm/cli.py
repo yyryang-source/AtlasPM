@@ -47,6 +47,7 @@ from atlaspm.us_market_prices import sync_us_market_prices
 from atlaspm.selection.us_market_quality import audit_current_us_stock_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
+from atlaspm.selection.v2_momentum_diagnostics import diagnose_v2_momentum_extremes
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
 from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
 
@@ -482,6 +483,23 @@ def build_parser() -> argparse.ArgumentParser:
     ai_train_v2.add_argument("--report", type=Path,
                              default=Path("local_data/atlas_stock_ranker_v2_report.json"))
 
+    diagnostic = sub.add_parser(
+        "stock-ai-diagnose-momentum",
+        help="Investigate per-date extreme 12-1 momentum Top N failures; no model fitting",
+    )
+    diagnostic.add_argument("--prices", type=Path, required=True)
+    diagnostic.add_argument("--benchmark-prices", type=Path, required=True)
+    diagnostic.add_argument("--start", default="2025-01-02")
+    diagnostic.add_argument("--train-end", default="2025-12-31")
+    diagnostic.add_argument("--validation-end", default="2026-05-29")
+    diagnostic.add_argument("--test-end", default="2026-11-20")
+    diagnostic.add_argument("--benchmark-symbol", default="SPY")
+    diagnostic.add_argument("--horizon-sessions", type=int, default=21)
+    diagnostic.add_argument("--sample-every-sessions", type=int, default=21)
+    diagnostic.add_argument("--top", type=int, default=10)
+    diagnostic.add_argument("--output", type=Path,
+                            default=Path("local_data/v2_momentum_diagnostics.json"))
+
     ai_rank_v2 = sub.add_parser(
         "stock-ai-rank-v2",
         help="Rank stocks with an ordinal learning-to-rank model, no orders",
@@ -748,6 +766,43 @@ def main(argv: list[str] | None = None) -> int:
                 "validation": result["validation"],
                 "test": result["test"],
                 "model_research_review": result["model_research_review"],
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-ai-diagnose-momentum":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Momentum diagnostics output must be private JSON")
+            inputs = {
+                args.prices.expanduser().resolve(),
+                args.benchmark_prices.expanduser().resolve(),
+            }
+            if destination in inputs:
+                raise ValueError("Diagnostics output must not overwrite source CSV files")
+            result = diagnose_v2_momentum_extremes(
+                args.prices, args.benchmark_prices,
+                start=args.start, train_end=args.train_end,
+                validation_end=args.validation_end, test_end=args.test_end,
+                benchmark_symbol=args.benchmark_symbol,
+                horizon_sessions=args.horizon_sessions,
+                sample_every_sessions=args.sample_every_sessions,
+                top=args.top,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "status": result["status"],
+                "validation": {
+                    key: value for key, value in result["validation"].items()
+                    if key != "cohorts"
+                },
+                "test": {
+                    key: value for key, value in result["test"].items()
+                    if key != "cohorts"
+                },
+                "written": str(destination.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
             }
         elif args.command == "stock-ai-rank-v2":
