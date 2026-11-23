@@ -142,6 +142,38 @@ used for each selection. For after-close releases, use the next decision-session
 date in the input. Supply the as-published values from each period and preserve
 the publication date of any later restatement.
 
+## Compare four strategies on a fixed test window
+
+`stock-compare` uses one cohort per decision: historical members with eligible
+price history, the standard risk filters and available published fundamentals.
+The equal-weight baseline invests across that cohort. Technical factors,
+technical plus fundamentals, and LightGBM each rank the same cohort and select
+up to the same Top N, using equal sizing within each resulting selection.
+When a group of tied scores straddles the cutoff, the portfolio uses only the
+groups above the tie. Each portfolio uses the same next-close simulation,
+fees, slippage and optional cash delisting events. The original `stock-backtest`
+continues to implement its existing broader price-based baseline.
+
+Choose the train, validation and final test boundaries before reviewing results.
+LightGBM fits on train decisions and chooses the stopping iteration on validation
+decisions. The forward label runs from the next close for one rebalance interval.
+The comparison purges labels that cross a split boundary and drops entire
+training or validation dates with incomplete cohort outcomes. Test decisions use
+the frozen model. The report includes input SHA-256 hashes, period settings,
+model details, purged and incomplete cohort counts, net returns, drawdown, costs
+and turnover. See the [Qlib workflow](https://qlib.readthedocs.io/en/latest/component/workflow.html)
+and [LightGBM grouping reference](https://lightgbm.readthedocs.io/en/stable/pythonapi/lightgbm.LGBMRanker.html).
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[ml]"
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-compare --prices local_data\stock_prices.csv --benchmark-prices local_data\benchmark.csv --universe-history local_data\historical_members.csv --fundamentals local_data\published_fundamentals.csv --delistings local_data\delistings.csv --train-start 2014-01-01 --train-end 2018-12-31 --validation-end 2020-12-31 --test-start 2021-01-01 --test-end 2025-12-31 --output local_data\stock_comparison.json
+```
+
+The dates illustrate the command. Use windows covered by your inputs, with
+at least 253 benchmark closes before the first labels and enough complete
+decision cohorts for both fitting periods. Report results for a genuinely
+unseen test period and document any earlier research on those dates.
+
 ## Matched-cost full-universe comparison (new)
 
 Each completed decision close also constructs a **separate** 1× equal-weight

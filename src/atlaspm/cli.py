@@ -41,6 +41,7 @@ from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tour
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
+from atlaspm.selection.stock_comparison import compare_stock_selection
 from atlaspm.selection.stock_history_audit import audit_stock_history
 from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
@@ -670,6 +671,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("local_data/stock_walkforward_2000_2026.json"),
     )
 
+    comparison = sub.add_parser("stock-compare", help="Compare four stock strategies on a fixed test window")
+    for flag in ("prices", "benchmark-prices", "universe-history", "fundamentals"):
+        comparison.add_argument(f"--{flag}", type=Path, required=True)
+    for flag in ("train-start", "train-end", "validation-end", "test-start", "test-end"):
+        comparison.add_argument(f"--{flag}", required=True)
+    comparison.add_argument("--benchmark-symbol", default="SPY")
+    comparison.add_argument("--delistings", type=Path)
+    comparison.add_argument("--top", type=int, default=10)
+    comparison.add_argument("--rebalance-days", type=int, default=21)
+    comparison.add_argument("--fee-bps", type=float, default=5.0)
+    comparison.add_argument("--slippage-bps", type=float, default=5.0)
+    comparison.add_argument("--max-universe-age-days", type=int, default=DEFAULT_MAX_UNIVERSE_AGE_DAYS)
+    comparison.add_argument("--max-fundamental-age-days", type=int, default=200)
+    comparison.add_argument("--num-boost-round", type=int, default=300)
+    comparison.add_argument("--min-train-rows", type=int, default=300)
+    comparison.add_argument("--output", type=Path, default=Path("local_data/stock_comparison.json"))
+
     stock = sub.add_parser(
         "stock-screen",
         help="Offline point-in-time-capped multi-factor stock ranking; no orders",
@@ -1115,6 +1133,34 @@ def main(argv: list[str] | None = None) -> int:
             )
             report = {key: value for key, value in details.items() if key != "decisions"}
             report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "stock-compare":
+            destination = require_private_output(args.output)
+            sources = {path.expanduser().resolve() for path in (
+                args.prices, args.benchmark_prices, args.universe_history, args.fundamentals, args.delistings,
+            ) if path is not None}
+            if destination.suffix.lower() != ".json" or destination in sources:
+                raise ValueError("Stock comparison requires a private .json output distinct from inputs")
+            result = compare_stock_selection(
+                args.prices, args.benchmark_prices, args.universe_history, args.fundamentals,
+                train_start=args.train_start, train_end=args.train_end, validation_end=args.validation_end,
+                test_start=args.test_start, test_end=args.test_end, benchmark_symbol=args.benchmark_symbol,
+                delistings_path=args.delistings, top=args.top, rebalance_days=args.rebalance_days,
+                fee_bps=args.fee_bps, slippage_bps=args.slippage_bps,
+                max_universe_age_days=args.max_universe_age_days,
+                max_fundamental_age_days=args.max_fundamental_age_days,
+                num_boost_round=args.num_boost_round, min_train_rows=args.min_train_rows,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8",
+            )
+            report = {
+                "written": destination.relative_to(Path.cwd().resolve()).as_posix(),
+                "windows": result["windows"],
+                "strategies": {name: {key: values[key] for key in ("total_return", "max_drawdown", "sum_turnover_ratios")}
+                               for name, values in result["strategies"].items()},
+                "live_execution_enabled": False,
+            }
         elif args.command == "stock-backtest":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":

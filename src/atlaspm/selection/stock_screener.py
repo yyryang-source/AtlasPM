@@ -116,6 +116,19 @@ def _rank_factors(rows: list[dict[str, Any]], weights: dict[str, float]) -> None
         ), 4)
 
 
+def rank_factor_rows(rows: list[dict[str, Any]], *, use_fundamentals: bool) -> list[dict[str, Any]]:
+    """Apply the standard factor weights to an already eligible cohort."""
+    weights = _MIXED_WEIGHTS if use_fundamentals else _TECH_WEIGHTS
+    _rank_factors(rows, weights)
+    ranked = sorted(rows, key=lambda row: (-row["score"], row["symbol"]))
+    for index, row in enumerate(ranked, 1):
+        row["rank"] = index
+    return ranked
+
+
+COMPARISON_FEATURES = tuple(_MIXED_WEIGHTS)
+
+
 def _decision_date(value: str) -> date:
     try:
         return date.fromisoformat(value)
@@ -274,11 +287,7 @@ def screen_stocks_from_prices(
             row["market_cap_usd"] = source["market_cap_usd"]
             factors.update({name: source[name] for name in _FUND_COLUMNS[4:]})
         eligible.append(row)
-    if eligible:
-        _rank_factors(eligible, weights)
-    ranked = sorted(eligible, key=lambda row: (-row["score"], row["symbol"]))
-    for index, row in enumerate(ranked, 1):
-        row["rank"] = index
+    ranked = rank_factor_rows(eligible, use_fundamentals=use_fundamentals)
     picks: list[dict[str, Any]] = []
     sector_counts: dict[str, int] = {}
     for row in ranked:
