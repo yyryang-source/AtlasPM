@@ -1,0 +1,51 @@
+name: Selection research checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "src/atlaspm/selection/**"
+      - "tests/selection/**"
+      - "src/atlaspm/cli.py"
+      - "scripts/selection/**"
+      - ".github/workflows/selection.yml"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+jobs:
+  fitted-models-and-quality:
+    name: Stock ranking, calendar and data-quality tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install selection research extras
+        run: python -m pip install -e ".[ml,calendar]"
+      - name: Run full selection regression suite (including V1 and V2)
+        run: python -m unittest discover -s tests/selection -p "test_*.py" -v
+      - name: Confirm genuine LightGBM backend
+        run: python -c "import lightgbm; print(lightgbm.__version__)"
+
+  windows-powershell-syntax:
+    name: Check canonical PowerShell scripts
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse all current stock-selection scripts in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Get-ChildItem scripts/selection -Filter '*.ps1' | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List
+              throw "Invalid Windows PowerShell: $($_.Name)"
+            }
+          }

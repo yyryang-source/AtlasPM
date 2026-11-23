@@ -135,6 +135,55 @@ class ReverseSplitReconciliationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "official SEC"):
             reconcile_reverse_splits(self.raw, self.manifest)
 
+    def test_multiple_verified_splits_compound_only_for_affected_symbol(self):
+        # Two events for one ticker require 10x * 5x on the earliest date;
+        # rows between events receive only the later 5x adjustment.
+        self._write([
+            ["2024-05-30", "DUKR", "1"],
+            ["2024-06-03", "DUKR", "10"],
+            ["2025-05-30", "DUKR", "8"],
+            ["2025-06-02", "DUKR", "40"],
+            ["2024-05-30", "AAPL", "100"],
+            ["2025-06-02", "AAPL", "120"],
+        ], events=[
+            {
+                "symbol": "DUKR", "type": "reverse_split",
+                "effective_date": "2024-06-01",
+                "old_shares_per_new_share": 10,
+                "source_url": _SEC,
+            },
+            {
+                "symbol": "DUKR", "type": "reverse_split",
+                "effective_date": "2025-06-01",
+                "old_shares_per_new_share": 5,
+                "source_url": _SEC,
+            },
+        ])
+        original_bytes = self.raw.read_bytes()
+        audit = reconcile_reverse_splits(self.raw, self.manifest)
+        self.assertEqual(
+            [check["status"] for check in audit["event_checks"]],
+            ["LIKELY_MISSING_ADJUSTMENT", "LIKELY_MISSING_ADJUSTMENT"],
+        )
+        result = reconcile_reverse_splits(
+            self.raw, self.manifest,
+            output_path=self.output, apply_confirmed=True
+        )
+        self.assertEqual(result["modified_rows"], 3)
+        self.assertEqual(self.raw.read_bytes(), original_bytes)
+        with self.output.open(newline="", encoding="utf-8") as handle:
+            fixed = list(csv.DictReader(handle))
+        self.assertEqual(
+            [float(row["adjusted_close"]) for row in fixed if row["symbol"] == "DUKR"],
+            [50, 50, 40, 40],
+        )
+        self.assertEqual(
+            [float(row["adjusted_close"]) for row in fixed if row["symbol"] == "AAPL"],
+            [100, 120],
+        )
+        post = reconcile_reverse_splits(self.output, self.manifest)
+        self.assertEqual(post["status"], "NO_CORRECTION_INDICATED")
+
     def test_cli_rejects_public_output_before_reading_data(self):
         from atlaspm.cli import main
         import contextlib
