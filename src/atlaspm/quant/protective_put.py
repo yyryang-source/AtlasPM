@@ -89,8 +89,8 @@ def _choose_put(history: OptionHistory, settings: ProtectivePutSettings, signal:
     return key, quantity
 
 
-def _performance(curve: list[dict[str, Any]], nav_key: str) -> dict[str, float]:
-    start = peak = curve[0][nav_key]
+def nav_performance(curve: list[dict[str, Any]], nav_key: str, *, initial_nav: float | None = None) -> dict[str, float]:
+    start = peak = curve[0][nav_key] if initial_nav is None else initial_nav
     drawdown = 0.0
     for row in curve:
         level = row[nav_key]
@@ -151,5 +151,5 @@ def compare_protective_put(history: OptionHistory, marks: list[StockMark],
                       "unhedged_nav_usd": stock_value + dividends + settings.cash_usd})
     return {"settings": asdict(settings),
             "method": "prior_session_signal_next_eod_snapshot" if settings.eod_snapshot else "prior_session_signal_next_snapshot",
-            "hedged": _performance(curve, "hedged_nav_usd"), "unhedged": _performance(curve, "unhedged_nav_usd"),
+            "hedged": nav_performance(curve, "hedged_nav_usd"), "unhedged": nav_performance(curve, "unhedged_nav_usd"),
             "decisions": decisions, "option_replay": replay, "curve": curve, "live_execution_enabled": False}

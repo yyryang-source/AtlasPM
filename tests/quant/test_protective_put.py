@@ -1,11 +1,14 @@
 """Verify selection timing, mark-to-market and paid hedge costs."""
 
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
 from atlaspm.quant.option_history import OptionHistory
+from atlaspm.quant.multiasset_hedge import MultiassetSettings, compare_multiasset_hedge
 from atlaspm.quant.protective_put import ProtectivePutSettings, compare_protective_put, load_stock_marks
+from atlaspm.quant.treasury_history import TreasuryHistory
 
 
 class ProtectivePutTest(unittest.TestCase):
@@ -68,3 +71,43 @@ class ProtectivePutTest(unittest.TestCase):
     def test_roll_cannot_fund_buy_with_unsettled_sale(self):
         with self.assertRaisesRegex(ValueError, "Insufficient cash for option purchase: B"):
             self._run(cash=472)
+
+    def test_multiasset_matched_funding_treasury_closure_and_maturity(self):
+        root = self.contracts.parent
+        treasury_contracts = root / "treasury_contracts.csv"
+        treasury_contracts.write_text(
+            "cusip,kind,dated_on,issued_on,maturity,annual_coupon_rate,face_increment_usd\n"
+            "999999990,note,2023-07-11,2023-07-11,2024-01-11,0.04,100\n", encoding="utf-8",
+        )
+        treasury_payments = root / "treasury_payments.csv"
+        treasury_payments.write_text("cusip,scheduled_on,paid_on\n999999990,2024-01-11,2024-01-11\n", encoding="utf-8")
+        treasury_quotes = root / "treasury_quotes.csv"
+        treasury_quotes.write_text(
+            "cusip,observed_on,clean_close_per_100\n999999990,2024-01-08,99.99\n999999990,2024-01-09,99.99\n",
+            encoding="utf-8",
+        )
+        treasury = TreasuryHistory(treasury_contracts, treasury_payments, treasury_quotes)
+        options = OptionHistory(self.contracts, self.quotes, self.settlements)
+        put = ProtectivePutSettings("SPY", 100, 0, roll_sessions=2, target_dte=30)
+        settings = MultiassetSettings(12500, 500, "999999990", 1000)
+        with self.assertRaisesRegex(ValueError, "Missing Treasury close on open session 2024-01-10"):
+            compare_multiasset_hedge(options, treasury, self.marks, put, settings)
+
+        result = compare_multiasset_hedge(
+            options, treasury, self.marks, put, settings, treasury_closed=frozenset({date(2024, 1, 10)}),
+            stress_window=(date(2024, 1, 9), date(2024, 1, 11)),
+        )
+        opening = result["opening"]
+        self.assertEqual(opening["stock_treasury"], opening["stock_treasury_put"])
+        self.assertGreater(opening["stock_only"]["stock_shares"], opening["stock_treasury"]["stock_shares"])
+        for name, arm in opening.items():
+            self.assertAlmostEqual(sum(arm[key] for key in ("stock_market_value_usd", "treasury_dirty_value_usd",
+                                                           "cash_usd", "entry_cost_usd")), 12500)
+            self.assertAlmostEqual(result["curve"][0][f"{name}_nav_usd"], 12500 - arm["entry_cost_usd"])
+        self.assertEqual(result["carried_treasury_quotes"], [{"date": "2024-01-10", "quote_date": "2024-01-09"}])
+        self.assertEqual(result["curve"][3]["treasury_nav_usd"], 1020)
+        self.assertEqual(result["curve"][3]["treasury_dv01_usd"], 0)
+        self.assertEqual(result["stress_window"]["sessions"], 3)
+        end = result["curve"][-1]
+        self.assertAlmostEqual(end["stock_treasury_put_nav_usd"] - end["stock_treasury_nav_usd"], 186)
+        self.assertAlmostEqual(result["option_costs"]["net_cost_after_sale_usd"], -186)

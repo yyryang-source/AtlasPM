@@ -13,6 +13,7 @@ from atlaspm.quant.stock_allocation import StockAllocationSettings
 from atlaspm.quant.option_history import OptionHistory
 from atlaspm.quant.option_replay import replay_long_options
 from atlaspm.quant.protective_put import ProtectivePutSettings, compare_protective_put, load_stock_marks
+from atlaspm.quant.multiasset_hedge import MultiassetSettings, compare_multiasset_hedge
 from atlaspm.quant.treasury_history import TreasuryHistory
 from atlaspm.quant.treasury_replay import replay_treasury_holding
 from atlaspm.quant.lean_option_quotes import import_lean_option_quotes
@@ -63,6 +64,15 @@ from atlaspm.selection.v2_momentum_diagnostics import diagnose_v2_momentum_extre
 from atlaspm.selection.corporate_action_reconciliation import reconcile_reverse_splits
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
 from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
+
+
+def _put_settings(args: argparse.Namespace, cash_usd: float) -> ProtectivePutSettings:
+    return ProtectivePutSettings(
+        underlying=args.underlying.strip().upper(), shares=args.shares, cash_usd=cash_usd,
+        fee_per_contract_usd=args.fee_per_contract_usd, otm_fraction=args.otm_fraction,
+        target_dte=args.target_dte, max_dte=args.max_dte, roll_sessions=args.roll_sessions,
+        max_quote_age_minutes=args.max_quote_age_minutes, eod_snapshot=args.eod_snapshot,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -755,19 +765,22 @@ def build_parser() -> argparse.ArgumentParser:
     lean_quotes.add_argument("--contracts", type=Path, required=True)
     lean_quotes.add_argument("--output", type=Path, default=Path("local_data/option_quotes.csv"))
 
-    protective_put = sub.add_parser("protective-put-backtest", help="Compare a rolling put hedge with the same stock holding")
+    put_arguments = argparse.ArgumentParser(add_help=False)
     for option in ("contracts", "quotes", "settlements", "stock-marks"):
-        protective_put.add_argument(f"--{option}", type=Path, required=True)
-    protective_put.add_argument("--underlying", required=True)
-    protective_put.add_argument("--shares", type=int, required=True)
+        put_arguments.add_argument(f"--{option}", type=Path, required=True)
+    put_arguments.add_argument("--underlying", required=True)
+    put_arguments.add_argument("--shares", type=int, required=True)
+    put_arguments.add_argument("--otm-fraction", type=float, default=0.05)
+    put_arguments.add_argument("--target-dte", type=int, default=45)
+    put_arguments.add_argument("--max-dte", type=int, default=65)
+    put_arguments.add_argument("--roll-sessions", type=int, default=21)
+    put_arguments.add_argument("--fee-per-contract-usd", type=float, default=1.0)
+    put_arguments.add_argument("--max-quote-age-minutes", type=int, default=1)
+    put_arguments.add_argument("--eod-snapshot", action="store_true", help="Input quote times represent modeled EOD snapshots")
+
+    protective_put = sub.add_parser("protective-put-backtest", parents=[put_arguments],
+                                     help="Compare a rolling put hedge with the same stock holding")
     protective_put.add_argument("--cash-usd", type=float, required=True)
-    protective_put.add_argument("--otm-fraction", type=float, default=0.05)
-    protective_put.add_argument("--target-dte", type=int, default=45)
-    protective_put.add_argument("--max-dte", type=int, default=65)
-    protective_put.add_argument("--roll-sessions", type=int, default=21)
-    protective_put.add_argument("--fee-per-contract-usd", type=float, default=1.0)
-    protective_put.add_argument("--max-quote-age-minutes", type=int, default=1)
-    protective_put.add_argument("--eod-snapshot", action="store_true", help="Input quote times represent modeled EOD snapshots")
     protective_put.add_argument("--output", type=Path, default=Path("local_data/protective_put_backtest.json"))
 
     treasury = sub.add_parser("treasury-replay", help="Mark a settled Treasury holding and replay its cash flows")
@@ -780,6 +793,23 @@ def build_parser() -> argparse.ArgumentParser:
     treasury.add_argument("--max-quote-age-days", type=int, default=3)
     treasury.add_argument("--shock-bps", type=float, default=100)
     treasury.add_argument("--output", type=Path, default=Path("local_data/treasury_replay.json"))
+
+    multiasset = sub.add_parser("multiasset-hedge-backtest", parents=[put_arguments],
+                                help="Compare stock, stock/Treasury and stock/Treasury/put with equal opening capital")
+    for option in ("treasury-contracts", "treasury-payments", "treasury-quotes"):
+        multiasset.add_argument(f"--{option}", type=Path, required=True)
+    multiasset.add_argument("--treasury-cusip", required=True)
+    multiasset.add_argument("--treasury-face-usd", type=int, required=True)
+    multiasset.add_argument("--initial-capital-usd", type=float, required=True)
+    multiasset.add_argument("--minimum-cash-usd", type=float, default=0)
+    multiasset.add_argument("--stock-entry-cost-bps", type=float, default=5)
+    multiasset.add_argument("--treasury-entry-cost-bps", type=float, default=5)
+    multiasset.add_argument("--treasury-shock-bps", type=float, default=100)
+    multiasset.add_argument("--treasury-max-quote-age-days", type=int, default=3)
+    multiasset.add_argument("--treasury-closed", nargs="+", type=date.fromisoformat, default=(),
+                            help="Dates when the stock exchange was open and the Treasury market was closed")
+    multiasset.add_argument("--stress-window", nargs=2, type=date.fromisoformat, metavar=("START", "END"))
+    multiasset.add_argument("--output", type=Path, default=Path("local_data/multiasset_hedge_backtest.json"))
 
     return parser
 
@@ -809,6 +839,33 @@ def main(argv: list[str] | None = None) -> int:
             report = {"written": destination.relative_to(Path.cwd().resolve()).as_posix(),
                       "ending_nav_usd": last_mark["nav_usd"], "coupon_paid_usd": last_mark["coupon_paid_to_date_usd"],
                       "principal_paid_usd": last_mark["principal_paid_to_date_usd"], "live_execution_enabled": False}
+        elif args.command == "multiasset-hedge-backtest":
+            destination = require_private_output(args.output)
+            sources = {path.expanduser().resolve() for path in (
+                args.contracts, args.quotes, args.settlements, args.stock_marks,
+                args.treasury_contracts, args.treasury_payments, args.treasury_quotes,
+            )}
+            if destination.suffix.lower() != ".json" or destination in sources:
+                raise ValueError("Multi-asset hedge backtest requires a private .json output distinct from inputs")
+            options = OptionHistory(args.contracts, args.quotes, args.settlements)
+            bonds = TreasuryHistory(args.treasury_contracts, args.treasury_payments, args.treasury_quotes)
+            settings = MultiassetSettings(
+                initial_capital_usd=args.initial_capital_usd, minimum_cash_usd=args.minimum_cash_usd,
+                treasury_cusip=args.treasury_cusip.strip().upper(), treasury_face_usd=args.treasury_face_usd,
+                stock_entry_cost_bps=args.stock_entry_cost_bps, treasury_entry_cost_bps=args.treasury_entry_cost_bps,
+                treasury_shock_bps=args.treasury_shock_bps, treasury_max_quote_age_days=args.treasury_max_quote_age_days,
+            )
+            result = compare_multiasset_hedge(
+                options, bonds, load_stock_marks(args.stock_marks), _put_settings(args, 0.0), settings,
+                treasury_closed=frozenset(args.treasury_closed),
+                stress_window=tuple(args.stress_window) if args.stress_window else None,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+            report = {"written": destination.relative_to(Path.cwd().resolve()).as_posix(),
+                      "sessions": len(result["curve"]), "performance": result["performance"],
+                      "stress_window": result["stress_window"], "option_costs": result["option_costs"],
+                      "live_execution_enabled": False}
         elif args.command == "protective-put-backtest":
             destination = require_private_output(args.output)
             sources = {path.expanduser().resolve() for path in (
@@ -817,13 +874,7 @@ def main(argv: list[str] | None = None) -> int:
             if destination.suffix.lower() != ".json" or destination in sources:
                 raise ValueError("Protective put backtest requires a private .json output distinct from inputs")
             history = OptionHistory(args.contracts, args.quotes, args.settlements)
-            settings = ProtectivePutSettings(
-                underlying=args.underlying.strip().upper(), shares=args.shares, cash_usd=args.cash_usd,
-                fee_per_contract_usd=args.fee_per_contract_usd, otm_fraction=args.otm_fraction,
-                target_dte=args.target_dte, max_dte=args.max_dte, roll_sessions=args.roll_sessions,
-                max_quote_age_minutes=args.max_quote_age_minutes, eod_snapshot=args.eod_snapshot,
-            )
-            result = compare_protective_put(history, load_stock_marks(args.stock_marks), settings)
+            result = compare_protective_put(history, load_stock_marks(args.stock_marks), _put_settings(args, args.cash_usd))
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
             report = {"written": destination.relative_to(Path.cwd().resolve()).as_posix(),

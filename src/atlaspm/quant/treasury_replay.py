@@ -35,7 +35,7 @@ def _rate_risk(dirty: float, future: list[TreasuryPayment], at: date, shock_bps:
 
 def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int, dates: list[date], *,
                             initial_cash_usd: float = 0, max_quote_age_days: int = 3,
-                            shock_bps: float = 100) -> dict[str, Any]:
+                            shock_bps: float = 100, include_opening_date_payment: bool = True) -> dict[str, Any]:
     terms = history.terms[cusip]
     if (not dates or dates != sorted(set(dates)) or not terms.issued_on <= dates[0] < terms.maturity
             or type(face_usd) is not int or face_usd <= 0 or face_usd % terms.face_increment_usd
@@ -46,7 +46,8 @@ def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int,
 
     schedule = history.payments[cusip]
     due_days = [payment.scheduled_on for payment in schedule]
-    eligible = [payment for payment in schedule if dates[0] <= payment.scheduled_on <= dates[-1]]
+    first_entitled = bisect_right(due_days, dates[0]) if not include_opening_date_payment else 0
+    eligible = [payment for payment in schedule[first_entitled:] if dates[0] <= payment.scheduled_on <= dates[-1]]
     units = face_usd / 100
     cashflows = [{"scheduled_on": payment.scheduled_on.isoformat(), "paid_on": payment.paid_on.isoformat(),
                   "coupon_usd": units * payment.coupon_per_100, "principal_usd": units * payment.principal_per_100}

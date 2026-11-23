@@ -70,6 +70,13 @@ class TreasuryReplayTest(unittest.TestCase):
         self.assertEqual(result["cashflows"][0]["coupon_usd"], 0)
         self.assertEqual(result["valuations"][-1]["nav_usd"], 1000)
 
+    def test_opening_after_coupon_entitlement_excludes_that_receipt(self):
+        result = replay_treasury_holding(self._history(), "999999990", 10000, [date(2024, 6, 30), date(2024, 7, 1)],
+                                         include_opening_date_payment=False)
+        self.assertEqual(result["cashflows"], [])
+        self.assertTrue(all(row["cash_available_usd"] == row["payment_receivable_usd"] == 0
+                            for row in result["valuations"]))
+
     def test_rejects_incomplete_schedule_and_nonstandard_face(self):
         with self.assertRaisesRegex(ValueError, "Invalid Treasury holding face"):
             replay_treasury_holding(self._history(), "999999990", 10005, [date(2024, 6, 28)])
