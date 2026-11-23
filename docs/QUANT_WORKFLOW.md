@@ -31,6 +31,33 @@ flowchart LR
 
 > Diagram nodes describe a **target architecture**. Alpha research, basic risk modeling and simulated OMS already exist; option/bond selection, unified cross-asset hedge optimization, broker paper adapters and real-time risk monitoring remain incomplete or not implemented.
 
+## Directory skeleton only
+
+The following **future implementation destinations** are tracked in Git with
+empty `.gitkeep` files. No code, `__init__.py`, strategy logic, interfaces, API
+calls, order adapters, or backtest behavior is added by this change.
+
+```text
+src/atlaspm/
+  data/                  # Market and instrument data
+  research/              # Factors, ML, validation and experiment reviews
+  strategies/
+    equity/              # Stock selection research sleeve
+    options/             # Options strategy research sleeve
+    bonds/               # Fixed-income strategy research sleeve
+  portfolio/             # Cross-asset allocation and rebalancing
+  risk/                  # Portfolio, financing and operational risk controls
+  hedging/               # Equity/volatility/rate hedge overlays
+  execution/             # Order life cycle and broker adapters (future)
+  monitoring/            # Reconciliation, performance and alerts
+```
+
+**Existing working modules remain in `selection/`, `quant/`, and
+`commands/`.** The existing root-level `atlaspm/portfolio.py` compatibility
+file is also untouched. A future separately reviewed implementation/migration
+will populate these folders; the placeholder names must not be interpreted
+as new importable runtime packages or operational functionality.
+
 ## Code-to-stage mapping and completion boundary
 
 | Stage | Existing code | Current maturity |
