@@ -21,7 +21,7 @@ from typing import Any
 from atlaspm.historical import load_adjusted_prices
 from atlaspm.ai_stock_ranker import (
     FEATURE_NAMES, _RISK_DISCLOSURES, _candidate_rows, _history_arrays,
-    _load_lightgbm, _matrix, _midrank, chronological_splits,
+    _load_lightgbm, _matrix, _midrank, _recent_inference_histories, chronological_splits,
     create_training_rows, evaluate_ranker,
 )
 
@@ -393,10 +393,11 @@ def rank_stocks_v2(
     dates = sorted(d for d in benchmark if d <= cutoff)
     if not dates or dates[-1] != cutoff:
         raise ValueError("as-of must have a completed benchmark trading close")
-    histories = load_adjusted_prices(prices_path)
-    histories.pop(metadata["benchmark_symbol"], None)
+    histories = _recent_inference_histories(
+        prices_path, cutoff, exclude_symbol=metadata["benchmark_symbol"]
+    )
     candidates = _candidate_rows(
-        _history_arrays(histories), dates, benchmark, len(dates) - 1, horizon=None
+        histories, dates, benchmark, len(dates) - 1, horizon=None
     )
     if not candidates:
         raise ValueError("No stocks with complete decision-close history")

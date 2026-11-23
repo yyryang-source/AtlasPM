@@ -12,7 +12,8 @@ after entry; purged chronological splits prohibit labels crossing boundaries.
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from collections import defaultdict
+from collections import defaultdict, deque
+import csv
 from datetime import date
 import hashlib
 import json
@@ -47,6 +48,56 @@ def _history_arrays(prices: dict[str, dict[date, float]]) -> dict[str, tuple[lis
         ordered = sorted(observations.items())
         result[symbol] = ([d for d, _ in ordered], [p for _, p in ordered])
     return result
+
+
+def _recent_inference_histories(
+    prices_path: Path, cutoff: date, *, exclude_symbol: str,
+) -> dict[str, tuple[list[date], list[float]]]:
+    """Stream only the last 253 observed closes per symbol for inference.
+
+    Training still loads full labeled history. Inference uses exactly 253
+    completed closes per symbol and must not load millions of older bars.
+    Input must be chronological *within each symbol* (ticker-major and
+    date-major CSVs are both supported). A duplicate or unsorted date fails
+    closed instead of silently changing the factor window.
+
+    All input rows, including future rows and the excluded benchmark, are
+    validated. Dates after cutoff cannot influence any candidate feature.
+    """
+    recent: dict[str, deque[tuple[date, float]]] = {}
+    last_date: dict[str, date] = {}
+    with Path(prices_path).open("r", encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        if (not reader.fieldnames
+                or not {"date", "symbol", "adjusted_close"}.issubset(reader.fieldnames)):
+            raise ValueError("CSV needs columns: date,symbol,adjusted_close")
+        for line, record in enumerate(reader, start=2):
+            try:
+                day = date.fromisoformat(record["date"].strip())
+                symbol = record["symbol"].strip().upper()
+                close = float(record["adjusted_close"])
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValueError(f"Invalid price CSV row {line}") from exc
+            if not symbol or not isfinite(close) or close <= 0:
+                raise ValueError(f"Invalid symbol or adjusted_close in row {line}")
+            previous = last_date.get(symbol)
+            if previous is not None and day <= previous:
+                raise ValueError(
+                    f"Duplicate or nonchronological price row {line} for {symbol}"
+                )
+            last_date[symbol] = day
+            if symbol == exclude_symbol:
+                continue
+            window = recent.setdefault(symbol, deque(maxlen=253))
+            if day <= cutoff:
+                window.append((day, close))
+    if not last_date:
+        raise ValueError("No valid price rows in CSV")
+    # Preserve first-seen symbol iteration order for deterministic scoring.
+    return {
+        symbol: ([day for day, _ in window], [close for _, close in window])
+        for symbol, window in recent.items()
+    }
 
 
 def _features(
@@ -505,9 +556,9 @@ def rank_with_ai(
     bench_days = sorted(d for d in bench if d <= cutoff)
     if not bench_days or bench_days[-1] != cutoff:
         raise ValueError("as-of must be a completed benchmark trading close")
-    prices = load_adjusted_prices(prices_path)
-    prices.pop(ticker, None)
-    history = _history_arrays(prices)
+    history = _recent_inference_histories(
+        prices_path, cutoff, exclude_symbol=ticker
+    )
     rows = _candidate_rows(
         history, bench_days, bench,
         len(bench_days) - 1, horizon=None,

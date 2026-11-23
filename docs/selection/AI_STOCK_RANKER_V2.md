@@ -158,3 +158,20 @@ non-overlapping/appropriately purged forward-return labels, and
 compare V2 against the momentum baseline on untouched future windows.
 Do not repeatedly optimize against the same 2026 test period.
 
+
+
+## November 2026 maintenance: bounded-memory monthly inference
+
+`stock-ai-rank` and `stock-ai-rank-v2` now read the stock CSV once and
+retain only the latest **253 adjusted closes per ticker on/before the
+requested decision date**. Both model training commands are unchanged and
+still use full historical training labels. The inference paths preserve
+the existing nine price features, no-forward-data cutoff and score/tie
+rules, while avoiding retaining all multi-year bars in RAM.
+
+**CSV contract:** records for a given symbol must be in chronological
+order (ticker-major and date-major both work). Duplicate or out-of-order
+rows now fail closed instead of being silently sorted. Use the unchanged
+`stock-market-audit` command to investigate bad histories. This is a
+research performance optimization, **not** an improvement to predictive
+IC or trading performance. The saved local CSV is never modified.
