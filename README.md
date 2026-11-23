@@ -59,6 +59,16 @@ Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatib
 
 An offline, gitignored SQLite warehouse now accepts the existing equity adjusted-close CSV, Massive option contract/day/5m/1m candle CSVs and US Treasury FiscalData auction CSVs. Use `python -m atlaspm.cli market-db init`, then `market-db import-stocks`, and inspect `market-db status`. See [Windows market database guide](docs/MARKET_DATABASE.md). No real market data are uploaded to GitHub; no live trading is enabled.
 
+## Unified factor database (research-only)
+
+The local Parquet factor mart computes 12 daily equity factors from the existing
+Hugging Face 5-minute bars or a separate SQLite adjusted-close feed without
+mixing their price conventions. It includes a factor catalog, materialization,
+incremental batches, audits and bounded queries; no new downloads or training
+permissions are implied. Start with `market-db factor-catalog` and
+`market-db factor-build --month 2026-03 --dry-run`. See the
+[Windows factor database guide](docs/FACTOR_DATABASE.md).
+
 ## Primary workflows
 
 | Goal | Entry point | Scope |

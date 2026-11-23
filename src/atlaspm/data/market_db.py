@@ -318,6 +318,30 @@ def register_parser(sub):
     h.add_argument('--month',required=True)
     h.add_argument('--session',choices=['rth','all'],default='rth')
     h.add_argument('--no-save',action='store_true')
+    # Offline, source-isolated daily factor mart; no new top-level CLI family.
+    f = actions.add_parser('factor-catalog', help='List documented equity factors')
+    for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
+        f = actions.add_parser(name)
+        f.add_argument('--source', choices=['hf', 'sqlite'], default='hf')
+        f.add_argument('--session', choices=['rth'], default='rth')
+        if name in ('factor-build', 'factor-audit'):
+            f.add_argument('--month', required=True)
+        if name in ('factor-build', 'factor-batch'):
+            f.add_argument('--sqlite-db', type=Path, default=DB_PATH)
+            f.add_argument('--refresh', action='store_true')
+            f.add_argument('--dry-run', action='store_true')
+        if name == 'factor-batch':
+            f.add_argument('--start-month', required=True)
+            f.add_argument('--end-month', required=True)
+            f.add_argument('--max-months', type=int, default=0)
+        if name == 'factor-query':
+            f.add_argument('--symbol', required=True)
+            f.add_argument('--start', default=None)
+            f.add_argument('--end', default=None)
+            f.add_argument('--limit', type=int, default=20)
+        if name != 'factor-status':
+            f.add_argument('--memory', default='4GB')
+            f.add_argument('--threads', type=int, default=4)
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -327,6 +351,26 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action.startswith('factor-'):
+        from atlaspm.data import factor_db
+        action = args.db_action
+        if action == 'factor-catalog':
+            return factor_db.catalog()
+        common = {'source': args.source, 'session': args.session}
+        if action == 'factor-status':
+            return factor_db.status(**common)
+        common.update(memory=args.memory, threads=args.threads)
+        if action == 'factor-audit':
+            return factor_db.audit(args.month, **common)
+        if action == 'factor-query':
+            return factor_db.query(args.symbol, start=args.start, end=args.end,
+                                   limit=args.limit, **common)
+        common.update(sqlite_db=args.sqlite_db, dry_run=args.dry_run,
+                      refresh=args.refresh)
+        if action == 'factor-build':
+            return factor_db.build(args.month, **common)
+        return factor_db.batch(args.start_month, args.end_month,
+                               max_months=args.max_months, **common)
     if args.db_action == 'hf-5m-reconcile':
         from atlaspm.data import hf_stock5m_reconcile
         return hf_stock5m_reconcile.reconcile(
