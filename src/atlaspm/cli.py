@@ -48,6 +48,7 @@ from atlaspm.selection.us_market_quality import audit_current_us_stock_prices
 from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
 from atlaspm.selection.v2_momentum_diagnostics import diagnose_v2_momentum_extremes
+from atlaspm.selection.corporate_action_reconciliation import reconcile_reverse_splits
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
 from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
 
@@ -500,6 +501,17 @@ def build_parser() -> argparse.ArgumentParser:
     diagnostic.add_argument("--output", type=Path,
                             default=Path("local_data/v2_momentum_diagnostics.json"))
 
+    split_audit = sub.add_parser(
+        "stock-split-reconcile",
+        help="Audit SEC-verified reverse splits; optionally create a separate adjusted research CSV",
+    )
+    split_audit.add_argument("--prices", type=Path, required=True)
+    split_audit.add_argument("--manifest", type=Path, required=True)
+    split_audit.add_argument("--apply-confirmed", action="store_true")
+    split_audit.add_argument("--output", type=Path, default=None)
+    split_audit.add_argument("--report", type=Path,
+                             default=Path("local_data/split_reconciliation_report.json"))
+
     ai_rank_v2 = sub.add_parser(
         "stock-ai-rank-v2",
         help="Rank stocks with an ordinal learning-to-rank model, no orders",
@@ -803,6 +815,36 @@ def main(argv: list[str] | None = None) -> int:
                     if key != "cohorts"
                 },
                 "written": str(destination.relative_to(Path.cwd().resolve())),
+                "live_execution_enabled": False,
+            }
+        elif args.command == "stock-split-reconcile":
+            destination = require_private_output(args.report)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Split audit report must be private JSON")
+            output = require_private_output(args.output) if args.output else None
+            if output is not None and output.suffix.lower() != ".csv":
+                raise ValueError("Reconciled price output must be private CSV")
+            inputs = {args.prices.expanduser().resolve(), args.manifest.expanduser().resolve()}
+            if destination in inputs or (output is not None and destination == output):
+                raise ValueError("Report cannot overwrite source inputs or output prices")
+            result = reconcile_reverse_splits(
+                args.prices, args.manifest, output_path=output,
+                apply_confirmed=args.apply_confirmed,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "status": result["status"],
+                "events_requiring_reconciliation": result["events_requiring_reconciliation"],
+                "events_requiring_manual_review": result["events_requiring_manual_review"],
+                "event_checks": result["event_checks"],
+                "corrected_prices_path": result["corrected_prices_path"],
+                "modified_rows": result.get("modified_rows"),
+                "report": str(destination.relative_to(Path.cwd().resolve())),
+                "research_only": True,
                 "live_execution_enabled": False,
             }
         elif args.command == "stock-ai-rank-v2":
