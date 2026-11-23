@@ -306,6 +306,10 @@ def register_parser(sub):
     h.add_argument('--acknowledge-rights',action='store_true')
     h.add_argument('--input',type=Path,default=None)
     actions.add_parser('hf-5m-status')
+    h=actions.add_parser('hf-5m-audit',help='Audit local HF 5m bars against NYSE calendar and major symbols')
+    h.add_argument('--month',required=True)
+    h.add_argument('--session',choices=['rth','all'],default='rth')
+    h.add_argument('--no-save',action='store_true')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -315,6 +319,9 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action == 'hf-5m-audit':
+        from atlaspm.data import hf_stock5m_audit
+        return hf_stock5m_audit.audit(args.month,session=args.session,save=not args.no_save)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
