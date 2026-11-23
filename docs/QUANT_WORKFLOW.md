@@ -31,32 +31,34 @@ flowchart LR
 
 > Diagram nodes describe a **target architecture**. Alpha research, basic risk modeling and simulated OMS already exist; option/bond selection, unified cross-asset hedge optimization, broker paper adapters and real-time risk monitoring remain incomplete or not implemented.
 
-## Directory skeleton only
+## Domain directory organization
 
-The following **future implementation destinations** are tracked in Git with
-empty `.gitkeep` files. No code, `__init__.py`, strategy logic, interfaces, API
-calls, order adapters, or backtest behavior is added by this change.
+Existing `quant/` and `selection/` modules have been moved into specialized
+domains without changing their original source code. The old paths remain
+lightweight module aliases. **Options, bonds, portfolio and hedging** remain
+reserved or not implemented. See [canonical source map](CODE_LAYOUT.md).
 
 ```text
 src/atlaspm/
-  data/                  # Market and instrument data
-  research/              # Factors, ML, validation and experiment reviews
-  strategies/
-    equity/              # Stock selection research sleeve
-    options/             # Options strategy research sleeve
-    bonds/               # Fixed-income strategy research sleeve
-  portfolio/             # Cross-asset allocation and rebalancing
-  risk/                  # Portfolio, financing and operational risk controls
-  hedging/               # Equity/volatility/rate hedge overlays
-  execution/             # Order life cycle and broker adapters (future)
-  monitoring/            # Reconciliation, performance and alerts
+  data/                  # Real stock market data and quote-quality code
+  research/              # Real stock rankers, validations and ML studies
+  strategies/equity/     # Real screening, monthly candidates and alpha gate
+  strategies/options/    # RESERVED, not implemented
+  strategies/bonds/      # RESERVED, not implemented
+  risk/                  # Real risk and margin simulations
+  execution/             # Offline synthetic OMS and read-only IBKR
+  monitoring/            # Historical performance, audits and local UI
+  quant/                 # Core portfolio/backtest + alias wrappers
+  selection/             # Alias wrappers for existing imports
+  portfolio/             # RESERVED; root portfolio.py shadows package
+  hedging/               # RESERVED, not implemented
 ```
 
-**Existing working modules remain in `selection/`, `quant/`, and
-`commands/`.** The existing root-level `atlaspm/portfolio.py` compatibility
-file is also untouched. A future separately reviewed implementation/migration
-will populate these folders; the placeholder names must not be interpreted
-as new importable runtime packages or operational functionality.
+**Legacy import paths remain importable** as thin module aliases; new modules
+reside in the domains above. The existing root `atlaspm/portfolio.py` still
+shadows the reserved `portfolio/` folder and has not been changed. Existing
+broker execution permissions remain disabled; this is a source move, not a
+functional expansion.
 
 ## Code-to-stage mapping and completion boundary
 
