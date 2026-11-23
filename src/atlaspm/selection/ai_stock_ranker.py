@@ -22,6 +22,7 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.selection.recent_prices import load_recent_adjusted_prices
 
 
 FEATURE_NAMES = (
@@ -505,7 +506,9 @@ def rank_with_ai(
     bench_days = sorted(d for d in bench if d <= cutoff)
     if not bench_days or bench_days[-1] != cutoff:
         raise ValueError("as-of must be a completed benchmark trading close")
-    prices = load_adjusted_prices(prices_path)
+    # Inference only needs 253 decision-close rows per symbol; training
+    # still loads the complete history and preserves chronological labels.
+    prices = load_recent_adjusted_prices(prices_path, as_of=cutoff)
     prices.pop(ticker, None)
     history = _history_arrays(prices)
     rows = _candidate_rows(

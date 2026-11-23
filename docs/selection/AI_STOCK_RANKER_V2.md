@@ -1,5 +1,21 @@
 # AtlasPM AI Stock Ranker V2: pure cross-sectional Learning-to-Rank
 
+## Bounded-memory monthly inference (V1 + V2)
+
+Monthly `stock-ai-rank` / `stock-ai-rank-v2` now stream each adjusted-close
+CSV once and keep **at most 253 decision-date closes per ticker** in memory,
+rather than keeping every observed historical bar. This is an inference-only
+optimization: training, backtesting, the price-data source, model weights and
+the nine factor definitions are not changed.
+
+Date-major and ticker-major files both work when observations for each ticker
+are chronologically ordered. Unexpected older/duplicate per-ticker dates
+fall back to the original full-history reader; duplicates still fail, and
+all rows including future-dated rows are validated. The loader does not
+repair splits, certify liquidity, establish historical listing membership,
+or make a weak V2 ranker profitable. Benchmark histories remain validated
+with the original strict reader.
+
 **This is a stock PICKER only**. No order, broker API, weights, leverage,
 trade, risk budget, stop-loss or market-maker functions.
 

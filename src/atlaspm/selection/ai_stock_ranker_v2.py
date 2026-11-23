@@ -19,6 +19,7 @@ from statistics import fmean
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.selection.recent_prices import load_recent_adjusted_prices
 from atlaspm.ai_stock_ranker import (
     FEATURE_NAMES, _RISK_DISCLOSURES, _candidate_rows, _history_arrays,
     _load_lightgbm, _matrix, _midrank, chronological_splits,
@@ -393,7 +394,9 @@ def rank_stocks_v2(
     dates = sorted(d for d in benchmark if d <= cutoff)
     if not dates or dates[-1] != cutoff:
         raise ValueError("as-of must have a completed benchmark trading close")
-    histories = load_adjusted_prices(prices_path)
+    # Do not materialize all 2000-2026 stock bars for one month-end rank.
+    # The 253 valid historical closes needed for features are enough.
+    histories = load_recent_adjusted_prices(prices_path, as_of=cutoff)
     histories.pop(metadata["benchmark_symbol"], None)
     candidates = _candidate_rows(
         _history_arrays(histories), dates, benchmark, len(dates) - 1, horizon=None
