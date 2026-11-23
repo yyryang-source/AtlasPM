@@ -89,9 +89,9 @@ def _review_momentum_cohorts(
                 "average_same_pool_spy_excess": pool_average,
                 "difference_vs_pool_mean": fmean(labels) - pool_average,
                 "spy_return_entry_to_exit": spy_growth,
-                "top_n_min_12_1_momentum": min(scores for scores in (
+                "top_n_min_12_1_momentum": min(
                     item["momentum_12_1"] for item in selection
-                )),
+                ),
                 "top_n_max_12_1_momentum": max(
                     item["momentum_12_1"] for item in selection
                 ),
