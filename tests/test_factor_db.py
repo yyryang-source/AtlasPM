@@ -132,6 +132,18 @@ class FactorDuckDBTests(FactorContractTests):
                                 memory='256MB', threads=1)
         self.assertEqual(1, batch['skipped_existing'])
         self.assertEqual(1, batch['months_processed'])
+        # Actual month-price mutation invalidates the cached daily projection.
+        cx = market_db.connect(market_db.DB_PATH)
+        try:
+            cx.execute("UPDATE equity_daily SET adjusted_close=321.0 "
+                       "WHERE symbol='AAPL' AND trade_date='2026-02-27'")
+            cx.commit()
+        finally:
+            cx.close()
+        updated = factor_db.build('2026-02', source='sqlite',
+                                  memory='256MB', threads=1)
+        self.assertEqual('built', updated['state'])
+
 
 
 
