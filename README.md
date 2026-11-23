@@ -13,6 +13,9 @@ For RiskNet, FusionNet, portfolio quant and broker risk research, see
 The stock-to-quant alpha gate is a **research allowlist only** and does
 not submit orders or authorize trades.
 
+For the Python and Streamlit after-close equity workbench, see the
+[launch commands and input formats](docs/quant/REBALANCE_WORKBENCH.md).
+
 ## Alpha candidate eligibility threshold (research, not broker permission)
 
 The optional `stock-alpha-gate` CLI converts a month-end V2 AI stock
