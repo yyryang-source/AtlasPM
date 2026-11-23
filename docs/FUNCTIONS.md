@@ -2,7 +2,7 @@
 
 AtlasPM 是一个本地运行的量化研究与组合风险工具。它能准备行情和财报数据、做选股和组合回测、研究期权与国债对冲、核对账户风险并生成待审核的调仓草案。
 
-本清单以 `feature/rebalance-workbench` 的代码基线 `6ae82a2` 为准。按用途共 **8 类功能**，包括 **55 个 `atlaspm` CLI 子命令**，以及共用同一后台的调仓审核页面与独立命令。辅助数据脚本另列。新增需求、实测缺口和开发进度见 [TODO.md](TODO.md)。
+本清单以 `feature/rebalance-workbench` 分支当前实现为准。按用途共 **8 类功能**，包括 **55 个 `atlaspm` CLI 子命令**，以及调仓审核的浏览器与独立命令入口。辅助数据脚本另列。新增需求、实测缺口和开发进度见 [TODO.md](TODO.md)。
 
 | 功能域 | 当前主要用途 | 主 CLI 命令数 |
 | --- | --- | ---: |
@@ -16,6 +16,8 @@ AtlasPM 是一个本地运行的量化研究与组合风险工具。它能准备
 | 调仓审核台 | 把数据检查、选股、仓位、草案及人工审核串成一页 | 独立入口 |
 
 仓库根目录运行 `.\.venv\Scripts\python.exe -m atlaspm.cli --help` 可查看全部子命令。在具体命令后加 `--help` 可查看输入文件、参数和输出位置。依赖和样本从 [README 快速开始](../README.md#windows-powershell-quick-start) 获取，数据字段见 [DATA.md](DATA.md)。
+
+浏览器工作台提供选股、等权与 Quant 回测的运行入口。期权、国债和多资产对冲页面读取已有报告。调仓审核与研究任务均可从总览打开。 [工作台启动与使用](quant/RESEARCH_WORKBENCH.md)
 
 ## 1. 行情与研究数据
 
@@ -126,19 +128,26 @@ RegimeNet 与交易执行约束中的不交易区间属于原生模型研究路�
 3. 导入账户持仓、现金和未成交挂单，计算持仓差额及订单草案。
 4. 检查现金与费用缓冲、挂单冲突、单股集中度、换手与下跌压力，拦截不合格草案。
 5. 在浏览器对比持仓市值、查看草案及风控原因，记录人工审核，按状态筛选历史并导出 CSV 或 JSON。SQLite 保存运行、输入哈希及审核记录。
+6. 从收盘监控日志查看行情交易日、股票池覆盖、拦截原因和账户交接，下载对应审计或打开关联草案。
 
 | 入口 | 用法 |
 | --- | --- |
-| 浏览器 | 通过 Streamlit 运行 `src/atlaspm/rebalance_dashboard.py`，默认打开 `http://127.0.0.1:8501`。 |
+| 浏览器 | 通过 [统一工作台](quant/RESEARCH_WORKBENCH.md) 打开「调仓审核」，也可单独通过 Streamlit 运行 `src/atlaspm/rebalance_dashboard.py`。 |
 | 独立后端命令 | `.\.venv\Scripts\python.exe -m atlaspm.rebalance_workbench --demo`，也可指定日期和四份输入文件。 |
+| 收盘行情与审计 | `python -m atlaspm.market_close`，支持 NYSE 收盘轮询、独立参考价和输入审计。 |
+| IBKR 只读快照 | `python -m atlaspm.ibkr_equity_snapshot`，可用通过的审计和本机 Gateway 账户快照生成草案。 |
+| IBKR Paper 预览 | `python -m atlaspm.ibkr_whatif`，绑定已审草案的精确限价单与券商佣金和保证金估算。 |
+| IBKR 次日复核 | `python -m atlaspm.ibkr_next_day`，用真实报价接口和账户数据重新计算目标数量、风险及逐笔预估。 |
+| IBKR Paper 订单 | `python -m atlaspm.ibkr_paper_orders`，提供显式提交、撤单与成交对账，并保存状态。 |
 
-已用合成账户验收两种仓位算法、拦截和审核记录，用 2023-12-29 四只股票的真实历史行情与模拟账户复验草案。下一阶段包括收盘定时更新、IBKR 账户直连与 What-If、次日复核、Paper 下单及成交对账。 [启动和输入格式](quant/REBALANCE_WORKBENCH.md) · [待开发清单](TODO.md#7-收盘调仓与审核)
+已用合成账户验收两种仓位算法、拦截和审核记录，用真实日线复验收盘行情审计。IBKR 同步、What-If、次日复核、Paper 下单和成交对账已用合成响应测试，实际会话仍待验收。 [收盘行情和 IBKR 入口](quant/MARKET_CLOSE_REBALANCE.md) · [启动和输入格式](quant/REBALANCE_WORKBENCH.md) · [待开发清单](TODO.md#7-收盘调仓与审核)
 
 ## 辅助脚本
 
 | 脚本 | 当前用途 |
 | --- | --- |
 | [`Invoke-USMarketDataExpansion.ps1`](../scripts/selection/Invoke-USMarketDataExpansion.ps1) | 手动串接上市目录、批量行情缓存和全市场覆盖审计。 |
+| [`Register-MarketCloseWatcher.ps1`](../scripts/selection/Register-MarketCloseWatcher.ps1) | 注册 Windows 登录任务或导出登录启动快捷方式，按 NYSE 收盘时间更新并审计指定股票池。 |
 | [`Invoke-MonthlyStockResearch.ps1`](../scripts/selection/Invoke-MonthlyStockResearch.ps1) | Windows 月末股票研究入口，根目录 `scripts/` 下另有同名兼容入口。 |
 | [`fetch_kibot_daily.py`](../scripts/selection/fetch_kibot_daily.py) | 按代码映射下载和缓存 Kibot 日线，生成复权或未复权样本文件。 |
 | [`prepare_spy_put_sample.py`](../scripts/quant/prepare_spy_put_sample.py) | 将 SPY 历史期权压缩包整理成保护性看跌期权回测输入。 |

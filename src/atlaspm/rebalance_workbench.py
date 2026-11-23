@@ -76,6 +76,17 @@ def latest_completed_session(now: datetime | None = None) -> date:
     return completed.index[-1].date()
 
 
+def next_session_window(day: date) -> tuple[date, datetime, datetime]:
+    import pandas_market_calendars as calendars
+
+    exchange_window(day)
+    schedule = calendars.get_calendar("NYSE").schedule(day + timedelta(days=1), day + timedelta(days=14))
+    if schedule.empty:
+        raise ValueError("Next NYSE session is unavailable")
+    session = schedule.iloc[0]
+    return schedule.index[0].date(), session["market_open"].to_pydatetime(), session["market_close"].to_pydatetime()
+
+
 def _object(value: object, name: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{name} 应为 JSON 对象")
@@ -132,7 +143,7 @@ def _reference_prices(data: bytes, day: date) -> dict[str, Decimal]:
 
 
 def _account(
-    raw: dict, *, closed_at: datetime, observed_at: datetime
+    raw: dict, *, closed_at: datetime, observed_at: datetime, max_age: timedelta = timedelta(hours=4),
 ) -> tuple[Decimal, Decimal, dict[str, int], list[dict]]:
     if raw["currency"] != "USD" or raw["account_type"] != "cash":
         raise ValueError("当前只支持 USD 现金账户的美股整数多头仓位")
@@ -145,8 +156,8 @@ def _account(
     captured_at = datetime.fromisoformat(raw["captured_at"])
     if captured_at.tzinfo is None or not closed_at <= captured_at <= observed_at:
         raise ValueError("账户快照应在决策日收盘后采集，并且不得晚于运行时间")
-    if captured_at - closed_at > timedelta(hours=4):
-        raise ValueError("账户快照与决策日收盘相隔超过 4 小时")
+    if captured_at - closed_at > max_age:
+        raise ValueError("账户快照超出允许的时间窗口")
     settled = _amount(raw["settled_cash"], "已结算现金")
     available = _amount(raw["available_cash"], "账户可用现金")
     positions = {
@@ -168,6 +179,166 @@ def _account(
             raise ValueError("挂单需提供买卖方向和未成交股数")
         _amount(order["limit_price"], "挂单限价", positive=True)
     return settled, available, positions, orders
+
+
+@dataclass(frozen=True)
+class AccountValuation:
+    holdings: dict[str, int]
+    effective: dict[str, int]
+    buys: dict[str, int]
+    sells: dict[str, int]
+    reserve: Decimal
+    cash_after_reserves: Decimal
+    equity: Decimal
+    fee_rate: Decimal
+
+
+def _value_account(cash, reported_available, holdings, pending, refs, policy, check) -> AccountValuation:
+    effective = defaultdict(int, holdings)
+    buys: dict[str, int] = defaultdict(int)
+    sells: dict[str, int] = defaultdict(int)
+    fee_rate = Decimal(policy.fee_buffer_bps) / 10000
+    reserve = Decimal(0)
+    for order in pending:
+        sym, qty = order["symbol"], order["remaining"]
+        if order["side"] == "BUY":
+            buys[sym] += qty
+            effective[sym] += qty
+            reserve += qty * Decimal(str(order["limit_price"])) * (1 + fee_rate)
+        else:
+            sells[sym] += qty
+            effective[sym] -= qty
+    oversold = sorted(sym for sym, quantity in sells.items() if quantity > holdings.get(sym, 0))
+    check("卖出挂单库存", not oversold, oversold)
+    cash_after_reserves = min(cash - reserve, reported_available)
+    equity = cash + sum(qty * refs[sym] for sym, qty in holdings.items())
+    check("账户净值参考", equity > 0, float(equity))
+    return AccountValuation(holdings, effective, buys, sells, reserve, cash_after_reserves, equity, fee_rate)
+
+
+def _size_targets(
+    result: dict, target_weights: dict, account: AccountValuation, refs: dict[str, Decimal],
+    policy: Policy, check, *, quotes: dict[str, tuple[Decimal, Decimal]] | None = None,
+    reviewed_limits: dict[tuple[str, str], Decimal] | None = None,
+) -> dict:
+    result["target_weights"] = target_weights
+    rows, draft, conflicts, targets = [], [], [], {}
+    buy_cost = sell_fee = turnover = Decimal(0)
+    worst_values = []
+    for sym in sorted(target_weights.keys() | account.effective.keys()):
+        mark = refs[sym]
+        target = int(account.equity * Decimal(str(target_weights.get(sym, 0.))) / mark)
+        delta = target - account.effective.get(sym, 0)
+        targets[sym] = target
+        buys = account.buys.get(sym, 0)
+        sells = account.sells.get(sym, 0)
+        held = account.holdings.get(sym, 0)
+        rows.append({
+            "symbol": sym, "held": held, "pending_buy": buys, "pending_sell": sells,
+            "effective": held + buys - sells, "target": target, "delta": delta, "close": float(mark),
+        })
+        if (delta > 0 and sells) or (delta < 0 and buys) or (buys and sells):
+            conflicts.append(sym)
+        worst_values.append((held + buys + max(delta, 0)) * mark)
+        if delta:
+            side = "BUY" if delta > 0 else "SELL"
+            limit = quotes[sym][1 if delta > 0 else 0] if quotes is not None else mark
+            approved = (reviewed_limits or {}).get((sym, side))
+            if approved is not None and abs(limit / approved - 1) <= Decimal(".005"):
+                limit = approved
+            notional = abs(delta) * limit
+            fee = notional * account.fee_rate
+            turnover += notional
+            if delta > 0:
+                buy_cost += notional + fee
+            else:
+                sell_fee += fee
+            order = {"symbol": sym, "side": side, "shares": abs(delta),
+                     "reference_close": float(mark), "notional": float(notional), "fee_buffer": float(fee)}
+            if quotes is not None:
+                order["limit_price"] = float(limit)
+            draft.append(order)
+    result["positions"] = rows
+    if not check("持仓目标", any(targets.values()), "目标组合需至少持有一只入选股"):
+        return result
+    gross = sum(worst_values) / account.equity
+    stress = gross * Decimal(str(policy.shock))
+    max_position = max(worst_values, default=Decimal(0)) / account.equity
+    turnover /= account.equity
+    check("挂单方向冲突", not conflicts, conflicts)
+    check("现金与费用缓冲", buy_cost + sell_fee <= account.cash_after_reserves, {
+        "挂单预留": float(account.reserve), "可用现金下界": float(account.cash_after_reserves),
+        "新单买入及费用缓冲": float(buy_cost + sell_fee),
+    })
+    check("总股票敞口", gross <= Decimal(1), {"最坏情形": float(gross), "上限": 1.0})
+    check("单股集中度", max_position <= Decimal(str(policy.max_weight)), {
+        "最坏情形": float(max_position), "上限": policy.max_weight,
+    })
+    check("草稿换手率", turnover <= Decimal(str(policy.turnover_limit)), {
+        "换手率": float(turnover), "上限": policy.turnover_limit,
+    })
+    check("股票下跌压力测试", stress <= Decimal(str(policy.max_stress_loss)), {
+        "冲击": policy.shock, "净值损失": float(stress), "损失上限": policy.max_stress_loss,
+    })
+    if all(item["passed"] for item in result["checks"]):
+        result["status"] = "review"
+        result["draft"] = draft
+    return result
+
+
+def rerisk_targets(
+    original: dict, snapshot: dict, live_quotes: dict, *, now: datetime,
+    reviewed_limits: dict[tuple[str, str], Decimal] | None = None,
+) -> dict:
+    """Recompute the reviewed signal's weights against the next session's cash, inventory and quotes."""
+    session_day, opens_at, closes_at = next_session_window(date.fromisoformat(original["as_of"]))
+    if now.tzinfo is None or not opens_at <= now < closes_at:
+        raise ValueError(f"次日复核应在 {session_day} 的 NYSE 正常交易时段运行")
+    if (original["status"] != "reviewed" or not original["input_sha256"].get("market_audit")
+            or snapshot.get("is_paper") is not True
+            or original.get("account_id_sha256") != hashlib.sha256(snapshot["account_id"].encode()).hexdigest()):
+        raise ValueError("次日复核需要同一 IBKR Paper 账户和经过审计且已审核的草案")
+    captured = datetime.fromisoformat(snapshot["captured_at"])
+    cash, reported, holdings, pending = _account(
+        snapshot, closed_at=max(opens_at, now - timedelta(seconds=60)), observed_at=now,
+        max_age=timedelta(seconds=60),
+    )
+    targets = original["target_weights"]
+    policy = Policy(**original["policy"])
+    weights = [_amount(weight, "权重") for weight in targets.values()]
+    if (not weights or max(weights) > Decimal(str(policy.max_weight))
+            or sum(weights) > Decimal(str(policy.invested_fraction)) + Decimal("1e-8")):
+        raise ValueError("已审核目标权重超出策略配置")
+    symbols = targets.keys() | holdings.keys() | {order["symbol"] for order in pending}
+    if symbols - live_quotes.keys():
+        raise ValueError("次日账户或目标股票缺少实时双边报价")
+    result: dict[str, Any] = {
+        "status": "blocked", "mode": original["mode"], "as_of": original["as_of"], "checks": [], "draft": [],
+        "scope_source": original["scope_source"], "account_source": original["account_source"],
+        "account_id_sha256": original["account_id_sha256"], "snapshot_at": captured.isoformat(),
+        "execution_session": session_day.isoformat(), "parent_id": original["id"],
+        "candidates": original.get("candidates", []), "excluded": original.get("excluded", []),
+    }
+
+    def check(name: str, passed: bool, detail: object) -> bool:
+        result["checks"].append({"name": name, "passed": passed, "detail": detail})
+        return passed
+
+    quotes = {}
+    for symbol in sorted(symbols):
+        quote = live_quotes[symbol]
+        bid, ask = (_amount(quote[field], f"{symbol} {field}", positive=True) for field in ("bid", "ask"))
+        age = now.timestamp() - float(quote["updated_epoch"])
+        if not -3 <= age <= 30 or bid > ask:
+            raise ValueError(f"次日实时双边报价过期或无效 {symbol}")
+        quotes[symbol] = (bid, ask)
+    marks = {symbol: (bid + ask) / 2 for symbol, (bid, ask) in quotes.items()}
+    check("次日交易时段与报价", True, session_day.isoformat())
+    value = _value_account(cash, reported, holdings, pending, marks, policy, check)
+    if value.equity <= 0:
+        return result
+    return _size_targets(result, targets, value, marks, policy, check,
+                         quotes=quotes, reviewed_limits=reviewed_limits)
 
 
 def _plan(
@@ -233,25 +404,8 @@ def _plan(
             return result
         result["account_source"] = "synthetic_fixture" if demo else "user_imported_snapshot"
         result["snapshot_at"] = account["captured_at"]
-        effective = defaultdict(int, holdings)
-        buys: dict[str, int] = defaultdict(int)
-        sells: dict[str, int] = defaultdict(int)
-        fee_rate = Decimal(policy.fee_buffer_bps) / 10000
-        reserve = Decimal(0)
-        for order in pending:
-            sym, qty = order["symbol"], order["remaining"]
-            if order["side"] == "BUY":
-                buys[sym] += qty
-                effective[sym] += qty
-                reserve += qty * Decimal(str(order["limit_price"])) * (1 + fee_rate)
-            else:
-                sells[sym] += qty
-                effective[sym] -= qty
-        oversold = sorted(sym for sym, quantity in sells.items() if quantity > holdings.get(sym, 0))
-        check("卖出挂单库存", not oversold, oversold)
-        cash_after_reserves = min(cash - reserve, reported_available)
-        equity = cash + sum(qty * refs[sym] for sym, qty in holdings.items())
-        if not check("账户净值参考", equity > 0, float(equity)):
+        value = _value_account(cash, reported_available, holdings, pending, refs, policy, check)
+        if value.equity <= 0:
             return result
 
         if policy.allocation == "quant":
@@ -261,14 +415,14 @@ def _plan(
                 max_weight=min(1., policy.max_weight / policy.invested_fraction),
                 turnover_limit=min(2., policy.turnover_limit / policy.invested_fraction),
             )
-            sleeve = equity * Decimal(str(policy.invested_fraction))
-            current = {sym: float(qty * refs[sym] / sleeve) for sym, qty in effective.items() if qty > 0}
+            sleeve = value.equity * Decimal(str(policy.invested_fraction))
+            current = {sym: float(qty * refs[sym] / sleeve) for sym, qty in value.effective.items() if qty > 0}
             signal = prepare_stock_allocation(picks, history, list(sessions[-64:]), settings)
             if signal is None:
                 raise ValueError("Quant 协方差缺少连续行情")
             weights, reason = optimize_stock_allocation(
                 signal, current, set(signal.symbols), settings,
-                cost_rate=float(fee_rate), holding_sessions=21,
+                cost_rate=float(value.fee_rate), holding_sessions=21,
             )
             if not check("Quant 求解", weights is not None and any(weights.values()), reason):
                 return result
@@ -279,59 +433,7 @@ def _plan(
         else:
             weight = min(policy.max_weight, policy.invested_fraction / len(picks))
             target_weights = {row["symbol"]: weight for row in picks}
-        result["target_weights"] = target_weights
-        rows, draft, conflicts, targets = [], [], [], {}
-        for sym in sorted(target_weights.keys() | holdings.keys() | effective.keys()):
-            mark = refs[sym]
-            target = int(equity * Decimal(str(target_weights.get(sym, 0.))) / mark)
-            delta = target - effective[sym]
-            targets[sym] = target
-            rows.append({
-                "symbol": sym, "held": holdings.get(sym, 0), "pending_buy": buys[sym],
-                "pending_sell": sells[sym], "effective": effective[sym],
-                "target": target, "delta": delta, "close": float(mark),
-            })
-            if (delta > 0 and sells[sym]) or (delta < 0 and buys[sym]) or (buys[sym] and sells[sym]):
-                conflicts.append(sym)
-            if delta:
-                notional = abs(delta) * mark
-                draft.append({
-                    "symbol": sym, "side": "BUY" if delta > 0 else "SELL",
-                    "shares": abs(delta), "reference_close": float(mark),
-                    "notional": float(notional), "fee_buffer": float(notional * fee_rate),
-                })
-        result["positions"] = rows
-        if not check("持仓目标", any(targets.values()), "目标组合需至少持有一只入选股"):
-            return result
-        # Check worst direction separately. Pending sales cannot fund buys
-        # or supply shares to a draft sell, and buys may fill before sells.
-        buy_cost = sum(max(row["delta"], 0) * refs[row["symbol"]] * (1 + fee_rate) for row in rows)
-        sell_fee = sum(max(-row["delta"], 0) * refs[row["symbol"]] * fee_rate for row in rows)
-        worst_values = [
-            (row["held"] + row["pending_buy"] + max(row["delta"], 0)) * refs[row["symbol"]]
-            for row in rows
-        ]
-        stress = sum(worst_values) / equity * Decimal(str(policy.shock))
-        max_position = max(worst_values, default=Decimal(0)) / equity
-        turnover = sum(abs(row["delta"]) * refs[row["symbol"]] for row in rows) / equity
-        check("挂单方向冲突", not conflicts, conflicts)
-        check("现金与费用缓冲", buy_cost + sell_fee <= cash_after_reserves, {
-            "挂单预留": float(reserve), "可用现金下界": float(cash_after_reserves),
-            "新单买入及费用缓冲": float(buy_cost + sell_fee),
-        })
-        check("单股集中度", max_position <= Decimal(str(policy.max_weight)), {
-            "最坏情形": float(max_position), "上限": policy.max_weight,
-        })
-        check("草稿换手率", turnover <= Decimal(str(policy.turnover_limit)), {
-            "换手率": float(turnover), "上限": policy.turnover_limit,
-        })
-        check("股票下跌压力测试", stress <= Decimal(str(policy.max_stress_loss)), {
-            "冲击": policy.shock, "净值损失": float(stress), "损失上限": policy.max_stress_loss,
-        })
-        if all(item["passed"] for item in result["checks"]):
-            result["status"] = "review"
-            result["draft"] = draft
-        return result
+        return _size_targets(result, target_weights, value, refs, policy, check)
     except (ValueError, TypeError, KeyError, ArithmeticError, OSError, csv.Error) as exc:
         check("输入或计算错误", False, str(exc))
         return result
@@ -389,13 +491,18 @@ class RunStore:
         )
 
     def run(self, day: date, scope: bytes, adjusted: bytes, references: bytes, snapshot: bytes,
-            policy: Policy = Policy(), *, demo: bool = False) -> str:
+            policy: Policy = Policy(), *, demo: bool = False, market_audit_sha256: str | None = None,
+            account_source: str | None = None) -> str:
         params = {"policy": asdict(policy), "mode": "demo" if demo else "import", "day": day.isoformat()}
         hashes = {
             name: hashlib.sha256(value).hexdigest()
             for name, value in zip(("universe", "adjusted", "references", "account"),
                                    (scope, adjusted, references, snapshot), strict=True)
         }
+        if market_audit_sha256:
+            hashes["market_audit"] = market_audit_sha256
+        if account_source:
+            params["account_source"] = account_source
         key = hashlib.sha256(_json({"inputs": hashes, "params": params, "schema": 1}).encode()).hexdigest()
         with closing(self._connect()) as db, db:
             self._init(db)
@@ -403,6 +510,9 @@ class RunStore:
             if saved and saved["status"] != "blocked":
                 return key
             report = _plan(day, scope, adjusted, references, snapshot, policy, demo=demo)
+            if account_source and report["account_source"]:
+                report["account_source"] = account_source
+                report["account_id_sha256"] = hashlib.sha256(_read_json(snapshot)["account_id"].encode()).hexdigest()
             report.update(input_sha256=hashes, policy=params["policy"], id=key)
             db.execute(
                 """INSERT INTO rebalance_runs (id, created, as_of, status, report) VALUES (?, ?, ?, ?, ?)
@@ -411,6 +521,29 @@ class RunStore:
                 (key, datetime.now(timezone.utc).isoformat(), day.isoformat(), report["status"], _json(report)),
             )
         return key
+
+    def run_prepared(self, market_audit: Path, account: bytes, policy: Policy = Policy(),
+                     *, account_source: str | None = None) -> str:
+        from atlaspm.market_close import approved_inputs
+
+        day, scope, adjusted, references, audit_digest = approved_inputs(market_audit)
+        return self.run(day, scope, adjusted, references, account, policy, market_audit_sha256=audit_digest,
+                        account_source=account_source)
+
+    def record_next_day(self, report: dict) -> str:
+        if not report.get("parent_id") or not report.get("execution_session"):
+            raise ValueError("Expected a next-day review record")
+        with closing(self._connect()) as db, db:
+            self._init(db)
+            parent = db.execute("SELECT status FROM rebalance_runs WHERE id=?",
+                                (report["parent_id"],)).fetchone()
+            if parent is None or parent["status"] != "reviewed":
+                raise ValueError("Original close draft is not reviewed")
+            db.execute("""INSERT OR IGNORE INTO rebalance_runs (id, created, as_of, status, report)
+                          VALUES (?, ?, ?, ?, ?)""",
+                       (report["id"], datetime.now(timezone.utc).isoformat(), report["as_of"],
+                        report["status"], _json(report)))
+        return report["id"]
 
     def list(self) -> list[dict]:
         with closing(self._connect()) as db, db:
@@ -449,22 +582,31 @@ def main() -> int:
     sessions = parser.add_mutually_exclusive_group()
     sessions.add_argument("--as-of", type=date.fromisoformat)
     sessions.add_argument("--latest-close", action="store_true")
+    sessions.add_argument("--market-audit", type=Path)
     for name in ("universe", "adjusted", "references", "account"):
         parser.add_argument(f"--{name}", type=Path)
     parser.add_argument("--allocation", choices=["equal", "quant"], default="equal")
     args = parser.parse_args()
     files = (args.universe, args.adjusted, args.references, args.account)
+    store = RunStore(args.db)
+    policy = Policy(allocation=args.allocation)
     if args.demo:
-        if args.as_of or args.latest_close or any(files):
+        if args.as_of or args.latest_close or args.market_audit or any(files):
             parser.error("--demo cannot be combined with input files or a decision date")
-        inputs = demo_inputs()
+        key = store.run(*demo_inputs(), policy, demo=True)
+    elif args.market_audit:
+        if not args.account or any(files[:3]):
+            parser.error("--market-audit requires --account and supplies all price and universe inputs")
+        try:
+            key = store.run_prepared(args.market_audit, args.account.read_bytes(), policy)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(_json({"status": "blocked", "error": str(exc)}))
+            return 2
     elif (args.as_of or args.latest_close) and all(files):
         day = args.as_of or latest_completed_session()
-        inputs = (day, *(path.read_bytes() for path in files))
+        key = store.run(day, *(path.read_bytes() for path in files), policy)
     else:
-        parser.error("Specify --demo or choose --as-of / --latest-close with all four input files")
-    store = RunStore(args.db)
-    key = store.run(*inputs, Policy(allocation=args.allocation), demo=args.demo)
+        parser.error("Specify --demo, --market-audit with --account, or a date with all four input files")
     status = store.get(key)["status"]
     print(_json({"id": key, "status": status}))
     return 2 if status == "blocked" else 0
