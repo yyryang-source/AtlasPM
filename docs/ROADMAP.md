@@ -1,202 +1,26 @@
-# AtlasPM roadmap
+# AtlasPM roadmap (research-first)
 
-## v0.1 — foundation (implemented)
+This file describes **outstanding work**, not a promise of profitability or a release date.
 
-- [x] Python package and Windows PowerShell quick start
-- [x] Long-only cash and margin account accounting
-- [x] Illustrative maintenance-margin and decline stress tests
-- [x] Borrowing-cost estimate
-- [x] Capped inverse-volatility allocation baseline
-- [x] Automated unit tests and CI
+## Current — research stabilization
 
-## v0.2 — constrained optimization and historical research (in progress)
+- Audit and reconcile verified corporate actions without rewriting raw quotes; add regression tests for repeated events and already-adjusted data.
+- Repair the US equity point-in-time universe (IPO/delistings, identifier history, corporate actions, volume/liquidity, trusted fundamentals).
+- Re-run all-market selection baselines on identical, cost-aware and *tie-safe* cohorts. Current V2 has not beaten the simple momentum ranker on expanded US data.
+- Freeze research parameters before future holdout / paper tracking. Distinguish already-inspected history from independently held-out periods.
 
-- [x] Deterministic long-only mean-variance prototype with covariance validation and concentration caps
-- [x] User-defined leverage and financing assumptions in scenario output
-- [x] Make cash-account maintenance requirement zero
-- [x] Download adjusted Yahoo Finance daily prices via optional yfinance; estimate historical annualized returns/covariance with provenance
+## Next — portfolio decision workbench
 
-### Remaining data work
+- Link verified candidate allowlist to a deterministic portfolio optimizer **in offline preview only**.
+- Separate cash vs margin account ledgers, fee/cost estimates, concentration limits, stress tests and explicit no-trade state.
+- Report rejected names, position sizing rationale, financing expense and scenario risk; do not force ten holdings when there are too few qualifying equities.
 
-- [x] Strict CSV schema, common-date calendar alignment and source metadata
-- [ ] Additional vetted data providers and corporate-action validation
-- [ ] Total return and corporate-action handling
-- [x] Walk-forward rolling backtest with no future-return exposure, fee and financing assumptions, drawdowns and same-universe benchmark
-- [ ] Improve slippage, exchange-calendar handling, broker-specific margin requirements and forced-liquidation modeling
-- [ ] Historical multi-asset covariance, factor and drawdown risk reports
+## Later — broker paper integration
 
-## v0.2.1 — backtest prototype (implemented)
+- Add fully isolated Alpaca/IBKR paper-only adapters, explicit opt-in permissions, idempotent order intents, cancels/partial fills and reconciliation.
+- Test failures, stale prices, disconnects and broker margin discrepancies before considering any live execution path.
+- Develop a maintained UI once validated research and paper accounting outputs have stable schemas.
 
-- [x] 3-year rolling lookback and quarterly rebalance defaults
-- [x] Buy-and-hold equal-weight benchmark on matching dates
-- [x] Position drift, gross-leverage resets, daily financing interest and trading costs
-- [x] Research-only maintenance-breach flags (not liquidation)
+## Maintenance
 
-## v0.2.2 — risk-audit prototype (implemented)
-
-- [x] Match portfolio universes, parameter settings and daily return dates
-- [x] Report leveraged maintenance-breach dates, calendar-year returns and benchmark comparisons
-- [x] Flag model risk and refuse claims of live execution suitability
-
-## v0.2.3 — independent benchmark and margin stress mode (implemented, awaiting local validation)
-
-- [x] Optional delayed, full deleveraging response to hypothetical maintenance breaches
-- [x] Preserve original non-liquidating scenario by default
-- [x] SPY buy-and-hold benchmark downloaded independently and aligned without forward fill
-- [x] Offline regression tests for SPY alignment and forced-deleveraging state transitions
-- [ ] Validate 2003–2026 strategy impact with real user-downloaded SPY data and margin stress outputs
-
-## v0.2.4 — historical relative-risk diagnostics (implemented; awaiting local validation)
-
-- [x] SPY-relative Beta, correlation, tracking error and information ratio
-- [x] Calendar-year compounded returns and excess returns versus SPY
-- [x] Mark partial years and count full years outperforming SPY
-- [ ] Validate diagnostics against 2003–2026 real local results
-
-## v0.2.5 — pre-trade research risk budgets (implemented; awaiting full Windows validation)
-
-- [x] Read-only candidate portfolio volatility, concentration, leverage, stress loss, maintenance cushion and financing-cost checks
-- [x] Report constrained hypothetical leverage cap or infeasibility of any fully invested 1× candidate
-- [x] Offline core and CLI regression tests; source estimates from historical covariance
-- [ ] Integrate past-only risk limits inside the walk-forward rebalancing process
-- [ ] Add cash allocations under 1× and data-driven drawdown-control experiments
-
-## v0.3.0 — dynamic past-only risk budgets (implemented; awaiting full local validation)
-
-- [x] Independent opt-in `backtest-risk` engine; original baseline results remain unchanged
-- [x] Window-local sample volatility to cap leverage at each quarter's rebalance
-- [x] Cash allocation for modeled exposure below 1×; borrowing accounting above 1×
-- [x] Stress-loss, hypothetical maintenance-buffer, fee, APR and concentration budgets
-- [x] Read-only signals one close before execution; explicit cash/borrow/debt ledger reconciliation
-- [x] Offline regression and CLI smoke tests
-- [ ] Validate 2003–2026 risk-managed results locally against baseline and SPY
-- [ ] Test sensitivity across genuinely unseen time periods and independent symbol universes
-- [ ] Replace historical fixed APR and simple liquidation rules with realistically sourced financing schedules and conservative fills
-
-## v0.3.1 — historical tail-risk budgeting (implemented; awaiting Windows validation)
-
-- [x] Empirical one-day worst-tail Expected Shortfall estimator from prior returns
-- [x] Optional `--max-daily-tail-loss` cap on risky exposure at scheduled rebalances
-- [x] Preserve baseline behavior with the flag omitted
-- [x] Report which periods the ES cap binds, and log the training sample and tail count
-- [x] Offline regression tests for numeric calculations, input validation and leakage
-- [ ] Compare 2003–2026 outcomes with an unchanged v0.3.0 baseline and SPY
-- [ ] Out-of-sample model selection and direct CVaR asset-weight optimization
-
-## v0.4.0 — institutional architecture contracts (committed; needs Windows validation)
-
-- [x] Product architecture: PMS/RMS, cash/margin accounts, Treasury collateral, options overlay and OMS
-- [x] Phase-by-phase implementation roadmap with testable operational requirements
-- [x] Pure fail-closed intent preflight for paper-only proposals and broker preview inputs
-- [x] Cash borrowing, unknown Treasury credit, stale quote, options permissions and margin tests
-- [ ] Integrate real broker read-only accounts and trustworthy What-If data via separate adapter
-- [ ] Add Treasury CUSIP cashflow accounting, options contracts and a full order/event ledger
-- [ ] Expand into controlled paper OMS and replayable reconciliation before any live access
-
-## v0.4.1 — read-only institutional multi-asset ledger (committed; awaiting Windows validation)
-
-- [x] Synthetic cash and margin accounts with settled cash, margin debt and financing accrual
-- [x] Equity/ETF share marks, US Treasury dirty price and first-order duration DV01
-- [x] Signed option position market values and short liability flags
-- [x] Independent account net-liquidation reconciliation, quote staleness and USD-only validation
-- [x] Broker-sourced Treasury collateral value reported but never added to cash or equity
-- [x] Offline regression tests and PowerShell ledger-report command
-- [ ] Treasury coupon settlement journal and real broker read-only ingestion
-- [ ] Option expiry/assignment/payoff engine, plus robust broker margin validation
-
-## v0.4.2 — read-only account-aware equity add/reduce planner (implemented; awaiting Windows validation)
-
-- [x] Paper-only BUY / SELL of existing long stock/ETF positions with client-order intent IDs
-- [x] Pro-forma settled cash, unsettled liability reserve, debt, shares and net liquidation
-- [x] Match mock broker What-If preview to account, identifier, side, quantity, price and financing debt
-- [x] Reject stale marks, mismatched ledger/broker NLV, understated gross and stress exposures
-- [x] Integrate centralized institutional risk gate and block orders on unreconciled accounts
-- [x] Synthetic fixtures, offline regression tests and CLI smoke workflow
-- [ ] Multi-order portfolio target rebalancer with held-out cost data and trade event journal
-- [ ] Broker-authenticated account and What-If adapters; live orders remain disabled
-
-## v0.4.3 — combined multi-asset basket proposals (committed; pending Windows test run)
-
-- [x] One-account stock BUY/SELL, existing Treasury face purchases, new long protective puts and debt repayments
-- [x] T+1-style settlement-aware receivables: stock-sale cash is not available inside the same basket
-- [x] No automatic increment to broker Treasury collateral credit
-- [x] Independent cash/debt/position mark-to-market reconciliation including modeled fees and limit/mark differences
-- [x] Per-leg fail-closed central RMS reviews and exact ordered-leg mock preview matching
-- [x] Protective puts limited to held long underlying share coverage; no assumed stress profit credited for hedges
-- [x] Local example and CLI, regression tests and network-free GitHub Actions smoke run
-- [ ] Broker-authenticated What-If requests, order journal/partial fills and real options/UST data
-
-## v0.4.4 — offline paper OMS replay (committed; awaiting local Windows validation)
-
-- [x] Recheck the synthetic approved basket before accepting local paper order events
-- [x] SUBMIT/ACK/FILL/CANCEL_REQUEST/CANCELED/REJECT/UNKNOWN_OUTCOME event state machine
-- [x] Partial fills and idempotent duplicate event IDs / execution IDs
-- [x] Equity, Treasury, long put and margin repayment fill accounting
-- [x] Explicit later-date sale settlement, without instantly spending unsettled receivables
-- [x] Independent account net-liquidation reconciliation after every unique event
-- [x] Halt replay on an UNKNOWN_OUTCOME to avoid assuming a disconnected order failed
-- [x] Synthetic example, offline unit tests and CI smoke CLI
-- [ ] Real broker read-only order/position reconciliation, persisted event sourcing, true market calendar, post-fill risk repricing and access controls
-
-## v0.4.5 — post-fill controls and unsigned audit chain (committed; awaiting Windows validation)
-
-- [x] Recalculate marked gross leverage, stressed equity/Treasury loss and cash/debt validity after each unique synthetic fill
-- [x] Halt the replay on an intermediate risk-budget violation even when a full-basket proposal initially passed
-- [x] Capture deterministic SHA-256 chain over each original event, order transition and accounting result
-- [x] Detect modified audit entries in a verification test; separate repeat-execution deduplication from original entries
-- [x] Expose summary risk breaches, audit hash root, self-consistency and explicit broker-margin-not-rechecked flags
-- [x] Offline regression tests and synthetic CI smoke run
-- [ ] Authenticated broker data, margin/Greeks recalculation after each actual fill, signed append-only event storage, operator recovery
-
-## v0.4.6 — offline broker export versus ledger reconciliation (committed; awaiting Windows validation)
-
-- [x] Compare one exact account and all stocks, Treasury face, and signed option contract identifiers, terms and marks
-- [x] Compare cash, receivables/payables, margin principal/interest, NLV and informational Treasury collateral credit
-- [x] Independent imported broker balance-sheet arithmetic and account-vs-export mismatch report
-- [x] Fail closed on stale snapshots, missing/extra positions, duplicate holdings and negative broker liquidity
-- [x] Preserve untrusted-source flags and live execution disabled even if two local files match
-- [x] CLI, synthetic source, regression tests and CI smoke check
-- [ ] Authenticate and normalize real IBKR account / contract snapshots; verify actual margin preview separately
-
-## v0.4.7 — IBKR localhost GET-only raw ingestion (committed; awaiting Windows validation)
-
-- [x] Explicit opt-in local Client Portal Gateway GET-only adapter, browser auth-status check, verified localhost TLS and no proxy/redirects
-- [x] Require exact account selection from portfolio/accounts before reading USD ledger and contract-ID positions
-- [x] Raw private output restricted to Git-ignored local_data/ and redacted terminal results
-- [x] Zero-network synthetic Gateway fixture, regression suite and CI smoke workflow
-- [x] Fail closed on unsupported currency, missing contract IDs and absent/unauthenticated sessions
-- [ ] Verify capture against user's own Gateway only with consent; real account/raw output is private and should never be uploaded
-- [ ] IBKR conid/CUSIP/OCC mapping, financing debit interpretation, option risk and true margin/collateral validation
-- [ ] Authenticated read-only position reconciliation and genuine What-If margin preview before any order pathway
-
-## v0.4.8 — IBKR security identity mapping diagnostic (committed; awaiting Windows validation)
-
-- [x] Read a local private Gateway capture and explicitly listed conid-to-AtlasPM equity, U.S. Treasury and option mappings
-- [x] Reject stale/unmapped/duplicate contract IDs, wrong asset classes, unconfirmed bond units/issuer and option contract problems
-- [x] Compare mktValue/marketValue aliases; never invent missing security marks or bond face-value conventions
-- [x] Identify USD settled cash / position-market-value / reported NLV gap without inventing a margin debt balance
-- [x] Do NOT misinterpret IBKR's documented USD.interest RATE as accrued financing interest liability
-- [x] Redact CLI output and save detailed mapping results under ignored local_data/
-- [x] Synthetic mapping fixture, comprehensive unit tests and no-network CLI smoke
-- [ ] Authenticated broker account financing summary, precise conid-CUSIP-OCC matching and collateral/What-If risk model
-
-## v0.4 — optimization and AI experiments
-
-- [ ] CVaR optimizer and turnover-aware, broker-compatible risk constraints
-- [ ] Out-of-sample baselines before training
-- [ ] Local ML training on Windows with reproducible seeds/configs
-- [ ] Leakage-safe validation and model cards; no unsupported return promises
-
-## v0.5 — broker sandbox
-
-- [ ] Read-only positions and balances adapter
-- [ ] Broker-supported simulated/paper order routing
-- [ ] Reconciliation, audit logs, rate limits, idempotency
-- [ ] Live trading permanently off by default; explicit permissions and safety review required
-
-## v0.6 — interface
-
-- [ ] Browser dashboard for balances, portfolios and risk explanations
-- [ ] Scenario comparison, cash/margin account selection and approval workflow
-
-Priority: make the accounting auditable before adding forecasting or automated execution.
+`README.md` is the single current entry point. Topic-specific quantitative and selection methods stay in `docs/quant` and `docs/selection`; historical experiments remain in Git history or method notes. All new modules use canonical `atlaspm.quant` / `atlaspm.selection` paths. Legacy import shims will be removed only in a documented breaking change after tests and CLI consumers migrate.

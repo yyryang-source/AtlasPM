@@ -77,9 +77,16 @@ def _events(path: Path) -> list[dict[str, Any]]:
 def _observe_event_prices(
     path: Path, events: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    candidates = {(event["symbol"], event["effective_date"]): {
-        "pre": None, "post": None,
-    } for event in events}
+    # Index events once: millions of unrelated quote rows should not scan
+    # every event or repeatedly parse an event's effective date.
+    events_by_symbol: dict[str, list[tuple[date, dict[str, Any]]]] = {}
+    candidates = {}
+    for event in events:
+        key = (event["symbol"], event["effective_date"])
+        candidates[key] = {"pre": None, "post": None}
+        events_by_symbol.setdefault(event["symbol"], []).append(
+            (date.fromisoformat(event["effective_date"]), event)
+        )
     with path.open("r", newline="", encoding="utf-8-sig") as source:
         reader = csv.DictReader(source)
         fields = reader.fieldnames
@@ -87,7 +94,7 @@ def _observe_event_prices(
             raise ValueError("Price CSV needs date,symbol,adjusted_close")
         for line, row in enumerate(reader, start=2):
             symbol = row["symbol"].strip().upper()
-            targets = [event for event in events if event["symbol"] == symbol]
+            targets = events_by_symbol.get(symbol)
             if not targets:
                 continue
             try:
@@ -97,9 +104,8 @@ def _observe_event_prices(
                     raise ValueError("Invalid adjusted close")
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"Invalid event symbol price on line {line}") from exc
-            for event in targets:
+            for event_date, event in targets:
                 record = candidates[(symbol, event["effective_date"])]
-                event_date = date.fromisoformat(event["effective_date"])
                 name = "pre" if d < event_date else "post"
                 old = record[name]
                 if (old is None
@@ -201,8 +207,12 @@ def reconcile_reverse_splits(
 
     # Build split-normalization factors across all *preceding* dates. This
     # preserves comparable share units for features and labels crossing events.
-    factors = [(e["symbol"], date.fromisoformat(e["effective_date"]),
-                e["old_shares_per_new_share"]) for e in corrective]
+    factors_by_symbol: dict[str, list[tuple[date, float]]] = {}
+    for event in corrective:
+        factors_by_symbol.setdefault(event["symbol"], []).append(
+            (date.fromisoformat(event["effective_date"]),
+             event["old_shares_per_new_share"])
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = None
     modified = 0
@@ -222,8 +232,8 @@ def reconcile_reverse_splits(
                     day = date.fromisoformat(row["date"])
                     symbol = row["symbol"].strip().upper()
                     factor = 1.0
-                    for ticker, effective, multiple in factors:
-                        if symbol == ticker and day < effective:
+                    for effective, multiple in factors_by_symbol.get(symbol, ()):
+                        if day < effective:
                             factor *= multiple
                     if factor != 1.0:
                         close = float(row["adjusted_close"])

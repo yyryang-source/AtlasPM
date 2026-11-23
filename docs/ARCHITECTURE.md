@@ -1,55 +1,37 @@
-# AtlasPM architecture (v0.1)
+# AtlasPM architecture and boundaries
 
-## Principles
+AtlasPM is a **local-first research toolkit**, not a production trading service. It is organized as one Python package plus a Windows-friendly CLI.
 
-1. **Local-first**: data and execution remain on the user's machine.
-2. **Explicit account separation**: cash and margin accounts do not share maintenance buffers.
-3. **Explainability**: calculations are auditable, and assumptions are in output.
-4. **No silent orders**: broker integrations will be paper-only by default; future live orders require explicit authorization and pre-trade risk checks.
-5. **Secrets never in Git**: use environment variables or a local secret store, never config tracked in source control.
+```text
+src/atlaspm/
+  cli.py                 # single command-line interface
+  selection/             # current US universe, adjusted-price QA, rankers, monthly candidates
+  quant/                 # portfolio, backtesting, AI risk, margin accounting and synthetic OMS
+  *.py                   # temporary compatibility aliases for original module imports
+scripts/selection/       # PowerShell runners
+tests/quant/             # risk/backtest/regression suite
+tests/selection/         # ranking/data-quality regression suite
+docs/quant/              # independent risk and research methods
+docs/selection/          # stock-selection methods
+examples/                # fictional/synthetic data only
+```
 
-## Modules
+## Research flow
 
-- `models.py`: validated long-only account and position objects.
-- `portfolio.py`: ledger-based equity/leverage, borrowing estimates, scenario stress.
-- `benchmark.py`: separate SPY buy-and-hold reference aligned exactly to backtest dates.
-- `audit.py`: compare saved cash and margin curves and report stress warnings.
-- `tail_risk.py`: historical one-day Expected Shortfall from the worst fixed fraction of aligned trailing daily returns; optional research budget, not future prediction.
-- `ibkr_mapping.py`: local-only conid/security identity and position-unit diagnostic; reports cash/debt bridge as unresolved and refuses to assume collateral or order permissions.
-- `ibkr_gateway.py`: optional explicit-opt-in GET-only localhost HTTPS Client Portal Gateway capture, verified TLS, raw private output, no account-to-risk authorization mapping.
-- `broker_reconcile.py`: offline, unauthenticated imported broker export vs ledger comparison with fail-closed NLV/cash/positions/collateral checks; no API calls.
-- `oms_controls.py`: offline after-FILL marked gross/stress risk guard and locally verifiable unsigned SHA-256 event audit chain; not broker-authenticated.
-- `paper_oms.py`: offline order event replay with partial fills, idempotency, cancel/reject/unknown states, settlement and marked-account audit; no broker connectivity.
-- `institutional_batch.py`: read-only multi-asset batch with coordinated stock/UST/put/debt accounting, unsettled receivables, matching synthetic preview and per-leg deterministic RMS checks; no execution or fill state.
-- `institutional_rebalance.py`: read-only single-equity add/reduce intent, fee/cash/debt pro-forma, order-bound mock broker preview and central fail-closed risk decision; no actual orders.
-- `institutional_ledger.py`: read-only cash/margin multi-asset ledger, synthetic broker net-liquidation reconciliation, Treasury clean/dirty valuation and option liabilities; no settled cashflow or broker feed.
-- `institutional_gate.py`: deterministic broker-preview-style paper intent preflight, not executable orders.
-- `risk_backtest.py`: opt-in historical risk-budget simulation using only past covariance, a cash sleeve below 1×, and a self-financing cash/loan ledger with zero cash yield.
-- `risk_budget.py`: static pre-trade read-only hypothetical constraints; separate from dynamic backtests.
-- `backtest.py`: rolling-window close-to-next-close simulated trading with constant-rate financing, fees, drifted positions, high-water drawdowns, and benchmark; optional one-session-delayed full-deleveraging stress scenario, but no broker liquidation model.
-- `historical.py`: optional Yahoo Finance downloader and strict local CSV estimator (252 trading days per year, shared-date simple daily returns, no forward-fill).
-- `mean_variance.py`: deterministic projected-gradient mean-variance scenario optimizer; estimates/covariance are explicit inputs and assumed financing is not a broker margin check.
-- `optimizer.py`: deterministic inverse-volatility baseline with max-weight constraints.
-- `cli.py`: reproducible JSON-in/JSON-out command-line interface.
-- `examples/`: fictional sample input.
-- `tests/`: numerical and input-validation regression tests.
+1. **Data ingestion** obtains a current listing snapshot and local quotes. Audits reject incomplete/stale prices and ambiguous corporate actions. Today's listing snapshot **cannot recreate historic delistings**.
+2. **Stock selection** computes deterministic factors or fits LightGBM ranking models on past-only examples. Model and Top-K ties must be evaluated before interpreting any alpha.
+3. **Alpha eligibility** produces a dated **research allowlist**, currently not connected to live allocation; it never authorizes orders or borrowing.
+4. **Portfolio and risk** run offline research backtests (cash/margin scenarios) and independent native AI risk models. Native fitted model backtests remain restricted to **0–1× cash exposure**.
+5. **IBKR integration** is currently read-only or synthetic. Mapping, financing and stress results are *not independently authenticated broker purchasing power*.
+6. **OMS** only replays synthetic events. No real order submission, automatic portfolio rebalancing or live execution is enabled.
 
-## Definitions
+## Rules that must not regress
 
-Equity / net liquidation value = cash + market value of longs - borrowed amount.
+- Never push `local_data/`, broker credentials or unlicensed downloaded market data.
+- Keep raw price files immutable; explicit, verified corrections create **new** research copies.
+- A bad/stale/tied rank must fail closed. Reductions and exits may not be blocked by an alpha-entry allowlist.
+- Do not convert rank utilities into fabricated return probabilities or ignore transaction costs and delistings.
+- Broker execution requires a separately built, audited authorization and order lifecycle; none is present today.
+- Preserve import compatibility aliases until a versioned API migration updates consumers and regression tests.
 
-Gross exposure = long market value (cash excluded).
-
-Gross exposure leverage = gross exposure / equity.
-
-Illustrative maintenance required = sum(position value * assumed maintenance fraction).
-
-Maintenance excess = equity - illustrative maintenance required.
-
-A hypothetical uniform decline `d` makes stressed holdings `(1 - d) * holdings`, leaving cash/debt unchanged. The output reports an illustrative maintenance shortfall, not a broker-confirmed margin-call condition.
-
-Annualized borrowing estimate = debt * stated rate, excluding compounding, tiering, fees, changes in borrowing balance, and other financing terms.
-
-## Explicit nonfeatures in v0.1
-
-No live broker data, no broker orders, no training datasets, no forecasting model, no covariance optimizer, no options/shorts, no tax lots, no transaction cost model, no production risk engine, and no web UI. The CLI only analyzes data supplied by the user.
+For current work, see [ROADMAP.md](ROADMAP.md), [selection docs](selection/) and [quant docs](quant/).

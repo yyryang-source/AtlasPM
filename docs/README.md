@@ -1,10 +1,12 @@
-# AtlasPM Documentation
+# AtlasPM documentation
 
-This repository separates two research domains:
+The canonical code lives in two packages:
 
-- **[Stock selection](selection/)**: stock screener, US universe and quote ingestion, LightGBM AI rankers, calendar-aware monthly selection, and the offline alpha eligibility filter.
-- **[Quantitative portfolio and risk](quant/)**: portfolio optimization, Atlas RiskNet / RegimeNet / FusionNet, risk budgets, financing, IBKR reconciliation and synthetic OMS workflows.
+- **[Selection](selection/)** — [market data QC](selection/US_MARKET_DATA_EXPANSION.md), [V2 learning-to-rank](selection/AI_STOCK_RANKER_V2.md), [monthly candidates](selection/MONTHLY_ALPHA_SELECTION.md), [alpha research gate](selection/ALPHA_ELIGIBILITY_GATE.md), and [corporate-action corrections](selection/CORPORATE_ACTION_PRICE_RECONCILIATION.md).
+- **[Quant and risk](quant/)** — [native FusionNet](quant/ATLAS_FUSIONNET_V1.md), [RiskNet](quant/ATLAS_RISKNET_V2.md), [backtesting](quant/BACKTEST.md), [IBKR read-only](quant/IBKR_READONLY.md), and [paper OMS](quant/PAPER_OMS.md).
 
-Shared starting points: [Architecture](ARCHITECTURE.md), [Data](DATA.md), [Roadmap](ROADMAP.md) and [Open-source model references](OPEN_SOURCE_MODELS.md).
+Shared: [Architecture](ARCHITECTURE.md), [Data](DATA.md), [Roadmap](ROADMAP.md), [Open-source model review](OPEN_SOURCE_MODELS.md).
 
-The stock screener is not a broker order flow. The alpha eligibility file is a research-only candidate universe, not execution authorization.
+Older version-numbered research notes remain under `docs/quant/` for method and regression reproducibility; they are **not separate supported applications**. See the root [README](../README.md) for current status and commands.
+
+All historical research remains non-executable: ranking candidates, calculating weights or passing an offline risk check **does not authorize brokerage orders**.
