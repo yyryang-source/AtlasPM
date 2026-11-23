@@ -16,6 +16,7 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS, HistoricalUniverse
 
 _FUND_COLUMNS = (
     "as_of_date", "symbol", "sector", "market_cap_usd", "roe",
@@ -115,11 +116,20 @@ def _rank_factors(rows: list[dict[str, Any]], weights: dict[str, float]) -> None
         ), 4)
 
 
+def _decision_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("--as-of must be YYYY-MM-DD") from exc
+
+
 def screen_stocks(
     prices_path: Path,
     as_of: str,
     *,
     fundamentals_path: Path | None = None,
+    universe_history_path: Path | None = None,
+    max_universe_age_days: int = DEFAULT_MAX_UNIVERSE_AGE_DAYS,
     top: int = 10,
     max_price_age_days: int = 10,
     max_fundamental_age_days: int = 200,
@@ -135,8 +145,14 @@ def screen_stocks(
     No prices on later dates enter a score. Fundamentals as_of_date represents
     the *first publicly available* date, not a fiscal period-end date.
     """
-    return screen_stocks_from_prices(
-        load_adjusted_prices(prices_path), as_of,
+    prices = load_adjusted_prices(prices_path)
+    snapshot = None
+    if universe_history_path is not None:
+        history = HistoricalUniverse(universe_history_path, max_universe_age_days)
+        snapshot, prices = history.prices_at(prices, _decision_date(as_of))
+
+    result = screen_stocks_from_prices(
+        prices, as_of,
         fundamentals_path=fundamentals_path, top=top,
         max_price_age_days=max_price_age_days,
         max_fundamental_age_days=max_fundamental_age_days,
@@ -145,8 +161,13 @@ def screen_stocks(
         minimum_market_cap_usd=minimum_market_cap_usd,
         require_uptrend=require_uptrend,
         max_per_sector=max_per_sector,
-        require_decision_close=require_decision_close,
+        require_decision_close=require_decision_close or snapshot is not None,
     )
+    result["universe_source"] = "historical_snapshots" if snapshot is not None else "supplied_prices"
+    if snapshot is not None:
+        result["universe_snapshot_as_of"] = snapshot.isoformat()
+        result["filters"]["max_universe_age_days"] = max_universe_age_days
+    return result
 
 
 def screen_stocks_from_prices(
@@ -170,10 +191,7 @@ def screen_stocks_from_prices(
     No prices on later dates enter a score. Fundamentals as_of_date represents
     the *first publicly available* date, not a fiscal period-end date.
     """
-    try:
-        cutoff = date.fromisoformat(as_of)
-    except ValueError as exc:
-        raise ValueError("--as-of must be YYYY-MM-DD") from exc
+    cutoff = _decision_date(as_of)
     if (top < 1 or max_price_age_days < 1 or max_fundamental_age_days < 1
             or (max_per_sector is not None and max_per_sector < 1)):
         raise ValueError("top, freshness limits and sector cap must be positive integers")
@@ -295,7 +313,7 @@ def screen_stocks_from_prices(
         "warnings": [
             "Ranking and relative factor percentiles are NOT forecasts or trade approvals.",
             "Fundamentals dates are user-asserted PUBLICATION/availability dates; fiscal quarter ends are not valid substitutes.",
-            "Retrospectively adjusted closes and today's surviving ticker universe can cause historical lookahead/survivorship bias.",
+            "Retrospectively adjusted closes and incomplete membership history can cause lookahead or survivorship bias.",
             "No liquidity, spread, corporate-action, sector-neutral, delisting or independent data-provenance audit.",
             "No realized-return out-of-sample evaluation, transaction-cost simulation or broker connectivity.",
         ],

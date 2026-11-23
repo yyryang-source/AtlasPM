@@ -23,6 +23,7 @@ class StockWalkforwardTest(unittest.TestCase):
         self.stocks = self.base / "stocks.csv"
         self.benchmark = self.base / "benchmark.csv"
         self.fundamentals = self.base / "fundamentals.csv"
+        self.universe = self.base / "universe.csv"
         self.dates = []
         day = date(2024, 1, 1)
         while len(self.dates) < 370:
@@ -54,6 +55,56 @@ class StockWalkforwardTest(unittest.TestCase):
     def _run(self, **kwargs):
         arguments = {"start": self.start, "end": self.end, "top": 2, **kwargs}
         return backtest_stock_screener(self.stocks, self.benchmark, **arguments)
+
+    def _write_universe(self, rows):
+        with self.universe.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["as_of_date", "symbol"])
+            writer.writerows(rows)
+
+    def test_historical_membership_drives_strategy_and_equal_weight_baseline(self):
+        later_date = self.dates[281].isoformat()
+        self._write_universe([
+            (later_date, "B"), (later_date, "C"), (later_date, "SPY"),
+            (self.start, "A"), (self.start, "SPY"),
+        ])
+        result = self._run(universe_history_path=self.universe, max_universe_age_days=100)
+        early, later = result["decisions"][:2]
+
+        self.assertEqual(result["parameters"]["universe_source"], "historical_snapshots")
+        self.assertEqual(result["universe_count_excluding_benchmark"], 3)
+        self.assertEqual(early["universe_snapshot_as_of"], self.start)
+        self.assertEqual(later["universe_snapshot_as_of"], later_date)
+        self.assertEqual([row["symbol"] for row in early["selected"]], ["A"])
+        self.assertEqual({row["symbol"] for row in later["selected"]}, {"B", "C"})
+        self.assertEqual([early["universe_member_count"], later["universe_member_count"]], [1, 2])
+        self.assertEqual([row["holdings_count"] for row in result["equal_weight_universe_executions"][:2]],
+                         [1, 2])
+        self.assertAlmostEqual(result["portfolio"]["total_return"],
+                               result["equal_weight_universe"]["total_return"])
+
+    def test_historical_membership_rejects_future_stale_and_duplicate_snapshots(self):
+        invalid_cases = [
+            ([(self.dates[261], "A")], {}, "No historical universe snapshot"),
+            ([(self.start, "A")], {"max_universe_age_days": 0}, "snapshot .* is stale"),
+            ([(self.start, "A"), (self.start, " a ")], {}, "Duplicate historical universe member"),
+        ]
+        for rows, options, error in invalid_cases:
+            with self.subTest(error=error):
+                self._write_universe(rows)
+                with self.assertRaisesRegex(ValueError, error):
+                    self._run(universe_history_path=self.universe, **options)
+
+    def test_historical_membership_requires_its_decision_and_exit_prices(self):
+        self._write_universe([(self.start, "A"), (self.start, "C")])
+        self._write_prices(missing=("C", self.dates[260]))
+        with self.assertRaisesRegex(ValueError, "MISSING_UNIVERSE_DECISION_CLOSE.*C"):
+            self._run(universe_history_path=self.universe)
+
+        self._write_universe([(self.start, "A"), (self.dates[281], "B")])
+        self._write_prices(missing=("A", self.dates[282]))
+        with self.assertRaisesRegex(ValueError, "MISSING_HELD_PRICE: A"):
+            self._run(universe_history_path=self.universe)
 
     def _write_fundamentals(self, *, later_snapshots=False):
         with self.fundamentals.open("w", newline="", encoding="utf-8") as handle:
@@ -176,6 +227,7 @@ class StockWalkforwardTest(unittest.TestCase):
     def test_cli_stores_private_json_only(self):
         from atlaspm.cli import main
         self._write_fundamentals(later_snapshots=True)
+        self._write_universe([(self.start, "A"), (self.start, "B"), (self.start, "C")])
         cwd = Path.cwd()
         try:
             os.chdir(self.base)
@@ -186,11 +238,13 @@ class StockWalkforwardTest(unittest.TestCase):
                              "--start", self.start, "--end", self.end,
                              "--fundamentals", str(self.fundamentals), "--min-market-cap", "2e9",
                              "--max-per-sector", "1", "--max-fundamental-age-days", "80",
+                             "--universe-history", str(self.universe), "--max-universe-age-days", "140",
                              "--top", "2", "--output", "local_data/walkforward.json"])
             self.assertEqual(code, 0)
             summary = json.loads(stream.getvalue())
             saved = json.loads((self.base / "local_data/walkforward.json").read_text())
             self.assertEqual(summary["ranking_mode"], "fundamental_plus_technical")
+            self.assertEqual(summary["universe_source"], "historical_snapshots")
             self.assertEqual(saved["parameters"]["max_fundamental_age_days"], 80)
             self.assertEqual(saved["executions"][0]["selected"], ["B"])
             self.assertEqual(summary["decision_count"], saved["decision_count"])

@@ -40,6 +40,7 @@ from atlaspm.ml_dynamic_rebalance import backtest_ml_dynamic_rebalance, redacted
 from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tournament_console
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
+from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
 from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
 from atlaspm.us_market_universe import build_us_listed_universe
@@ -625,6 +626,10 @@ def build_parser() -> argparse.ArgumentParser:
     stock_backtest.add_argument("--prices", type=Path, required=True)
     stock_backtest.add_argument("--benchmark-prices", type=Path, required=True)
     stock_backtest.add_argument("--benchmark-symbol", default="SPY")
+    stock_backtest.add_argument("--universe-history", type=Path,
+                                help="CSV of complete dated snapshots: as_of_date,symbol")
+    stock_backtest.add_argument("--max-universe-age-days", type=int,
+                                default=DEFAULT_MAX_UNIVERSE_AGE_DAYS)
     stock_backtest.add_argument("--start", default="2000-01-01")
     stock_backtest.add_argument("--end", default="2026-11-20")
     stock_backtest.add_argument("--top", type=int, default=10)
@@ -653,6 +658,10 @@ def build_parser() -> argparse.ArgumentParser:
     stock.add_argument("--prices", type=Path, required=True,
                        help="Long CSV: date,symbol,adjusted_close")
     stock.add_argument("--as-of", required=True, help="Evaluation date YYYY-MM-DD")
+    stock.add_argument("--universe-history", type=Path,
+                       help="CSV of complete dated snapshots: as_of_date,symbol")
+    stock.add_argument("--max-universe-age-days", type=int,
+                       default=DEFAULT_MAX_UNIVERSE_AGE_DAYS)
     stock.add_argument("--fundamentals", type=Path, default=None,
                        help="Optional dated fundamental snapshot CSV")
     stock.add_argument("--top", type=int, default=10)
@@ -1073,6 +1082,8 @@ def main(argv: list[str] | None = None) -> int:
                        args.benchmark_prices.expanduser().resolve()}
             if args.fundamentals is not None:
                 sources.add(args.fundamentals.expanduser().resolve())
+            if args.universe_history is not None:
+                sources.add(args.universe_history.expanduser().resolve())
             if destination in sources:
                 raise ValueError("Stock backtest cannot overwrite its inputs")
             result = backtest_stock_screener(
@@ -1084,6 +1095,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_volatility=args.max_volatility,
                 max_drawdown=args.max_drawdown,
                 require_uptrend=args.require_uptrend,
+                universe_history_path=args.universe_history,
+                max_universe_age_days=args.max_universe_age_days,
                 fundamentals_path=args.fundamentals,
                 max_fundamental_age_days=args.max_fundamental_age_days,
                 minimum_market_cap_usd=args.min_market_cap,
@@ -1101,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
                 "requested_window": result["requested_window"],
                 "actual_window": result["actual_window"],
                 "ranking_mode": result["parameters"]["ranking_mode"],
+                "universe_source": result["parameters"]["universe_source"],
                 "universe_count": result["universe_count_excluding_benchmark"],
                 "decision_count": result["decision_count"],
                 "executed_rebalances": result["executed_rebalances"],
@@ -1109,7 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
                 "equal_weight_universe": result["equal_weight_universe"],
                 "relative": result["relative"],
                 "live_execution_enabled": False,
-                "data_caution": "Surviving ticker universe; NOT survivorship-safe or certified alpha.",
+                "data_caution": "Historical universe coverage and price vintages are unverified.",
             }
         elif args.command == "stock-screen":
             destination = require_private_output(args.output)
@@ -1118,12 +1132,16 @@ def main(argv: list[str] | None = None) -> int:
             inputs = {args.prices.expanduser().resolve()}
             if args.fundamentals:
                 inputs.add(args.fundamentals.expanduser().resolve())
+            if args.universe_history is not None:
+                inputs.add(args.universe_history.expanduser().resolve())
             if destination in inputs:
                 raise ValueError("Refusing to overwrite stock screener input")
             result = screen_stocks(
                 args.prices,
                 args.as_of,
                 fundamentals_path=args.fundamentals,
+                universe_history_path=args.universe_history,
+                max_universe_age_days=args.max_universe_age_days,
                 top=args.top,
                 max_price_age_days=args.max_price_age_days,
                 max_fundamental_age_days=args.max_fundamental_age_days,
@@ -1145,6 +1163,8 @@ def main(argv: list[str] | None = None) -> int:
                 ).as_posix(),
                 "as_of": result["as_of"],
                 "mode": result["mode"],
+                "universe_source": result["universe_source"],
+                "universe_snapshot_as_of": result.get("universe_snapshot_as_of"),
                 "universe_count": result["universe_count"],
                 "eligible_count": result["eligible_count"],
                 "excluded_count": len(result["excluded"]),

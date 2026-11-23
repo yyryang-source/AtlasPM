@@ -148,6 +148,35 @@ class StockScreenerTest(unittest.TestCase):
         finally:
             os.chdir(current)
 
+    def test_cli_ranks_only_members_of_the_latest_available_snapshot(self):
+        from atlaspm.cli import main
+        universe = self.root / "universe.csv"
+        with universe.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerows([
+                ["as_of_date", "symbol"],
+                [self.days[-1] + timedelta(days=1), "AAA"],
+                [self.days[-2], "CCC"],
+                [self.days[-3], "BBB"],
+            ])
+        current = Path.cwd()
+        try:
+            os.chdir(self.root)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main([
+                    "stock-screen", "--prices", str(self.prices), "--as-of", self.as_of,
+                    "--universe-history", str(universe), "--max-universe-age-days", "7",
+                    "--output", "local_data/member_rank.json",
+                ])
+            self.assertEqual(code, 0)
+            summary = json.loads(output.getvalue())
+            self.assertEqual(summary["universe_source"], "historical_snapshots")
+            self.assertEqual(summary["universe_snapshot_as_of"], self.days[-2].isoformat())
+            self.assertEqual([row["symbol"] for row in summary["selected"]], ["CCC"])
+        finally:
+            os.chdir(current)
+
     def test_cli_blocks_public_repository_output(self):
         from atlaspm.cli import main
         current = Path.cwd()

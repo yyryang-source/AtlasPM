@@ -2,7 +2,7 @@
 
 Decision: today's completed close. Execution: next benchmark-session close.
 P&L: subsequent adjusted-close ratios, with one-way notional cost estimates.
-No brokerage, leverage, order intent, training or survivorship-safe universe.
+Membership can come from dated snapshots supplied by the caller.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS, HistoricalUniverse
 from atlaspm.stock_screener import load_fundamental_history, screen_stocks_from_prices
 
 
@@ -80,6 +81,8 @@ def backtest_stock_screener(
     max_volatility: float = 0.80,
     max_drawdown: float = 0.65,
     require_uptrend: bool = False,
+    universe_history_path: Path | None = None,
+    max_universe_age_days: int = DEFAULT_MAX_UNIVERSE_AGE_DAYS,
     fundamentals_path: Path | None = None,
     max_fundamental_age_days: int = 200,
     minimum_market_cap_usd: float = 0.0,
@@ -116,7 +119,7 @@ def backtest_stock_screener(
         raise ValueError(f"Benchmark {ticker} missing in benchmark price file")
     if ticker in price_history:
         price_history.pop(ticker)  # Never recommend the comparison benchmark itself.
-    if len(price_history) < 2:
+    if universe_history_path is None and len(price_history) < 2:
         raise ValueError("Need at least two non-benchmark symbols")
     spy_prices = benchmark_all[ticker]
     dates = sorted(d for d in spy_prices if d <= last)
@@ -135,6 +138,11 @@ def backtest_stock_screener(
         load_fundamental_history(fundamentals_path, dates[max(decision_indices)])
         if fundamentals_path is not None else None
     )
+    universe_history = (
+        HistoricalUniverse(universe_history_path, max_universe_age_days)
+        if universe_history_path is not None else None
+    )
+    universe_members_seen: set[str] = set()
 
     equity = 1.0
     cash = 1.0
@@ -271,8 +279,15 @@ def backtest_stock_screener(
             pending = None
 
         if i in decision_indices and i + 1 <= last_index:
+            decision_prices = price_history
+            snapshot = None
+            if universe_history is not None:
+                snapshot, decision_prices = universe_history.prices_at(
+                    price_history, observed, benchmark_symbol=ticker,
+                )
+                universe_members_seen.update(decision_prices)
             screen = screen_stocks_from_prices(
-                price_history, observed.isoformat(),
+                decision_prices, observed.isoformat(),
                 top=top, max_annual_volatility=max_volatility,
                 max_drawdown=max_drawdown,
                 require_uptrend=require_uptrend,
@@ -285,11 +300,9 @@ def backtest_stock_screener(
             chosen = [row["symbol"] for row in screen["selected"]]
             # This comparison does not pick the top names: it equally weights
             # *all* symbols with valid 253-close history on the decision date.
-            # Risk filters are deliberately disabled; delisted companies are
-            # still absent unless supplied in the CSV.
             universe_screen = screen_stocks_from_prices(
-                price_history, observed.isoformat(),
-                top=len(price_history),
+                decision_prices, observed.isoformat(),
+                top=len(decision_prices),
                 max_annual_volatility=10.0,
                 max_drawdown=1.0,
                 require_decision_close=True,
@@ -300,6 +313,8 @@ def backtest_stock_screener(
                 "execution_date": dates[i+1].isoformat(),
                 "eligible_count": screen["eligible_count"],
                 "excluded_count": len(screen["excluded"]),
+                "universe_member_count": len(decision_prices),
+                "universe_snapshot_as_of": snapshot.isoformat() if snapshot is not None else None,
                 "universe_price_qualified_count": len(universe_chosen),
                 "selected": [
                     {"symbol": row["symbol"], "rank": row["rank"], "score": row["score"],
@@ -345,6 +360,8 @@ def backtest_stock_screener(
             "maximum_drawdown_magnitude": max_drawdown,
             "require_uptrend": require_uptrend,
             "ranking_mode": ranking_mode,
+            "universe_source": "historical_snapshots" if universe_history is not None else "supplied_prices",
+            "max_universe_age_days": max_universe_age_days if universe_history is not None else None,
             "max_fundamental_age_days": (
                 max_fundamental_age_days if fundamental_history is not None else None
             ),
@@ -354,14 +371,16 @@ def backtest_stock_screener(
             "financing_enabled": False,
             "cash_yield_annual": 0.0,
         },
-        "universe_count_excluding_benchmark": len(price_history),
+        "universe_count_excluding_benchmark": (
+            len(universe_members_seen) if universe_history is not None else len(price_history)
+        ),
         "decision_count": len(decisions),
         "executed_rebalances": len(orders),
         "portfolio": portfolio,
         "benchmark": benchmark,
         "equal_weight_universe": universe_benchmark,
         "equal_weight_universe_definition": (
-            "Every supplied ticker with at least 253 recent closes on the "
+            "Every member of the decision universe with at least 253 recent closes on the "
             "decision date, no sector or volatility filter, equally weighted "
             "and next-close rebalanced with matching fees and slippage."
         ),
@@ -391,8 +410,12 @@ def backtest_stock_screener(
         "live_execution_enabled": False,
         "warnings": [
             "NOT a trained AI model, proof of alpha or actual/paper broker trading.",
-            "Both strategy and equal-weight universe use today's surviving ticker list; neither corrects survivorship bias.",
-            "Eligible universe composition evolves as stocks reach 253 recorded prices, not historical index memberships.",
+            (
+                "Strategy and baseline use the same caller-supplied historical membership; completeness is not independently verified."
+                if universe_history is not None else
+                "Strategy and baseline use membership inferred from the supplied prices, which can introduce survivorship bias."
+            ),
+            "Delistings require price coverage through simulated exits; missing marks or fills abort the backtest.",
             "The full-universe comparison is 1x equal-weight, next-close rebalanced with matched turnover costs; not a free buy-and-hold portfolio.",
             "Provider-adjusted historical prices may be revised retrospectively; true vintage point-in-time data are not certified.",
             "Supplied fundamentals must use availability dates known by the decision close; data vintages are not independently verified.",

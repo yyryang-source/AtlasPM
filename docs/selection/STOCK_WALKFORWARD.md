@@ -42,6 +42,41 @@ The download start is inclusive, end **exclusive**. Vendor data are unofficial
 and may fail or be revised. Do not upload `local_data/` or broker account
 data to GitHub.
 
+## Supply historical membership
+
+Pass `--universe-history local_data\historical_members.csv` to use the same
+historical membership in the strategy and the matched-cost equal-weight
+baseline. Each snapshot lists **every member** on a date when that membership
+was effective and known by the trading close. The dates and symbols below are
+illustrative.
+
+```csv
+as_of_date,symbol
+2024-01-31,EXAMPLE_A
+2024-01-31,EXAMPLE_B
+2024-02-29,EXAMPLE_B
+2024-02-29,EXAMPLE_C
+```
+
+At each decision, the engine selects the most recent snapshot dated on or
+before the decision close. It requires a snapshot no more than 35 calendar
+days old by default. Use `--max-universe-age-days 0` for same-day snapshots.
+Duplicate symbols within a snapshot, missing or stale snapshots, and missing
+decision-day closes for any member stop the run. A member with fewer than 253
+closes can enter the strategy and baseline once it meets the warmup and other
+price eligibility rules. Reports record the snapshot date and member count for
+each decision and the number of distinct members used across decisions.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --universe-history local_data\historical_members.csv --output local_data\stock_historical_universe.json
+```
+
+Holdings stay in the simulation until the next scheduled rebalance executes.
+Supply closes through their simulated exit. If a delisting leaves a held
+position without a required mark or exit price, the backtest stops. The
+quality of a historical run depends on the completeness and timing of the
+provided membership data.
+
 ## Include publication-dated fundamentals
 
 Use the [stock-screen fundamentals format](STOCK_SCREENER.md#inputs). For each
@@ -64,7 +99,8 @@ the publication date of any later restatement.
 Each completed decision close also constructs a **separate** 1× equal-weight
 portfolio of **all supplied stocks with valid 253-close history** on that day,
 including those rejected by the factor strategy's volatility/drawdown gate.
-Membership never depends on the top-N factor rank. For every scheduled decision:
+With historical snapshots enabled, this set starts from the historical members
+for the same decision. For every scheduled decision:
 
 - The strategy and universe comparison both use the same completed decision
   date, following-session close for hypothetical execution, 21/42/63-session
@@ -95,12 +131,10 @@ $r = Get-Content local_data\stock_with_equal_weight.json -Raw | ConvertFrom-Json
 } | Format-List
 ```
 
-**Interpretation:** The comparison tests factor selection/risk filtering
-**relative to this same surviving-ticker universe**, not whether the selected
-universe is representative of everything investable in past decades. Both
-strategies share substantial survivor, availability and corporate-action
-data biases. Also this is **periodic rebalanced equal-weight**, NOT a
-one-time buy-and-hold benchmark.
+The comparison measures selection and risk filtering within the same supplied
+universe. Both strategies share any availability, survivorship and
+corporate-action biases in the input. The equal-weight benchmark rebalances
+on the same schedule as the strategy.
 
 ## Methodology: avoid same-close P&L lookahead
 
@@ -133,10 +167,9 @@ one-time buy-and-hold benchmark.
 
 ### Critical research caveats
 
-- The supplied symbols represent a **present-day survivor-biased universe**.
-  The engine does **not** automatically include delisted, bankrupt or merged
-  stocks, or reconstruct historical index membership. It is unsuitable for
-  making validated institutional 2000–2026 alpha claims.
+- A current listing supply introduces **survivorship bias**. Provide historical
+  snapshots containing the stocks that subsequently delisted, went bankrupt or
+  merged, plus price coverage through simulated exits.
 - A company's first public trading date naturally limits availability; firms
   that did not exist in 2000 are not falsely given prices.
 - Yahoo-style adjusted historical prices are revised retrospectively; this
@@ -156,7 +189,7 @@ one-time buy-and-hold benchmark.
 
 ## Planned (not yet present)
 
-A full historical eligible-universe archive, independent survivorship-safe
-data provider, independently verified fundamentals, genuine walk-forward selection of
+A vetted historical eligible-universe archive, independently verified
+fundamentals, genuine walk-forward selection of
 trained ranking models, separate unseen test segments, risk budgeting
 integration with Atlas FusionNet, and uncertainty/cost/sector stress audits.

@@ -52,6 +52,11 @@ Inputs may include rows after the cutoff; these are ignored.
 Add `--require-decision-close` to require a close on `--as-of`, matching the
 price-date rule used by `stock-backtest`.
 
+Use `--universe-history local_data\historical_members.csv` to limit ranks to
+the latest complete membership snapshot available by `--as-of`. In this mode
+the command requires a decision-day close for every member. See the
+[snapshot schema and freshness rules](STOCK_WALKFORWARD.md#supply-historical-membership).
+
 Optional fundamentals CSV format (the following entries are **fictional
 schema examples, not market facts**):
 
@@ -131,6 +136,6 @@ costs, borrow costs, liquidity constraints, independent point-in-time data
 audit or unseen out-of-sample performance verification is implemented yet.
 
 Use [stock-backtest](STOCK_WALKFORWARD.md) for rolling historical evaluation of
-these factors against SPY and an equal-weight baseline. A historical universe
-that includes delisted stocks and independently verified data vintages remains
-necessary for evaluating historical selection performance.
+these factors against SPY and an equal-weight baseline. For historical
+performance evaluation, supply complete membership including former listings
+and independently verify the input data vintages.
