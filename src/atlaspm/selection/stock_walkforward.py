@@ -15,7 +15,7 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
-from atlaspm.stock_screener import screen_stocks_from_prices
+from atlaspm.stock_screener import load_fundamental_history, screen_stocks_from_prices
 
 
 def _ratio_drawdown(values: list[float]) -> float:
@@ -80,6 +80,10 @@ def backtest_stock_screener(
     max_volatility: float = 0.80,
     max_drawdown: float = 0.65,
     require_uptrend: bool = False,
+    fundamentals_path: Path | None = None,
+    max_fundamental_age_days: int = 200,
+    minimum_market_cap_usd: float = 0.0,
+    max_per_sector: int | None = None,
 ) -> dict[str, Any]:
     """Equal-weight long-only, all-cash if no qualified names.
 
@@ -127,6 +131,10 @@ def backtest_stock_screener(
     # Executions are always one benchmark session after a completed decision close.
     if not decision_indices:
         raise ValueError("No eligible decision dates")
+    fundamental_history = (
+        load_fundamental_history(fundamentals_path, dates[max(decision_indices)])
+        if fundamentals_path is not None else None
+    )
 
     equity = 1.0
     cash = 1.0
@@ -269,6 +277,10 @@ def backtest_stock_screener(
                 max_drawdown=max_drawdown,
                 require_uptrend=require_uptrend,
                 require_decision_close=True,
+                fundamental_history=fundamental_history,
+                max_fundamental_age_days=max_fundamental_age_days,
+                minimum_market_cap_usd=minimum_market_cap_usd,
+                max_per_sector=max_per_sector,
             )
             chosen = [row["symbol"] for row in screen["selected"]]
             # This comparison does not pick the top names: it equally weights
@@ -290,7 +302,8 @@ def backtest_stock_screener(
                 "excluded_count": len(screen["excluded"]),
                 "universe_price_qualified_count": len(universe_chosen),
                 "selected": [
-                    {"symbol": row["symbol"], "rank": row["rank"], "score": row["score"]}
+                    {"symbol": row["symbol"], "rank": row["rank"], "score": row["score"],
+                     "fundamentals_as_of": row["fundamentals_as_of"]}
                     for row in screen["selected"]
                 ],
             })
@@ -315,6 +328,7 @@ def backtest_stock_screener(
     portfolio = _performance(curve, "equity_index")
     benchmark = _performance(curve, "spy_index")
     universe_benchmark = _performance(curve, "universe_index")
+    ranking_mode = "technical_only" if fundamental_history is None else "fundamental_plus_technical"
     return {
         "method": "offline_stock_factor_walkforward_next_close_v1",
         "requested_window": {"start": start, "end": end},
@@ -330,6 +344,12 @@ def backtest_stock_screener(
             "maximum_annual_volatility": max_volatility,
             "maximum_drawdown_magnitude": max_drawdown,
             "require_uptrend": require_uptrend,
+            "ranking_mode": ranking_mode,
+            "max_fundamental_age_days": (
+                max_fundamental_age_days if fundamental_history is not None else None
+            ),
+            "minimum_market_cap_usd": minimum_market_cap_usd,
+            "max_per_sector": max_per_sector,
             "long_only": True, "gross_exposure_cap": 1.0,
             "financing_enabled": False,
             "cash_yield_annual": 0.0,
@@ -375,7 +395,8 @@ def backtest_stock_screener(
             "Eligible universe composition evolves as stocks reach 253 recorded prices, not historical index memberships.",
             "The full-universe comparison is 1x equal-weight, next-close rebalanced with matched turnover costs; not a free buy-and-hold portfolio.",
             "Provider-adjusted historical prices may be revised retrospectively; true vintage point-in-time data are not certified.",
-            "No company fundamental dates, sector caps, liquidity/borrow/spread conditions, cash yield or tax modeling.",
+            "Supplied fundamentals must use availability dates known by the decision close; data vintages are not independently verified.",
+            "No liquidity/borrow/spread conditions, cash yield or tax modeling.",
             "Use untouched holdouts and genuine historically available universe snapshots before evaluating skill.",
             "Signals use decision close; hypothetical execution next close; profits accrue only after execution.",
             "Trading costs are a simple turnover-based approximation, not a fill/execution simulator.",

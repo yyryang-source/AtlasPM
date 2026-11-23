@@ -1,9 +1,7 @@
 # AtlasPM: 2000–2026 stock-selection walk-forward research
 
-**Status:** experimental price-only, 0–1x cash equity simulation. It is **not
-AI training**, not a real brokerage backtest, and not independently validated
-alpha. Existing `stock-screen` remains unchanged. This is a separate
-`stock-backtest` command.
+`stock-backtest` runs an experimental 0–1x cash equity simulation with the
+technical or combined fundamental and technical factors from `stock-screen`.
 
 ## Windows PowerShell: run against your local 26-year files
 
@@ -12,9 +10,6 @@ You have `local_data/us_stocks_2000_2026.csv` and previously downloaded
 closes. Everything stays under gitignored `local_data/`.
 
 ```powershell
-cd C:\Users\Kevin\Desktop\AtlasPM
-git fetch origin
-git switch --track origin/feature/stock-walkforward-v1
 .\.venv\Scripts\python.exe -m pip install -e .
 
 # First: verify offline unit tests
@@ -47,6 +42,23 @@ The download start is inclusive, end **exclusive**. Vendor data are unofficial
 and may fail or be revised. Do not upload `local_data/` or broker account
 data to GitHub.
 
+## Include publication-dated fundamentals
+
+Use the [stock-screen fundamentals format](STOCK_SCREENER.md#inputs). For each
+decision session, the rank uses the latest snapshot available by that close.
+Missing or stale snapshots exclude the stock from the strategy. The price-based
+equal-weight benchmark retains its own universe and uses the same decision
+dates and cost assumptions.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --fundamentals local_data\published_fundamentals.csv --max-fundamental-age-days 200 --min-market-cap 10000000000 --max-per-sector 2 --output local_data\stock_fundamental_walkforward.json
+```
+
+The report records the ranking mode, filter settings, and the publication date
+used for each selection. For after-close releases, use the next decision-session
+date in the input. Supply the as-published values from each period and preserve
+the publication date of any later restatement.
+
 ## Matched-cost full-universe comparison (new)
 
 Each completed decision close also constructs a **separate** 1× equal-weight
@@ -69,8 +81,6 @@ Membership never depends on the top-N factor rank. For every scheduled decision:
 To compare with the new in-file benchmark, rerun the identical backtest:
 
 ```powershell
-git fetch origin
-git switch --track origin/feature/stock-universe-benchmark-v1
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_stock*.py" -v
 .\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --start 2000-01-01 --end 2026-11-20 --top 10 --rebalance-days 21 --fee-bps 5 --slippage-bps 5 --output local_data\stock_with_equal_weight.json
@@ -98,8 +108,8 @@ one-time buy-and-hold benchmark.
    typically in 2001 when prices begin in 2000. The first actual evaluated
    date is reported, not falsely labeled January 2000.
 2. On the decision session's *completed close*, compute each company's
-   `stock-screen` technical-factor rank using no dates later than the
-   decision close. This uses 12–1/6–1 momentum, 200-day SMA, last-63-return
+   `stock-screen` factor rank using data available through the decision close.
+   Technical factors include 12–1/6–1 momentum, 200-day SMA, last-63-return
    volatility and trailing 253-close drawdown. Default volatility cap 80%,
    drawdown cap −65%, and selection Top 10. A company must have a price **on
    the decision date**.
@@ -131,9 +141,9 @@ one-time buy-and-hold benchmark.
   that did not exist in 2000 are not falsely given prices.
 - Yahoo-style adjusted historical prices are revised retrospectively; this
   module cannot certify data vintages or pre-trade data availability.
-- The present implementation has **no fundamental factors**, historical
-  company-financial publication archive, transaction volume/spread caps,
-  market-impact or tax modeling. Fee/slippage are approximations.
+- The caller supplies the historical company-financial publication archive.
+  Fee/slippage are approximations. Transaction volume, spreads, market impact
+  and taxes are outside the model.
 - A missing held or newly selected share price on a required date causes an
   explicit failure, rather than inventing a return. Existing history may
   require a point-in-time data-quality audit before the experiment runs end
@@ -147,6 +157,6 @@ one-time buy-and-hold benchmark.
 ## Planned (not yet present)
 
 A full historical eligible-universe archive, independent survivorship-safe
-data provider, point-in-time fundamentals, genuine walk-forward selection of
+data provider, independently verified fundamentals, genuine walk-forward selection of
 trained ranking models, separate unseen test segments, risk budgeting
 integration with Atlas FusionNet, and uncertainty/cost/sector stress audits.

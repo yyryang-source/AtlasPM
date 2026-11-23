@@ -128,6 +128,26 @@ class StockScreenerTest(unittest.TestCase):
         finally:
             os.chdir(current)
 
+    def test_cli_requires_exact_decision_close_when_requested(self):
+        from atlaspm.cli import main
+        current = Path.cwd()
+        try:
+            os.chdir(self.root)
+            next_day = (self.days[-1] + timedelta(days=1)).isoformat()
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main([
+                    "stock-screen", "--prices", str(self.prices), "--as-of", next_day,
+                    "--require-decision-close", "--output", "local_data/strict.json",
+                ])
+            self.assertEqual(code, 0)
+            saved = json.loads((self.root / "local_data/strict.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["selected"], [])
+            self.assertTrue(saved["filters"]["require_decision_close"])
+            self.assertEqual({row["reason"] for row in saved["excluded"]}, {"MISSING_DECISION_CLOSE"})
+            self.assertEqual(screen_stocks(self.prices, next_day)["eligible_count"], 3)
+        finally:
+            os.chdir(current)
+
     def test_cli_blocks_public_repository_output(self):
         from atlaspm.cli import main
         current = Path.cwd()

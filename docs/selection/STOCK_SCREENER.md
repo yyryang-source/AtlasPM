@@ -10,8 +10,6 @@ alpha model, a live feed, a recommendation, or a broker trade signal.
 From your AtlasPM folder, with Python 3.12+ and its existing `.venv`:
 
 ```powershell
-git fetch origin
-git switch --track origin/feature/stock-screener-v1
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_stock_screener.py" -v
 
@@ -51,6 +49,8 @@ At least **253 observations per symbol through the cutoff date** are needed.
 The last price must be no more than 10 calendar days old by default; 253
 observations must fall within 420 calendar days, with no gap over 14 days.
 Inputs may include rows after the cutoff; these are ignored.
+Add `--require-decision-close` to require a close on `--as-of`, matching the
+price-date rule used by `stock-backtest`.
 
 Optional fundamentals CSV format (the following entries are **fictional
 schema examples, not market facts**):
@@ -62,7 +62,9 @@ as_of_date,symbol,sector,market_cap_usd,roe,revenue_growth_yoy,debt_to_equity,fc
 ```
 
 - `as_of_date` **must mean the first date the complete snapshot was publicly
-  available**, not the end of its fiscal quarter and not the date you downloaded it.
+  available by the decision close**, using the next decision-session date for
+  after-close releases. Fiscal quarter ends and download dates do not represent
+  publication dates.
 - Financial ratios use decimals: ROE 25% = `0.25`, FCF yield 6% = `0.06`.
   All five fundamental factor values are required; EV/EBITDA must be positive.
 - Only the latest snapshot for each symbol with `as_of_date <= --as-of` is
@@ -128,6 +130,7 @@ can all invalidate naive backtest conclusions. No spread or transaction
 costs, borrow costs, liquidity constraints, independent point-in-time data
 audit or unseen out-of-sample performance verification is implemented yet.
 
-**Planned, not included:** historical point-in-time fundamentals ingestion,
-survivorship-safe universe construction, stock-selection walk-forward
-backtesting against SPY and Atlas FusionNet ranking/risk integration.
+Use [stock-backtest](STOCK_WALKFORWARD.md) for rolling historical evaluation of
+these factors against SPY and an equal-weight baseline. A historical universe
+that includes delisted stocks and independently verified data vintages remains
+necessary for evaluating historical selection performance.

@@ -634,6 +634,13 @@ def build_parser() -> argparse.ArgumentParser:
     stock_backtest.add_argument("--max-volatility", type=float, default=0.80)
     stock_backtest.add_argument("--max-drawdown", type=float, default=0.65)
     stock_backtest.add_argument("--require-uptrend", action="store_true")
+    stock_backtest.add_argument("--fundamentals", type=Path,
+                                help="Optional CSV of publication-dated fundamental snapshots")
+    stock_backtest.add_argument("--max-fundamental-age-days", type=int, default=200)
+    stock_backtest.add_argument("--min-market-cap", type=float, default=0.0,
+                                help="Minimum market_cap_usd; requires --fundamentals")
+    stock_backtest.add_argument("--max-per-sector", type=int,
+                                help="Max picks per sector; requires --fundamentals")
     stock_backtest.add_argument(
         "--output", type=Path,
         default=Path("local_data/stock_walkforward_2000_2026.json"),
@@ -656,6 +663,8 @@ def build_parser() -> argparse.ArgumentParser:
     stock.add_argument("--min-market-cap", type=float, default=0.0,
                        help="Minimum market_cap_usd; requires --fundamentals")
     stock.add_argument("--require-uptrend", action="store_true")
+    stock.add_argument("--require-decision-close", action="store_true",
+                       help="Require an adjusted close on --as-of")
     stock.add_argument("--max-per-sector", type=int, default=None,
                        help="Max picks per sector; requires --fundamentals")
     stock.add_argument("--output", type=Path,
@@ -1062,6 +1071,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("Stock backtest output must be private local_data .json")
             sources = {args.prices.expanduser().resolve(),
                        args.benchmark_prices.expanduser().resolve()}
+            if args.fundamentals is not None:
+                sources.add(args.fundamentals.expanduser().resolve())
             if destination in sources:
                 raise ValueError("Stock backtest cannot overwrite its inputs")
             result = backtest_stock_screener(
@@ -1073,6 +1084,10 @@ def main(argv: list[str] | None = None) -> int:
                 max_volatility=args.max_volatility,
                 max_drawdown=args.max_drawdown,
                 require_uptrend=args.require_uptrend,
+                fundamentals_path=args.fundamentals,
+                max_fundamental_age_days=args.max_fundamental_age_days,
+                minimum_market_cap_usd=args.min_market_cap,
+                max_per_sector=args.max_per_sector,
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(
@@ -1085,6 +1100,7 @@ def main(argv: list[str] | None = None) -> int:
                 ).as_posix(),
                 "requested_window": result["requested_window"],
                 "actual_window": result["actual_window"],
+                "ranking_mode": result["parameters"]["ranking_mode"],
                 "universe_count": result["universe_count_excluding_benchmark"],
                 "decision_count": result["decision_count"],
                 "executed_rebalances": result["executed_rebalances"],
@@ -1116,6 +1132,7 @@ def main(argv: list[str] | None = None) -> int:
                 minimum_market_cap_usd=args.min_market_cap,
                 require_uptrend=args.require_uptrend,
                 max_per_sector=args.max_per_sector,
+                require_decision_close=args.require_decision_close,
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(

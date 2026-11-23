@@ -22,6 +22,7 @@ class StockWalkforwardTest(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.stocks = self.base / "stocks.csv"
         self.benchmark = self.base / "benchmark.csv"
+        self.fundamentals = self.base / "fundamentals.csv"
         self.dates = []
         day = date(2024, 1, 1)
         while len(self.dates) < 370:
@@ -53,6 +54,34 @@ class StockWalkforwardTest(unittest.TestCase):
     def _run(self, **kwargs):
         arguments = {"start": self.start, "end": self.end, "top": 2, **kwargs}
         return backtest_stock_screener(self.stocks, self.benchmark, **arguments)
+
+    def _write_fundamentals(self, *, later_snapshots=False):
+        with self.fundamentals.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["as_of_date", "symbol", "sector", "market_cap_usd", "roe",
+                             "revenue_growth_yoy", "debt_to_equity", "fcf_yield", "ev_to_ebitda"])
+            if later_snapshots:
+                writer.writerow([self.dates[281], "A", "Tech", 3e9, .4, .3, .1, .15, 6])
+                writer.writerow([self.dates[281], "C", "Energy", 3e9, .2, .1, .3, .08, 12])
+            writer.writerow([self.dates[250], "A", "Tech", 1e9, .1, .1, .3, .06, 12])
+            writer.writerow([self.dates[250], "B", "Tech", 3e9, .1, .05, .5, .04, 20])
+
+    def test_fundamental_selection_uses_publication_dates_and_keeps_price_baseline(self):
+        self._write_fundamentals()
+        options = {"fundamentals_path": self.fundamentals, "minimum_market_cap_usd": 2e9,
+                   "max_per_sector": 1, "max_fundamental_age_days": 80}
+        original = self._run(**options)
+        self._write_fundamentals(later_snapshots=True)
+        result = self._run(**options)
+
+        self.assertEqual(result["parameters"]["ranking_mode"], "fundamental_plus_technical")
+        early, later = result["decisions"][:2]
+        self.assertEqual(early, original["decisions"][0])
+        self.assertEqual([row["symbol"] for row in early["selected"]], ["B"])
+        self.assertEqual({row["symbol"] for row in later["selected"]}, {"A", "C"})
+        self.assertEqual({row["fundamentals_as_of"] for row in later["selected"]}, {later["date"]})
+        self.assertEqual(result["decisions"][-1]["selected"], [])
+        self.assertEqual(result["equal_weight_universe"], self._run()["equal_weight_universe"])
 
     def test_date_range_and_benchmark(self):
         r = self._run()
@@ -146,6 +175,7 @@ class StockWalkforwardTest(unittest.TestCase):
 
     def test_cli_stores_private_json_only(self):
         from atlaspm.cli import main
+        self._write_fundamentals(later_snapshots=True)
         cwd = Path.cwd()
         try:
             os.chdir(self.base)
@@ -154,10 +184,15 @@ class StockWalkforwardTest(unittest.TestCase):
                 code = main(["stock-backtest", "--prices", str(self.stocks),
                              "--benchmark-prices", str(self.benchmark),
                              "--start", self.start, "--end", self.end,
+                             "--fundamentals", str(self.fundamentals), "--min-market-cap", "2e9",
+                             "--max-per-sector", "1", "--max-fundamental-age-days", "80",
                              "--top", "2", "--output", "local_data/walkforward.json"])
             self.assertEqual(code, 0)
             summary = json.loads(stream.getvalue())
             saved = json.loads((self.base / "local_data/walkforward.json").read_text())
+            self.assertEqual(summary["ranking_mode"], "fundamental_plus_technical")
+            self.assertEqual(saved["parameters"]["max_fundamental_age_days"], 80)
+            self.assertEqual(saved["executions"][0]["selected"], ["B"])
             self.assertEqual(summary["decision_count"], saved["decision_count"])
             self.assertEqual(summary["portfolio"]["cagr"], saved["portfolio"]["cagr"])
             self.assertFalse(saved["live_execution_enabled"])

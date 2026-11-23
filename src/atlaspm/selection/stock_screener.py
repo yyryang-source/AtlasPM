@@ -8,6 +8,7 @@ unverified fundamental publication dates are not a point-in-time data guarantee.
 from __future__ import annotations
 
 import csv
+from bisect import bisect_right
 from datetime import date
 from math import isfinite, sqrt
 from pathlib import Path
@@ -35,8 +36,12 @@ _MIXED_WEIGHTS = {
 _LOWER_BETTER = {"annual_volatility", "debt_to_equity", "ev_to_ebitda"}
 
 
-def _fundamental_rows(path: Path, cutoff: date) -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
+FundamentalHistory = dict[str, list[dict[str, Any]]]
+
+
+def load_fundamental_history(path: Path, cutoff: date) -> FundamentalHistory:
+    """Read publication-dated snapshots through the last decision date."""
+    history: FundamentalHistory = {}
     seen: set[tuple[str, date]] = set()
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -71,10 +76,12 @@ def _fundamental_rows(path: Path, cutoff: date) -> dict[str, dict[str, Any]]:
                     or not -1 <= vals["revenue_growth_yoy"] <= 10
                     or not -5 <= vals["fcf_yield"] <= 5):
                 raise ValueError(f"Check decimal ratio units at fundamentals row {number}")
-            existing = latest.get(symbol)
-            if existing is None or observed > existing["as_of_date"]:
-                latest[symbol] = {"as_of_date": observed, "sector": sector, **vals}
-    return latest
+            history.setdefault(symbol, []).append(
+                {"as_of_date": observed, "sector": sector, **vals}
+            )
+    for snapshots in history.values():
+        snapshots.sort(key=lambda snapshot: snapshot["as_of_date"])
+    return history
 
 
 def _drawdown(prices: list[float]) -> float:
@@ -121,13 +128,13 @@ def screen_stocks(
     minimum_market_cap_usd: float = 0.0,
     require_uptrend: bool = False,
     max_per_sector: int | None = None,
+    require_decision_close: bool = False,
 ) -> dict[str, Any]:
     """Rank historical snapshots, with pre-scoring data/risk eligibility checks.
 
     No prices on later dates enter a score. Fundamentals as_of_date represents
     the *first publicly available* date, not a fiscal period-end date.
     """
-    """Screen a CSV price source through an explicit date cutoff."""
     return screen_stocks_from_prices(
         load_adjusted_prices(prices_path), as_of,
         fundamentals_path=fundamentals_path, top=top,
@@ -138,6 +145,7 @@ def screen_stocks(
         minimum_market_cap_usd=minimum_market_cap_usd,
         require_uptrend=require_uptrend,
         max_per_sector=max_per_sector,
+        require_decision_close=require_decision_close,
     )
 
 
@@ -146,6 +154,7 @@ def screen_stocks_from_prices(
     as_of: str,
     *,
     fundamentals_path: Path | None = None,
+    fundamental_history: FundamentalHistory | None = None,
     top: int = 10,
     max_price_age_days: int = 10,
     max_fundamental_age_days: int = 200,
@@ -172,11 +181,15 @@ def screen_stocks_from_prices(
             and isfinite(max_drawdown) and 0 < max_drawdown <= 1
             and isfinite(minimum_market_cap_usd) and minimum_market_cap_usd >= 0):
         raise ValueError("Invalid volatility, drawdown, or minimum market-cap limit")
-    if fundamentals_path is None and (minimum_market_cap_usd > 0 or max_per_sector is not None):
+    if fundamentals_path is not None:
+        if fundamental_history is not None:
+            raise ValueError("Supply one fundamentals source")
+        fundamental_history = load_fundamental_history(fundamentals_path, cutoff)
+    use_fundamentals = fundamental_history is not None
+    if not use_fundamentals and (minimum_market_cap_usd > 0 or max_per_sector is not None):
         raise ValueError("Market-cap and sector caps require --fundamentals")
 
-    fundamentals = _fundamental_rows(fundamentals_path, cutoff) if fundamentals_path else {}
-    weights = _MIXED_WEIGHTS if fundamentals_path else _TECH_WEIGHTS
+    weights = _MIXED_WEIGHTS if use_fundamentals else _TECH_WEIGHTS
     eligible: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for symbol, time_series in sorted(prices.items()):
@@ -208,8 +221,12 @@ def screen_stocks_from_prices(
             reason = "DRAWDOWN_LIMIT"
         elif require_uptrend and not above_sma:
             reason = "BELOW_SMA200"
-        source = fundamentals.get(symbol)
-        if not reason and fundamentals_path:
+        source = None
+        if not reason and fundamental_history is not None:
+            snapshots = fundamental_history.get(symbol, [])
+            index = bisect_right(snapshots, cutoff, key=lambda row: row["as_of_date"])
+            if index:
+                source = snapshots[index - 1]
             if source is None:
                 reason = "FUNDAMENTALS_NOT_AVAILABLE_AS_OF_DATE"
             elif (cutoff - source["as_of_date"]).days > max_fundamental_age_days:
@@ -257,15 +274,16 @@ def screen_stocks_from_prices(
     return {
         "method": "offline_cross_sectional_factor_percentile_v1",
         "as_of": cutoff.isoformat(),
-        "mode": "fundamental_plus_technical" if fundamentals_path else "technical_only",
+        "mode": "fundamental_plus_technical" if use_fundamentals else "technical_only",
         "weights": weights,
         "filters": {
             "max_price_age_days": max_price_age_days,
-            "max_fundamental_age_days": max_fundamental_age_days if fundamentals_path else None,
+            "max_fundamental_age_days": max_fundamental_age_days if use_fundamentals else None,
             "max_annual_volatility": max_annual_volatility,
             "max_drawdown": max_drawdown,
             "minimum_market_cap_usd": minimum_market_cap_usd,
             "require_uptrend": require_uptrend,
+            "require_decision_close": require_decision_close,
             "max_per_sector": max_per_sector,
         },
         "universe_count": len(prices),
