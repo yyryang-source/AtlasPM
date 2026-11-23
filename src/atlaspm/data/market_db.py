@@ -282,6 +282,19 @@ def register_parser(sub):
     t.add_argument('--max-contracts', type=int, default=10)
     t.add_argument('--rpm', type=int, default=5)
     t.add_argument('--refresh', action='store_true')
+    q=actions.add_parser('stock-5m-probe',help='Probe Massive Stocks historical 5-minute bars')
+    q.add_argument('--symbol',default='AAPL')
+    q.add_argument('--date',default='2026-11-20')
+    q=actions.add_parser('stock-5m-backfill',help='Download full-market 1m files and aggregate to 5m Parquet')
+    q.add_argument('--start',default='2000-01-01')
+    q.add_argument('--end',default='2026-11-23')
+    q.add_argument('--max-days',type=int,default=0)
+    q.add_argument('--session',choices=['rth','all'],default='rth')
+    q.add_argument('--profile',default='massive')
+    q.add_argument('--dry-run',action='store_true')
+    q.add_argument('--remove-raw',action='store_true')
+    q.add_argument('--refresh',action='store_true')
+    actions.add_parser('stock-5m-status')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -291,6 +304,16 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action.startswith('stock-5m-'):
+        from atlaspm.data import stock5m_flatfiles
+        if args.db_action == 'stock-5m-probe':
+            return stock5m_flatfiles.probe(args.symbol,args.date)
+        if args.db_action == 'stock-5m-status':
+            return stock5m_flatfiles.status()
+        return stock5m_flatfiles.backfill(
+            args.start,args.end,max_days=args.max_days,session=args.session,
+            profile=args.profile,dry_run=args.dry_run,
+            remove_raw=args.remove_raw,refresh=args.refresh)
     if args.db_action.startswith('fetch-'):
         from atlaspm.data import market_fetch
         if args.db_action == 'fetch-treasury':
