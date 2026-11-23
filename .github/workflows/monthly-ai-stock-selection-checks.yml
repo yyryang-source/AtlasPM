@@ -8,6 +8,7 @@ on:
       - feature/selection-us-market-data-quality-v1
       - feature/stock-sync-bounded-stop-resume-v1
       - feature/v2-tie-safe-evaluation-gate
+      - feature/diagnose-v2-momentum-extremes
   pull_request:
     paths:
       - "src/atlaspm/selection/monthly_stock_selection.py"
@@ -20,6 +21,8 @@ on:
       - "tests/selection/test_stock_sync_resume.py"
       - "src/atlaspm/selection/ai_stock_ranker_v2.py"
       - "tests/selection/test_v2_tie_safe_evaluation.py"
+      - "src/atlaspm/selection/v2_momentum_diagnostics.py"
+      - "tests/selection/test_v2_momentum_diagnostics.py"
       - "tests/selection/test_ai_stock_ranker_v2.py"
       - "scripts/selection/Invoke-USMarketDataExpansion.ps1"
       - ".github/workflows/monthly-ai-stock-selection-checks.yml"
@@ -53,6 +56,8 @@ jobs:
         run: python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v
       - name: Verify tie-safe Top-N and fail-closed research-only model review
         run: python -m unittest discover -s tests -p "test_v2_tie_safe_evaluation.py" -v
+      - name: Verify momentum extreme-cohort forensics and no-execution CLI
+        run: python -m unittest discover -s tests -p "test_v2_momentum_diagnostics.py" -v
 
   powershell-market-runner-syntax:
     name: Verify Windows PowerShell 5.1 market data runner syntax
