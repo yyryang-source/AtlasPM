@@ -4,9 +4,10 @@ AtlasPM is a **local-first research toolkit**, not a production trading service.
 
 ```text
 src/atlaspm/
-  cli.py                 # single command-line interface
-  selection/             # current US universe, adjusted-price QA, rankers, monthly candidates
-  quant/                 # portfolio, backtesting, AI risk, margin accounting and synthetic OMS
+  cli.py                 # public command interface, JSON/error handling
+  commands/              # selection_cli.py, quant_cli.py, broker_cli.py (CLI adapters)
+  selection/             # actual US stock screening/ranking algorithms and quote QC
+  quant/                 # actual portfolio, risk, margin and synthetic OMS algorithms
   *.py                   # temporary compatibility aliases for original module imports
 scripts/selection/       # PowerShell runners
 tests/quant/             # risk/backtest/regression suite

@@ -22,7 +22,8 @@ For existing clones, run `git pull --ff-only origin main` instead of cloning aga
 
 ```text
 src/atlaspm/
-  cli.py            # CLI entry point (offline research)
+  cli.py            # public entry point (offline research)
+  commands/         # quant_cli.py, selection_cli.py, broker_cli.py
   quant/            # allocation, backtests, RiskNet/FusionNet, IBKR risk
   selection/        # stock universe, quote QC, rankers, monthly shortlist
 tests/
@@ -55,6 +56,7 @@ Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatib
 ## Documentation
 
 - [Architecture and safety boundaries](docs/ARCHITECTURE.md)
+- [Command interface and module layout](docs/CLI.md)
 - [Documentation index](docs/README.md)
 - [Stock selection and ranking](docs/selection/AI_STOCK_RANKER_V2.md)
 - [Market data coverage](docs/selection/US_MARKET_DATA_EXPANSION.md)

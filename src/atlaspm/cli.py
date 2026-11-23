@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from atlaspm.commands import broker, quant, selection
+from atlaspm.commands import broker_cli, quant_cli, selection_cli
 # Backward-compatible public injection point used by offline data CLI tests.
 from atlaspm.quant.historical import download_yahoo_adjusted_prices
 
@@ -17,10 +17,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     # Preserve original top-level command ordering for terminal users.
-    quant.register_core_parsers(sub)
-    broker.register_parsers(sub)
-    quant.register_model_parsers(sub)
-    selection.register_parsers(sub)
+    quant_cli.register_core_parsers(sub)
+    broker_cli.register_parsers(sub)
+    quant_cli.register_model_parsers(sub)
+    selection_cli.register_parsers(sub)
     return parser
 
 
@@ -28,12 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command in selection.COMMANDS:
-            report = selection.run(args)
-        elif args.command in broker.COMMANDS:
-            report = broker.run(args)
-        elif args.command in quant.COMMANDS:
-            report = quant.run(args, price_downloader=download_yahoo_adjusted_prices)
+        if args.command in selection_cli.COMMANDS:
+            report = selection_cli.run(args)
+        elif args.command in broker_cli.COMMANDS:
+            report = broker_cli.run(args)
+        elif args.command in quant_cli.COMMANDS:
+            report = quant_cli.run(args, price_downloader=download_yahoo_adjusted_prices)
         else:
             raise ValueError("Unsupported AtlasPM command")
         print(json.dumps(report, indent=2, sort_keys=True))

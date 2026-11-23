@@ -6,10 +6,12 @@ The public commands are stable: run `atlaspm <command>` or `python -m atlaspm.cl
 src/atlaspm/
   cli.py                  # stable error handler, JSON output, interruption semantics
   commands/
-    quant.py              # portfolio analysis, backtests and AI risk-model training
-    selection.py          # stock screening, model training and monthly alpha research
-    broker.py             # IBKR read-only, margin audit and synthetic paper OMS
+    quant_cli.py          # command arguments and adapters for portfolio/risk models
+    selection_cli.py      # command arguments and adapters for stock research
+    broker_cli.py         # command arguments and adapters for read-only IBKR / OMS
 ```
+
+The **selection/** and **quant/** directories contain real algorithms. **commands/*_cli.py** only exposes those algorithms through the CLI; they are not duplicate implementations.
 
 There are **45 existing command names**; this refactor only relocates argument registration and handler bodies. CLI option spellings, output schemas, default paths, error codes (including interrupted `stock-sync-market` exit 130), and fail-closed brokerage permissions remain unchanged.
 

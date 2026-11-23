@@ -6,12 +6,12 @@ import argparse
 import unittest
 
 from atlaspm.cli import build_parser
-from atlaspm.commands import broker, quant, selection
+from atlaspm.commands import broker_cli, quant_cli, selection_cli
 
 
 class ModularCLIContractTests(unittest.TestCase):
     def test_all_45_commands_are_unique_and_registered(self):
-        groups = (quant.COMMANDS, broker.COMMANDS, selection.COMMANDS)
+        groups = (quant_cli.COMMANDS, broker_cli.COMMANDS, selection_cli.COMMANDS)
         self.assertEqual([len(g) for g in groups], [14, 16, 15])
         self.assertEqual(len(set.union(*(set(g) for g in groups))), 45)
         self.assertEqual(sum(map(len, groups)), 45)
@@ -20,6 +20,20 @@ class ModularCLIContractTests(unittest.TestCase):
                    if isinstance(action, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
         self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)))
+
+    def test_command_modules_do_not_shadow_algorithm_packages(self):
+        """CLI adapters are distinct from the actual quant/selection implementations."""
+        from pathlib import Path
+        import atlaspm
+
+        package = Path(atlaspm.__file__).resolve().parent
+        self.assertTrue((package / "selection" / "ai_stock_ranker_v2.py").is_file())
+        self.assertTrue((package / "quant" / "portfolio.py").is_file())
+        self.assertTrue((package / "commands" / "selection_cli.py").is_file())
+        self.assertTrue((package / "commands" / "quant_cli.py").is_file())
+        self.assertTrue((package / "commands" / "broker_cli.py").is_file())
+        for old_name in ("selection.py", "quant.py", "broker.py"):
+            self.assertFalse((package / "commands" / old_name).exists())
 
     def test_existing_python_and_windows_cli_shapes(self):
         parser = build_parser()
