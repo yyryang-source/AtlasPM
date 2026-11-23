@@ -80,7 +80,7 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
         os.chdir(self.old)
         self.tmp.cleanup()
 
-    def seed(self,*,duplicate=False,invalid=False):
+    def seed(self,*,duplicate=False,invalid=False,extra_symbols=0):
         cx=duckdb.connect()
         cx.execute("""
             CREATE TABLE bars AS
@@ -97,6 +97,14 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
             INSERT INTO bars VALUES ('MSFT', TIMESTAMPTZ '2026-03-02 14:30:00+00',
                                      200, 201, 199, 200.5, 40)
         """)
+        if extra_symbols:
+            cx.execute("""
+                INSERT INTO bars
+                SELECT 'S' || lpad(CAST(i AS VARCHAR),5,'0'),
+                       TIMESTAMPTZ '2026-03-02 14:30:00+00',
+                       50.0,51.0,49.0,50.5,12.0
+                FROM range(?) t(i)
+            """,[extra_symbols])
         if duplicate: cx.execute("INSERT INTO bars SELECT * FROM bars WHERE ticker='AAPL' LIMIT 1")
         if invalid: cx.execute("UPDATE bars SET low=999 WHERE ticker='MSFT'")
         cx.execute(f"COPY bars TO '{mod._quote(self.raw)}' (FORMAT PARQUET)")
@@ -113,11 +121,48 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
         cx.close()
         self.assertEqual((100.0,106.0,99.0,105.0,500.0,5),row)
 
-    def test_duplicate_minute_rejected_without_output(self):
+    def test_many_ambiguous_minutes_rejected_without_output(self):
         self.seed(duplicate=True)
-        with self.assertRaisesRegex(ValueError,"duplicated-minute"):
+        with self.assertRaisesRegex(ValueError,"limit 0.1000%"):
             mod.convert(self.raw,self.out)
         self.assertFalse(self.out.exists())
+        quarantine,audit=mod.quality_paths(self.out)
+        self.assertFalse(quarantine.exists())
+        self.assertFalse(audit.exists())
+        self.assertTrue(self.raw.exists())
+
+    def test_sparse_ambiguous_minute_quarantined(self):
+        self.seed(duplicate=True,extra_symbols=2000)
+        result=mod.convert(self.raw,self.out)
+        self.assertEqual(2002,result["candidate_bars_5m"])
+        self.assertEqual(2001,result["bars_5m"])
+        self.assertEqual(1,result["excluded_ambiguous_5m_buckets"])
+        self.assertEqual("REVIEW_REQUIRED",result["quality_status"])
+        quarantine,audit=mod.quality_paths(self.out)
+        self.assertTrue(quarantine.is_file())
+        self.assertTrue(audit.is_file())
+        cx=duckdb.connect()
+        bad=cx.execute("SELECT symbol,source_minute_bars,unique_source_minutes "
+                       "FROM read_parquet(?)",[str(quarantine)]).fetchall()
+        kept_aapl=cx.execute("SELECT count(*) FROM read_parquet(?) WHERE symbol='AAPL'",
+                             [str(self.out)]).fetchone()[0]
+        cx.close()
+        self.assertEqual([("AAPL",6,5)],bad)
+        self.assertEqual(0,kept_aapl)
+        self.assertEqual(1,mod.status()["quarantined_5m_buckets"])
+        self.assertTrue(self.raw.exists())
+
+    def test_clean_refresh_clears_obsolete_quarantine(self):
+        self.seed(duplicate=True,extra_symbols=2000)
+        mod.convert(self.raw,self.out)
+        self.raw.unlink()
+        self.seed(duplicate=False)
+        new=mod.convert(self.raw,self.out)
+        self.assertEqual(0,new["excluded_ambiguous_5m_buckets"])
+        quarantine,audit=mod.quality_paths(self.out)
+        self.assertFalse(quarantine.exists())
+        self.assertTrue(audit.is_file())
+        self.assertEqual(0,mod.status()["quarantined_5m_buckets"])
 
     def test_invalid_ohlc_rejected_without_output(self):
         self.seed(invalid=True)
