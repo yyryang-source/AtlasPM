@@ -77,3 +77,84 @@ can suffer corporate-action revision leakage. Full US-stock training
 requires larger survivorship-aware datasets and possibly a streaming
 data loader, but these limitations do NOT change the pure-stock-picker
 scope. Existing Atlas portfolio/risk/trading components stay separate.
+
+## Full-US research experiment (November 2026) — tie-safe evaluation
+
+After the current-listed US market quote expansion was audited as
+`READY_FOR_RESEARCH_REVIEW` with 5,830 cached symbols and 5,404
+history/freshness-qualified stocks, the user trained the V2 ranker
+on prices from 2024-01-01 through 2026-11-20. This is **not**
+an unbiased historical US market membership or a live-trade approval.
+
+First run (reported in local, NOT GitHub-shared JSON):
+- Train labeled rows 53,857; validation 20,399; test 26,382
+- Validation 4 decision dates; test 5 decision dates
+- Early-stopped best LightGBM iteration 4/150
+- Validation/test mean Spearman IC: +0.01382 / **-0.01774**
+- Simple 12-1 momentum validation/test IC: +0.13662 / **+0.11176**
+- Distinct displayed score-level fraction: about 3% per date
+- **Every** validation and test date's Top-10 cutoff crossed a tied
+  score group. Earlier Top-10 mean future SPY-excess and pool-spread
+  figures used ticker-alphabetic tie breaking and **cannot support
+  a claim of selection alpha**.
+
+Starting with the tie-safe evaluation fix, the V2 training report:
+
+1. Reports Top-N future SPY excess and same-pool spread **only** from
+   dates where the rank cutoff is unambiguous. If all dates have boundary
+   ties, these fields are JSON `null`, not a made-up return.
+2. Preserves the *old* tie-broken numbers solely under
+   `legacy_symbol_tiebroken_top_n_diagnostic`, marked **not a valid
+   portfolio result**.
+3. Compares simple 12-1 momentum Top-N returns on matching test
+   cohorts, plus its existing date-wise Spearman IC.
+4. Emits `model_research_review.status=REVIEW_REQUIRED` if the
+   validation/test sample includes fewer than 12 decision dates,
+   ambiguous Top-N cutoffs, or the model's test IC is non-positive or
+   no better than simple momentum. Twelve is a *diagnostic minimum*,
+   **not evidence of statistically sufficient testing**.
+5. Does **not** turn on orders, allocate capital, or approve alpha if
+   the result is `PRELIMINARY_RESEARCH_REVIEW`.
+
+To regenerate the **new, tie-safe** metrics on local 2024–2026 data
+without overwriting the original 38-name V2 files:
+
+```powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git pull --ff-only origin main
+
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_v2_tie_safe_evaluation.py" -v
+
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-ai-train-v2 `
+    --prices local_data\us_equity_prices.csv `
+    --benchmark-prices local_data\market_2000_2026.csv `
+    --start 2025-01-02 `
+    --train-end 2025-12-31 `
+    --validation-end 2026-05-29 `
+    --test-end 2026-11-20 `
+    --horizon-sessions 21 `
+    --sample-every-sessions 21 `
+    --num-boost-round 150 `
+    --top 10 `
+    --model-output local_data\atlas_stock_ranker_us_v2.txt `
+    --report local_data\atlas_stock_ranker_us_v2_report.json
+
+$r = Get-Content local_data\atlas_stock_ranker_us_v2_report.json -Raw | ConvertFrom-Json
+$r.model_research_review | Format-List
+$r.validation | Select-Object decision_dates,mean_spearman_ic,simple_momentum_mean_spearman_ic,top_n_ambiguous_decision_dates,top_n_unambiguous_decision_dates,mean_top_n_forward_excess_return | Format-List
+$r.test | Select-Object decision_dates,mean_spearman_ic,simple_momentum_mean_spearman_ic,top_n_ambiguous_decision_dates,top_n_unambiguous_decision_dates,mean_top_n_forward_excess_return | Format-List
+$r.test.simple_momentum_top_n | Format-List
+```
+
+Prerequisite: `local_data/market_2000_2026.csv` must contain
+`date,symbol,adjusted_close` for SPY through the exact 2026-11-20
+NYSE session. The new scorecard needs an actual rerun to reconstruct
+per-date Top-10 boundary decisions; it cannot reverse engineer
+the correct Top-N figures from the old summary-only report.
+
+**Next research priorities:** secure a survivorship-aware point-in-time
+training universe, collect more completed decision periods, use
+non-overlapping/appropriately purged forward-return labels, and
+compare V2 against the momentum baseline on untouched future windows.
+Do not repeatedly optimize against the same 2026 test period.
+

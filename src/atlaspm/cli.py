@@ -747,6 +747,7 @@ def main(argv: list[str] | None = None) -> int:
                 "group_counts": result["group_counts"],
                 "validation": result["validation"],
                 "test": result["test"],
+                "model_research_review": result["model_research_review"],
                 "live_execution_enabled": False,
             }
         elif args.command == "stock-ai-rank-v2":
