@@ -126,6 +126,13 @@ class FactorDuckDBTests(FactorContractTests):
         self.assertIsNotNone(aapl['mom_5d'])
         self.assertEqual(0, factor_db.status(source='hf')['months'])
         self.assertEqual(1, factor_db.status(source='sqlite')['months'])
+        plan = factor_db.batch('2026-01', '2026-03', source='sqlite', dry_run=True)
+        self.assertEqual(['2026-02'], plan['months_with_source'])
+        batch = factor_db.batch('2026-01', '2026-03', source='sqlite',
+                                memory='256MB', threads=1)
+        self.assertEqual(1, batch['skipped_existing'])
+        self.assertEqual(1, batch['months_processed'])
+
 
 
 if __name__ == '__main__':
