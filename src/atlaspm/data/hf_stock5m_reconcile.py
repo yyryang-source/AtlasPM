@@ -125,7 +125,7 @@ def _hf_days(month: str, symbols: list[str]) -> list[tuple]:
                 arg_max(source_minute_bars,timestamp_ms) AS last_minutes
             FROM candles
             WHERE symbol IN ({marks}) AND
-                  CAST(trade_date_et AS VARCHAR) BETWEEN ? AND ?
+                  CAST(trade_date_et AS VARCHAR) >= ? AND CAST(trade_date_et AS VARCHAR) < ?
             GROUP BY symbol,trade_date_et ORDER BY symbol,trade_date_et
         """, symbols+[month+"-01",_month_bounds(month)[1]]).fetchall()
     finally:
@@ -148,8 +148,7 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
     local_rows = _hf_days(month,symbols)
     observations = (_from_yahoo(month,symbols) if fetch_yahoo else
                     _from_csv(Path(reference_csv),symbols,month))
-    local = {(sym,day):row for sym,day,*_ in local_rows
-             for row in [next(r for r in local_rows if r[0]==sym and r[1]==day)]}
+    local = {(row[0],row[1]):row for row in local_rows}
     results = []
     high_close = []
     high_volume = []
@@ -160,7 +159,6 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         compared = 0
         max_close = 0.0
         max_volume = 0.0
-        missing_reference = 0
         missing_hf = 0
         edge_skipped = 0
         close_mismatches = 0
@@ -210,7 +208,8 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                                         "hf_volume":round(float(vol),1),
                                         "reference_volume":round(ref_volume,1),
                                         "pct_difference":round(volume_diff,4)})
-        missing_reference = len([k for k in local if k[0]==symbol and k not in observations])
+        missing_reference = sum(sym==symbol and (sym,day) not in observations
+                                for sym,day in local)
         results.append({"symbol":symbol,"reference_days":len(days),
                         "compared_days":compared,
                         "missing_hf_days":missing_hf,
