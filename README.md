@@ -23,7 +23,7 @@ For existing clones, run `git pull --ff-only origin main` instead of cloning aga
 ```text
 src/atlaspm/
   cli.py            # public entry point (offline research)
-  commands/         # quant_cli.py, selection_cli.py, broker_cli.py
+  commands/         # 3 public *_cli facades + 11 focused command families
   framework/        # 8-stage quant workflow registry (inspection only)
   data/            # stock quotes, history, universe and quality (migrated)
   research/        # AI ranking, model validation and walk-forward (migrated)

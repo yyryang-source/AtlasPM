@@ -1,23 +1,32 @@
-# AtlasPM CLI layout
+# AtlasPM CLI: stable commands, organized by domain
 
-The public commands are stable: run `atlaspm <command>` or `python -m atlaspm.cli <command>` from Windows PowerShell.
+There are **45 existing CLI commands**, accessed unchanged through `atlaspm <command>` or `python -m atlaspm.cli <command>`. The public `selection_cli.py`, `quant_cli.py`, `broker_cli.py` files are now small routing facades; all argument parsing and handler code is grouped by functionality.
 
 ```text
 src/atlaspm/
-  cli.py                  # stable error handler, JSON output, interruption semantics
+  cli.py                         # stable JSON/errors, Ctrl+C handling and dispatch
   commands/
-    quant_cli.py          # command arguments and adapters for portfolio/risk models
-    selection_cli.py      # command arguments and adapters for stock research
-    broker_cli.py         # command arguments and adapters for read-only IBKR / OMS
+    selection_cli.py             # public stock command router
+      stock_data_cli.py          # US equity universe, prices and audits
+      stock_models_cli.py        # LightGBM V1/V2 models and diagnostics
+      stock_rules_cli.py         # 20-signal consensus, screens, backtests
+      stock_monthly_cli.py       # monthly candidates and eligibility gate
+    quant_cli.py                 # public quant command router
+      portfolio_research_cli.py  # allocation, prices, estimation, optimization
+      quant_backtesting_cli.py   # backtests, benchmarks, risk checks
+      quant_models_cli.py        # native/ML research and robustness audits
+    broker_cli.py                # public read-only/synthetic broker router
+      broker_accounts_cli.py     # read-only IBKR account and mapping
+      broker_risk_cli.py         # margins, stress and risk budgets
+      broker_audits_cli.py       # audits and local HTML report
+      broker_paper_cli.py        # synthetic ledgers, baskets and paper OMS
 ```
 
-The **selection/** and **quant/** directories contain real algorithms. **commands/*_cli.py** only exposes those algorithms through the CLI; they are not duplicate implementations.
+All 45 command registrations retain their original order, option names and defaults. The specialized command modules import algorithms from `data/`, `research/`, `strategies/equity/`, `risk/`, `execution/`, `monitoring/`, or remaining core `quant/` modules. No new model training, backtest algorithm or order submission has been added by this refactor.
 
-There are **45 existing command names**; this refactor only relocates argument registration and handler bodies. CLI option spellings, output schemas, default paths, error codes (including interrupted `stock-sync-market` exit 130), and fail-closed brokerage permissions remain unchanged.
+`atlaspm.cli.download_yahoo_adjusted_prices` is preserved as a dependency-injection point for existing tests. All broker execution permissions remain disabled.
 
-`atlaspm.cli.download_yahoo_adjusted_prices` remains a compatibility injection point for offline tests. All other command handlers use canonical `atlaspm.quant.*` and `atlaspm.selection.*` modules. The historical top-level Python module aliases remain for external compatibility until a deliberate versioned migration.
-
-## Windows sanity check
+## Windows validation
 
 ```powershell
 cd C:\Users\Kevin\Desktop\AtlasPM
@@ -27,4 +36,4 @@ cd C:\Users\Kevin\Desktop\AtlasPM
 .\.venv\Scripts\python.exe -m atlaspm.cli ibkr-margin-monitor --help
 ```
 
-Full 5,830-stock datasets and credentials stay local under `local_data/`, not in the Git repository. No live trading is implemented.
+The local `local_data/` folder holds uncommitted private market/broker files; none are imported automatically or sent to any service by the CLI routing layer.
