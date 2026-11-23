@@ -41,6 +41,19 @@ CREATE TABLE IF NOT EXISTS treasury_auctions (
  cusip TEXT NOT NULL REFERENCES bonds(cusip), auction_date TEXT NOT NULL, security_type TEXT NOT NULL,
  security_term TEXT, coupon_rate_pct REAL, high_yield_pct REAL, offering_amount REAL, source TEXT NOT NULL,
  PRIMARY KEY(cusip,auction_date,security_type)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS option_quotes (
+ symbol TEXT NOT NULL REFERENCES option_contracts(symbol), timestamp_ms INTEGER NOT NULL,
+ bid REAL, ask REAL, bid_size REAL, ask_size REAL, source TEXT NOT NULL,
+ PRIMARY KEY(symbol,timestamp_ms), CHECK(bid IS NULL OR bid >= 0),
+ CHECK(ask IS NULL OR ask >= 0)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS option_greeks (
+ symbol TEXT NOT NULL REFERENCES option_contracts(symbol), observed_at_ms INTEGER NOT NULL,
+ underlying_price REAL, iv REAL, delta REAL, gamma REAL, theta REAL, vega REAL, rho REAL,
+ source TEXT NOT NULL, PRIMARY KEY(symbol,observed_at_ms)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS bond_quotes (
+ cusip TEXT NOT NULL REFERENCES bonds(cusip), quote_date TEXT NOT NULL,
+ bid_price REAL, ask_price REAL, yield_to_maturity_pct REAL, source TEXT NOT NULL,
+ PRIMARY KEY(cusip,quote_date)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS import_log (
  id INTEGER PRIMARY KEY, dataset TEXT NOT NULL, input_file TEXT NOT NULL,
  rows_processed INTEGER NOT NULL, rows_skipped INTEGER NOT NULL,
@@ -236,7 +249,7 @@ def import_csv(cx, dataset, filename, source, asof):
             'rows_processed':processed,'rows_skipped':skipped}
 
 def stats(cx):
-    tables = ('equity_daily','option_contracts','option_bars','bonds','treasury_auctions','import_log')
+    tables = ('equity_daily','option_contracts','option_bars','option_quotes','option_greeks','bonds','treasury_auctions','bond_quotes','import_log')
     result = {table:cx.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] for table in tables}
     result['equity_symbols'] = cx.execute('SELECT COUNT(DISTINCT symbol) FROM equity_daily').fetchone()[0]
     result['option_underlyings'] = cx.execute('SELECT COUNT(DISTINCT underlying) FROM option_contracts').fetchone()[0]

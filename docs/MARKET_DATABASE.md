@@ -63,6 +63,10 @@ yields are **not** secondary-market executable bids or ask prices.
 Corporate bonds, municipal bonds and full Treasury yield curves remain
 future data adapters; table `bonds` currently contains Treasury securities.
 
+## Reserved future datasets
+
+Tables `option_quotes`, `option_greeks`, and `bond_quotes` are created but **have no importer in v1**. They are intentionally empty until licensed historical bid/ask, Greeks/IV, and secondary-market bond price/yield data adapters are implemented and validated. Neither synthetic Greeks nor fabricated bond prices are written.
+
 ## Guarantees and limitations
 
 - Re-importing the same CSV upserts by unique instrument/timeframe/timestamp;
