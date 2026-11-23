@@ -112,6 +112,17 @@ Write-Host ("HF full-market archive: {0} to {1} ({2} month files)" -f $summary.e
 Write-Warning "The dataset stops at 2026-03. Requested later months will remain explicitly unavailable."
 Write-Warning "No published full-US point-in-time universe, corporate action certification or rights verification is implied."
 Write-Warning "KeepRaw is the default: the original 1m files and the new 5m files both require substantial local disk space."
+function RunLocalAudit([string] $month) {
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $python -m atlaspm.cli market-db hf-5m-audit --month $month --session $Session | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 Push-Location $root
 try {
     foreach ($month in $months) {
@@ -124,6 +135,15 @@ try {
             $f = Get-Item -LiteralPath $out
             if ($f.Length -gt 100) {
                 Write-Host ("[{0}/{1}] {2} already converted and QC metadata exists: skip" -f $reported,$months.Count,$month)
+                if ($AuditEachMonth) {
+                    $auditExit = RunLocalAudit $month
+                    if ($auditExit -ne 0) {
+                        $failed.Add($month)
+                        Write-Warning ("Local audit failed for preexisting {0}" -f $month)
+                        if ($StopOnError) { break }
+                        continue
+                    }
+                }
                 $skipped++
                 continue
             }
@@ -162,6 +182,16 @@ try {
         }
         ($entry | ConvertTo-Json -Compress) | Add-Content -LiteralPath $logfile -Encoding UTF8
         if ($entry.state -eq "converted") {
+            if ($AuditEachMonth) {
+                $auditExit = RunLocalAudit $month
+                if ($auditExit -ne 0) {
+                    $entry.state = "converted_audit_failed"
+                    $failed.Add($month)
+                    Write-Warning ("Month {0} converted but its local audit could not complete" -f $month)
+                    if ($StopOnError) { break }
+                    continue
+                }
+            }
             $completed++
         } else {
             $failed.Add($month)
