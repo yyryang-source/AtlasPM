@@ -32,6 +32,11 @@ class StockBacktestPortfolio:
     def equity(self) -> float:
         return self.liquid_equity + self.receivable_value
 
+    @property
+    def liquid_weights(self) -> dict[str, float]:
+        liquid = self.liquid_equity
+        return {symbol: quantity * self._marks[symbol] / liquid for symbol, quantity in self.shares.items()}
+
     def mark(
         self,
         observed: date,
@@ -51,20 +56,15 @@ class StockBacktestPortfolio:
         if not isfinite(self.equity):
             raise ValueError(f"Invalid portfolio equity on {observed}")
 
-    def rebalance(
+    def executable_symbols(
         self,
         chosen: list[str],
         observed: date,
         prices: dict[str, dict[date, float]],
         delistings: dict[str, StockDelisting],
-        cost_rate: float,
-    ) -> tuple[float, float, list[str]]:
-        liquid = self.liquid_equity
-        if liquid == 0.0:
-            return 0.0, 0.0, []
+    ) -> tuple[list[str], list[str]]:
+        executable: list[str] = []
         unfilled: list[str] = []
-        fraction = 1.0 / len(chosen) if chosen else 0.0
-        target: dict[str, float] = {}
         for symbol in chosen:
             close = prices[symbol].get(observed)
             if close is None:
@@ -74,9 +74,40 @@ class StockBacktestPortfolio:
                     continue
                 raise ValueError(f"{self._error_prefix}EXECUTION_PRICE: {symbol} {observed}")
             self._marks[symbol] = close
-            target[symbol] = fraction
+            executable.append(symbol)
+        return executable, unfilled
 
-        current = {symbol: quantity * self._marks[symbol] / liquid for symbol, quantity in self.shares.items()}
+    def rebalance(
+        self,
+        chosen: list[str],
+        observed: date,
+        prices: dict[str, dict[date, float]],
+        delistings: dict[str, StockDelisting],
+        cost_rate: float,
+        *,
+        exact_costs: bool = False,
+    ) -> tuple[float, float, list[str]]:
+        liquid = self.liquid_equity
+        if liquid == 0.0:
+            return 0.0, 0.0, []
+        executable, unfilled = self.executable_symbols(chosen, observed, prices, delistings)
+        fraction = 1.0 / len(chosen) if chosen else 0.0
+        target = dict.fromkeys(executable, fraction)
+
+        current = self.liquid_weights
+        if exact_costs:
+            symbols = sorted(current.keys() | target.keys())
+            # Solve remaining equity + the fee on final notionals = starting equity.
+            lower, upper = 0.0, 1.0
+            for _ in range(55):
+                midpoint = (lower + upper) / 2
+                turnover = sum(abs(midpoint * target.get(symbol, 0) - current.get(symbol, 0)) for symbol in symbols)
+                if midpoint + cost_rate * turnover > 1:
+                    upper = midpoint
+                else:
+                    lower = midpoint
+            turnover, fee = self.execute_notionals({symbol: lower * weight for symbol, weight in target.items()}, cost_rate)
+            return turnover, fee, unfilled
         liquid_turnover = sum(abs(target.get(symbol, 0.0) - current.get(symbol, 0.0))
                               for symbol in sorted(current.keys() | target.keys()))
         fee = liquid * liquid_turnover * cost_rate
@@ -92,6 +123,23 @@ class StockBacktestPortfolio:
         self.turnover += turnover
         self.cost += fee
         return turnover, fee, unfilled
+
+    def execute_notionals(self, target: dict[str, float], cost_rate: float) -> tuple[float, float]:
+        """Execute absolute target notionals expressed in units of pre-trade liquid equity."""
+        liquid = self.liquid_equity
+        current = self.liquid_weights
+        fraction_traded = sum(abs(target.get(symbol, 0.0) - current.get(symbol, 0.0))
+                              for symbol in sorted(current.keys() | target.keys()))
+        fee = liquid * fraction_traded * cost_rate
+        cash = liquid - fee - liquid * sum(target.values())
+        if cash < -1e-8 * liquid or any(not isfinite(weight) or weight < 0 for weight in target.values()):
+            raise ValueError("Rebalance would exceed its liquid cash budget")
+        turnover = fraction_traded * (liquid / self.equity)
+        self.shares = {symbol: liquid * weight / self._marks[symbol] for symbol, weight in target.items() if weight > 0}
+        self.cash = max(0.0, cash)
+        self.turnover += turnover
+        self.cost += fee
+        return turnover, fee
 
     def settle_delistings(self, observed: date) -> None:
         due = [symbol for symbol, (_, event) in self._receivables.items() if event.cash_date <= observed]

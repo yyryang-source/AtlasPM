@@ -174,6 +174,39 @@ at least 253 benchmark closes before the first labels and enough complete
 decision cohorts for both fitting periods. Report results for a genuinely
 unseen test period and document any earlier research on those dates.
 
+## Compare Quant weighting with the same equal-weight picks
+
+Pass `--quant` to simulate an additional portfolio using the exact same picks
+and dates as the ranked equal-weight strategy. The optimizer estimates a
+trailing covariance matrix through the decision close, with 25% shrinkage
+toward its diagonal. At the next close, it uses current holdings and execution
+prices to size orders. The decision-time ranks and covariance stay fixed.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[portfolio]"
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\stock_prices.csv --benchmark-prices local_data\benchmark.csv --start 2016-01-01 --end 2020-12-31 --top 2 --quant --quant-max-weight 0.55 --quant-turnover-limit 1.25 --output local_data\stock_quant_comparison.json
+```
+
+The objective balances covariance risk, a preference for invested capital
+scaled by 0.20 per year, the factor-score tilt, and the fee and slippage on the
+trade. The exposure preference and score tilt are modeling coefficients.
+The long-only optimization can hold cash. The stock cap and optional sector
+cap use post-cost liquid equity. Set `--quant-sector-cap` with
+`--fundamentals` to use sectors known at each decision. Turnover is the sum of
+absolute buy and sell notionals divided by pre-trade liquid equity, so a full
+rotation can approach 2. Both the Quant and equal-weight portfolios apply the
+same cost rate to executed notionals in this mode.
+
+If required exits or a concentration limit conflict with the turnover cap,
+the Quant sleeve skips the rebalance and records the reason. Retained weights
+can be above a cap after price drift. Insufficient exact-session covariance
+history also produces a skip. Review `quant.executions` for the decisions,
+binding limits, before/after weights, turnover, cash, and cost. Compare
+`quant.portfolio` with `portfolio`, the equal-weight result for the same picks.
+The approach follows the single-period formulation described by
+[Boyd et al.](https://web.stanford.edu/~boyd/papers/cvx_portfolio.html) and the
+[Cvxportfolio constraint model](https://www.cvxportfolio.com/en/stable/constraints.html).
+
 ## Matched-cost full-universe comparison (new)
 
 Each completed decision close also constructs a **separate** 1× equal-weight

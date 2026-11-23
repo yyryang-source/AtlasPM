@@ -8,6 +8,7 @@ Membership can come from dated snapshots supplied by the caller.
 from __future__ import annotations
 
 from bisect import bisect_left
+from dataclasses import asdict
 from datetime import date
 from math import isfinite, sqrt
 from pathlib import Path
@@ -15,6 +16,9 @@ from statistics import fmean, stdev
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
+from atlaspm.quant.stock_allocation import (
+    StockAllocationSettings, optimize_stock_allocation, prepare_stock_allocation,
+)
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS, HistoricalUniverse
 from atlaspm.selection.stock_backtest_portfolio import StockBacktestPortfolio
 from atlaspm.selection.stock_delistings import load_stock_delistings
@@ -127,6 +131,7 @@ def backtest_stock_screener(
     max_fundamental_age_days: int = 200,
     minimum_market_cap_usd: float = 0.0,
     max_per_sector: int | None = None,
+    quant_settings: StockAllocationSettings | None = None,
 ) -> dict[str, Any]:
     """Equal-weight long-only, all-cash if no qualified names.
 
@@ -141,6 +146,8 @@ def backtest_stock_screener(
     if not (isfinite(max_volatility) and 0 < max_volatility <= 10
             and isfinite(max_drawdown) and 0 < max_drawdown <= 1):
         raise ValueError("Invalid volatility or drawdown cap")
+    if quant_settings is not None and quant_settings.sector_cap is not None and fundamentals_path is None:
+        raise ValueError("Quant sector cap requires publication-dated fundamentals with sector data")
     ticker = benchmark_symbol.strip().upper()
     price_history = load_adjusted_prices(prices_path)
     price_history.pop(ticker, None)
@@ -167,6 +174,8 @@ def backtest_stock_screener(
 
     strategy_account = StockBacktestPortfolio()
     universe_account = StockBacktestPortfolio(baseline=True)
+    quant_account = StockBacktestPortfolio() if quant_settings is not None else None
+    quant_executions: list[dict[str, Any]] = []
     universe_executions: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
     costs_per_dollar = (fee_bps + slippage_bps) / 10_000.0
@@ -179,11 +188,14 @@ def backtest_stock_screener(
         observed = dates[i]
         strategy_account.mark(observed, price_history, delistings)
         universe_account.mark(observed, price_history, delistings)
+        if quant_account is not None:
+            quant_account.mark(observed, price_history, delistings)
 
         if pending is not None and pending["execution_index"] == i:
             chosen = pending["selected"]
             turnover, fee, unfilled = strategy_account.rebalance(
                 chosen, observed, price_history, delistings, costs_per_dollar,
+                exact_costs=quant_account is not None,
             )
             orders.append({
                 "decision_date": pending["decision_date"],
@@ -196,6 +208,7 @@ def backtest_stock_screener(
             })
             universe_turnover, universe_fee, universe_unfilled = universe_account.rebalance(
                 pending["universe_selected"], observed, price_history, delistings, costs_per_dollar,
+                exact_costs=quant_account is not None,
             )
             universe_executions.append({
                 "decision_date": pending["decision_date"],
@@ -206,6 +219,48 @@ def backtest_stock_screener(
                 "estimated_transaction_cost_index": universe_fee,
                 "equity_after_cost": universe_account.equity,
             })
+            if quant_account is not None and quant_settings is not None:
+                quant_turnover = quant_fee = liquid_turnover = 0.0
+                quant_unfilled = []
+                quant_status = "INSUFFICIENT_COVARIANCE_HISTORY"
+                signal = pending["quant_signal"]
+                before_equity = quant_account.equity
+                before_liquid = quant_account.liquid_equity
+                before_weights = quant_account.liquid_weights
+                binding = []
+                if before_liquid == 0:
+                    quant_status = "NO_LIQUID_EQUITY"
+                elif signal is not None:
+                    available, quant_unfilled = quant_account.executable_symbols(
+                        chosen, observed, price_history, delistings,
+                    )
+                    notionals, quant_status = optimize_stock_allocation(
+                        signal, before_weights, set(available), quant_settings,
+                        cost_rate=costs_per_dollar, holding_sessions=rebalance_days,
+                    )
+                    if notionals is not None:
+                        quant_turnover, quant_fee = quant_account.execute_notionals(notionals, costs_per_dollar)
+                        liquid_turnover = quant_turnover * (before_equity / before_liquid)
+                        after = quant_account.liquid_weights
+                        if any(abs(weight - quant_settings.max_weight) <= 1e-7 for weight in after.values()):
+                            binding.append("SINGLE_STOCK_CAP")
+                        if quant_settings.sector_cap is not None:
+                            sector_weights: dict[str | None, float] = {}
+                            for symbol, sector in zip(signal.symbols, signal.sectors):
+                                sector_weights[sector] = sector_weights.get(sector, 0.0) + after.get(symbol, 0.0)
+                            if any(abs(weight - quant_settings.sector_cap) <= 1e-7 for weight in sector_weights.values()):
+                                binding.append("SECTOR_CAP")
+                        if abs(liquid_turnover - quant_settings.turnover_limit) <= 1e-7:
+                            binding.append("TURNOVER_LIMIT")
+                quant_executions.append({
+                    "decision_date": pending["decision_date"], "execution_date": observed.isoformat(),
+                    "selected": list(chosen), "unfilled_due_to_delisting": quant_unfilled,
+                    "status": quant_status, "binding_constraints": binding,
+                    "pre_trade_liquid_weights": before_weights, "post_trade_liquid_weights": quant_account.liquid_weights,
+                    "liquid_equity_before": before_liquid, "liquid_equity_after": quant_account.liquid_equity,
+                    "cash_after": quant_account.cash, "cost_index": quant_fee,
+                    "turnover_over_liquid_equity": liquid_turnover, "turnover_over_total_equity": quant_turnover,
+                })
             pending = None
 
         if i in decision_indices and i + 1 <= last_index:
@@ -258,9 +313,16 @@ def backtest_stock_screener(
                 "selected": chosen,
                 "universe_selected": universe_chosen,
             }
+            if quant_settings is not None:
+                lookback = dates[max(0, i - quant_settings.lookback_sessions):i + 1]
+                pending["quant_signal"] = prepare_stock_allocation(
+                    screen["selected"], price_history, lookback, quant_settings,
+                )
 
         strategy_account.settle_delistings(observed)
         universe_account.settle_delistings(observed)
+        if quant_account is not None:
+            quant_account.settle_delistings(observed)
         equity = strategy_account.equity
         universe_equity = universe_account.equity
         curve.append({
@@ -275,12 +337,22 @@ def backtest_stock_screener(
             "cash_weight": strategy_account.cash / equity if equity else 0.0,
             "delisting_receivable_index": strategy_account.receivable_value,
         })
+        if quant_account is not None:
+            curve[-1]["quant_equity_index"] = quant_account.equity
 
     portfolio = _performance(curve, "equity_index")
     benchmark = _performance(curve, "spy_index")
     universe_benchmark = _performance(curve, "universe_index")
     ranking_mode = "technical_only" if fundamental_history is None else "fundamental_plus_technical"
+    quant_result = {}
+    if quant_account is not None and quant_settings is not None:
+        quant_result["quant"] = {
+            "parameters": asdict(quant_settings), "portfolio": _performance(curve, "quant_equity_index"),
+            "sum_turnover_ratios": quant_account.turnover, "total_cost_index": quant_account.cost,
+            "executions": quant_executions, "delisting_settlements": quant_account.settlements,
+        }
     return {
+        **quant_result,
         "method": "offline_stock_factor_walkforward_next_close_v1",
         "requested_window": {"start": start, "end": end},
         "actual_window": {"start": curve[0]["date"], "end": curve[-1]["date"]},

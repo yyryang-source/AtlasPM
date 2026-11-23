@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from atlaspm.optimizer import inverse_volatility_weights
+from atlaspm.quant.stock_allocation import StockAllocationSettings
 from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
@@ -667,6 +668,15 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Minimum market_cap_usd; requires --fundamentals")
     stock_backtest.add_argument("--max-per-sector", type=int,
                                 help="Max picks per sector; requires --fundamentals")
+    quant_defaults = StockAllocationSettings()
+    stock_backtest.add_argument("--quant", action="store_true",
+                                help="Compare Quant weights with the same picks at equal weights")
+    stock_backtest.add_argument("--quant-lookback-sessions", type=int, default=quant_defaults.lookback_sessions)
+    stock_backtest.add_argument("--quant-max-weight", type=float, default=quant_defaults.max_weight)
+    stock_backtest.add_argument("--quant-sector-cap", type=float)
+    stock_backtest.add_argument("--quant-turnover-limit", type=float, default=quant_defaults.turnover_limit)
+    stock_backtest.add_argument("--quant-risk-aversion", type=float, default=quant_defaults.risk_aversion)
+    stock_backtest.add_argument("--quant-rank-tilt", type=float, default=quant_defaults.rank_tilt)
     stock_backtest.add_argument(
         "--output", type=Path,
         default=Path("local_data/stock_walkforward_2000_2026.json"),
@@ -1196,6 +1206,11 @@ def main(argv: list[str] | None = None) -> int:
                 sources.add(args.delistings.expanduser().resolve())
             if destination in sources:
                 raise ValueError("Stock backtest cannot overwrite its inputs")
+            quant_settings = StockAllocationSettings(
+                lookback_sessions=args.quant_lookback_sessions, max_weight=args.quant_max_weight,
+                sector_cap=args.quant_sector_cap, turnover_limit=args.quant_turnover_limit,
+                risk_aversion=args.quant_risk_aversion, rank_tilt=args.quant_rank_tilt,
+            ) if args.quant else None
             result = backtest_stock_screener(
                 args.prices, args.benchmark_prices,
                 start=args.start, end=args.end,
@@ -1212,6 +1227,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_fundamental_age_days=args.max_fundamental_age_days,
                 minimum_market_cap_usd=args.min_market_cap,
                 max_per_sector=args.max_per_sector,
+                quant_settings=quant_settings,
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(
@@ -1238,6 +1254,11 @@ def main(argv: list[str] | None = None) -> int:
                 "live_execution_enabled": False,
                 "data_caution": "Historical universe coverage and price vintages are unverified.",
             }
+            if "quant" in result:
+                report["quant"] = {
+                    key: result["quant"][key] for key in ("portfolio", "sum_turnover_ratios", "total_cost_index")
+                }
+                report["selected_equal_weight_execution_summary"] = result["execution_summary"]
         elif args.command == "stock-screen":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":

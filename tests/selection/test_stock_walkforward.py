@@ -10,9 +10,11 @@ import os
 import tempfile
 import unittest
 from datetime import date, timedelta
+from importlib.util import find_spec
 from pathlib import Path
 
 from atlaspm.selection.stock_history_audit import audit_stock_history
+from atlaspm.quant.stock_allocation import StockAllocationSettings
 from atlaspm.stock_walkforward import backtest_stock_screener
 
 
@@ -72,6 +74,37 @@ class StockWalkforwardTest(unittest.TestCase):
                 ["symbol", "last_trade_date", "cash_date", "return_from_last_close"],
                 ["A", last_trade, cash_date, terminal_return],
             ])
+
+    @unittest.skipUnless(find_spec("scipy"), "Optional portfolio dependency")
+    def test_quant_same_picks_and_reconciled_costs_under_sector_and_turnover_limits(self):
+        self._write_fundamentals(later_snapshots=True)
+        settings = StockAllocationSettings(max_weight=.50, sector_cap=.65, turnover_limit=.45)
+        result = self._run(quant_settings=settings, fundamentals_path=self.fundamentals)
+        quant = result["quant"]
+        self.assertEqual(quant["portfolio"]["return_observations"], result["portfolio"]["return_observations"])
+        self.assertTrue(quant["executions"])
+        self.assertIn("TURNOVER_LIMIT", quant["executions"][0]["binding_constraints"])
+        executed = 0
+        for reference, trade in zip(result["executions"], quant["executions"], strict=True):
+            self.assertEqual(reference["selected"], trade["selected"])
+            self.assertEqual(reference["execution_date"], trade["execution_date"])
+            if trade["status"] != "OPTIMIZED":
+                self.assertEqual(trade["cost_index"], 0)
+                self.assertEqual(trade["post_trade_liquid_weights"], trade["pre_trade_liquid_weights"])
+                continue
+            executed += 1
+            weights = trade["post_trade_liquid_weights"]
+            self.assertTrue(set(weights) <= set(reference["selected"]))
+            self.assertLessEqual(max(weights.values(), default=0), .50000001)
+            self.assertLessEqual(weights.get("A", 0) + weights.get("B", 0), .65000001)
+            self.assertLessEqual(trade["turnover_over_liquid_equity"], .45000001)
+            before = trade["liquid_equity_before"]
+            after = trade["liquid_equity_after"]
+            self.assertAlmostEqual(before - after, trade["cost_index"])
+            self.assertAlmostEqual(after * (1 - sum(weights.values())), trade["cash_after"])
+            turnover_cost = trade["turnover_over_liquid_equity"] * before * .001
+            self.assertAlmostEqual(turnover_cost, trade["cost_index"])
+        self.assertGreater(executed, 1)
 
     def test_delisting_proceeds_are_unavailable_until_booked_and_can_be_zero(self):
         last_trade, cash_date = self.dates[270], self.dates[287]

@@ -24,6 +24,7 @@ market = ["yfinance>=1.8.0,<2.0"]
 calendar = ["pandas_market_calendars>=4.6,<6.0"]
 ml = ["lightgbm>=4.5.0,<5.0"]
 native = ["numpy>=2.0,<3.0"]
+portfolio = ["scipy>=1.15,<2.0"]
 
 [project.scripts]
 atlaspm = "atlaspm.cli:main"
