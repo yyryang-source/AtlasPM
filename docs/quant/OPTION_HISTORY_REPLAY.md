@@ -44,4 +44,10 @@
 
 ## 样本验收
 
-用 LEAN 的 2023 年 8 月 3 日 SPY 分钟数据导入了同一张 430 行权价看跌期权的 405 条报价。按固定时间模拟买入一张，权利金 227 美元，随后模拟卖出收入 215 美元。两次手续费各 1 美元，卖出款于计划里的下一交易日转为可用现金，现金从 1,000 美元变为 986 美元，持股始终是 100 股。数据版本及文件哈希在本地 `local_data/lean_spy_option_20230803/manifest.json`。这笔交易发生在到期前，同一日期的报价用于验收导入、成交和现金对账。到期和交割由合成测试验收，多日保护策略待真实历史链回测。[样本 ZIP](https://github.com/QuantConnect/Lean/blob/32a302a9a0fde64c0435798c0c4cb2c2309873ed/Data/option/usa/minute/spy/20230803_quote_american.zip)
+用 LEAN 的 2023 年 8 月 3 日 SPY 分钟数据导入了同一张 430 行权价看跌期权的 405 条报价。按固定时间模拟买入一张，权利金 227 美元，随后模拟卖出收入 215 美元。两次手续费各 1 美元，卖出款于计划里的下一交易日转为可用现金，现金从 1,000 美元变为 986 美元，持股始终是 100 股。数据版本及文件哈希在本地 `local_data/lean_spy_option_20230803/manifest.json`。单日样本用于验收导入、成交和现金对账。多日组合结果见[保护性看跌期权回测](PROTECTIVE_PUT_BACKTEST.md)。[样本 ZIP](https://github.com/QuantConnect/Lean/blob/32a302a9a0fde64c0435798c0c4cb2c2309873ed/Data/option/usa/minute/spy/20230803_quote_american.zip)
+
+## 真实 SPXW 到期参考值验收
+
+使用 HistoricalData.net 的 2022 年 9 月 15 日日终报价，模拟以 18.30 点买入一张行权价为 3,900 点的 `SPXW220916P03900000`。SPXW 为欧式现金结算，下午到期系列根据成分股收盘价格计算参考值。S&P Dow Jones Indices 经 FRED 发布的 2022 年 9 月 16 日收盘值为 3,873.33 点，与历史样本当日标的收盘一致。[HistoricalData.net 期权样本](https://historicaldata.net/options.html) · [Cboe SPXW 合约条款](https://www.cboe.com/tradable-products/sp-500/spx-options/spx-specifications/) · [S&P 500 官方收盘序列](https://fred.stlouisfed.org/series/SP500)
+
+权利金为 1,830 美元，模拟手续费为 1 美元。按 `(3,900 - 3,873.33) × 100` 算得应收行权款 2,667 美元。到期后，在参考值可用前，应收仍为零。参考值可用后记入应收，下一个营业日变为可用资金。初始现金 10,000 美元，最终现金 10,836 美元。实际输入使用日终报价和官方收盘，报价快照、参考值可用和入账的日内具体时间为回放设定。来源、输入哈希和报告存于本地 `local_data/spxw_expiry_20220916/`。[OCC 现金结算规则](https://www.theocc.com/clearance-and-settlement/clearing/index-options)

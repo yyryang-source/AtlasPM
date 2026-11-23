@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,8 @@ from atlaspm.quant.stock_allocation import StockAllocationSettings
 from atlaspm.quant.option_history import OptionHistory
 from atlaspm.quant.option_replay import replay_long_options
 from atlaspm.quant.protective_put import ProtectivePutSettings, compare_protective_put, load_stock_marks
+from atlaspm.quant.treasury_history import TreasuryHistory
+from atlaspm.quant.treasury_replay import replay_treasury_holding
 from atlaspm.quant.lean_option_quotes import import_lean_option_quotes
 from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
@@ -767,6 +770,17 @@ def build_parser() -> argparse.ArgumentParser:
     protective_put.add_argument("--eod-snapshot", action="store_true", help="Input quote times represent modeled EOD snapshots")
     protective_put.add_argument("--output", type=Path, default=Path("local_data/protective_put_backtest.json"))
 
+    treasury = sub.add_parser("treasury-replay", help="Mark a settled Treasury holding and replay its cash flows")
+    for option in ("contracts", "payments", "quotes"):
+        treasury.add_argument(f"--{option}", type=Path, required=True)
+    treasury.add_argument("--cusip", required=True)
+    treasury.add_argument("--face-usd", type=int, required=True)
+    treasury.add_argument("--dates", nargs="+", type=date.fromisoformat, required=True)
+    treasury.add_argument("--cash-usd", type=float, default=0)
+    treasury.add_argument("--max-quote-age-days", type=int, default=3)
+    treasury.add_argument("--shock-bps", type=float, default=100)
+    treasury.add_argument("--output", type=Path, default=Path("local_data/treasury_replay.json"))
+
     return parser
 
 
@@ -780,6 +794,21 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("LEAN quote import requires a new private .csv output")
             report = import_lean_option_quotes(args.archives, args.contracts, destination)
             report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "treasury-replay":
+            destination = require_private_output(args.output)
+            sources = {path.expanduser().resolve() for path in (args.contracts, args.payments, args.quotes)}
+            if destination.suffix.lower() != ".json" or destination in sources:
+                raise ValueError("Treasury replay requires a private .json output distinct from inputs")
+            history = TreasuryHistory(args.contracts, args.payments, args.quotes)
+            result = replay_treasury_holding(history, args.cusip.strip().upper(), args.face_usd, args.dates,
+                                             initial_cash_usd=args.cash_usd, max_quote_age_days=args.max_quote_age_days,
+                                             shock_bps=args.shock_bps)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+            last_mark = result["valuations"][-1]
+            report = {"written": destination.relative_to(Path.cwd().resolve()).as_posix(),
+                      "ending_nav_usd": last_mark["nav_usd"], "coupon_paid_usd": last_mark["coupon_paid_to_date_usd"],
+                      "principal_paid_usd": last_mark["principal_paid_to_date_usd"], "live_execution_enabled": False}
         elif args.command == "protective-put-backtest":
             destination = require_private_output(args.output)
             sources = {path.expanduser().resolve() for path in (
