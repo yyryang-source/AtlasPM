@@ -182,7 +182,9 @@ fake market prices should be used for actual comparisons.
 Daily close differences above 1% and RTH-only vs reference daily
 volume differences above 25% are flagged. Incomplete first/last
 5-minute time buckets are omitted from comparisons and explicitly
-counted, not silently filled. The report is written to
+counted, not silently filled. Daily volume is only compared when the
+entire session has all expected five-minute slots with five original
+minute records each; missing middle bars suppress volume comparisons. The report is written to
 local_data/stock_5m/huggingface/quality/reconciliations/2026-03.json.
 
 WARNING: Yahoo Close may be split-adjusted, while the HF minute
