@@ -32,3 +32,18 @@ jobs:
 
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
+
+  bulk-planner:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify historical bulk PowerShell plan without network
+        shell: pwsh
+        run: |
+          $plan = & .\scripts\data\Invoke-HFAllMarketBackfill.ps1 -DryRun | ConvertFrom-Json
+          if ($plan.months_selected -ne 315) { throw "Expected 315 available source months" }
+          if ($plan.effective_end_month -ne "2026-03") { throw "Unexpected available archive end" }
+          if ($plan.unavailable_requested_months.Count -ne 8) { throw "Missing 2026-04..11 gap" }
+          if ($plan.network_downloads -ne 0) { throw "Dry-run must not download" }
+          Write-Host "Offline all-market history planner verified"
