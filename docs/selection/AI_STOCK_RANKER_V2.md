@@ -180,3 +180,21 @@ duplicate and bad-price rejection. No real brokerage permissions change.
 Do not interpret this as resolving 5,000-stock survivorship bias,
 corporate-action audit gaps, the previously negative V2 test IC, or
 missing true future out-of-sample validation.
+
+
+## Low-memory monthly inference (November 2026)
+
+The current **V1/V2 ranking inference** path now uses a separate rolling
+253-close-per-symbol reader. It still validates the entire CSV (including
+future-dated values), but **only completed prices at or before the decision
+date** enter the candidate feature window. The nine feature definitions,
+score ties and rank gate are unchanged. Full training history remains
+available through `load_stock_price_arrays` (introduced in PR #38), and
+training/cohort labels are unchanged.
+
+For ticker-major and date-major inputs whose timestamps are chronological
+*within each ticker*, peak retained quote history is bounded by 253 closes
+per symbol. Shuffled ticker dates safely fall back to the full sorted-array
+reader so no arbitrary price order or nonadjacent duplicates are overlooked.
+This is a memory optimization for monthly inference, not evidence of better
+prediction or tradability. Raw files are not modified.

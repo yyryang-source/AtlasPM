@@ -87,6 +87,9 @@ def audit_current_us_stock_prices(
     if len(sessions) < recent_sessions:
         raise ValueError("Insufficient NYSE calendar lookback for recent-sessions")
     trailing = set(sessions[-recent_sessions:])
+    # Fixed for the decision date: do not re-scan this session set millions
+    # of times while parsing unrelated historical quote rows.
+    trailing_start = sessions[-recent_sessions]
 
     manifest = read_market_universe(universe_path)
     catalog = {row["provider_symbol"].strip().upper(): row for row in manifest}
@@ -176,7 +179,7 @@ def audit_current_us_stock_prices(
                 recent_rows[symbol] += 1
                 if day == decision:
                     last_onsession[symbol] = day
-            elif day >= min(trailing):
+            elif day >= trailing_start:
                 off_calendar_recent_rows += 1
             if day == decision:
                 last_onsession[symbol] = day

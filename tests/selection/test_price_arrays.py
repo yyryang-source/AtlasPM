@@ -10,7 +10,7 @@ import unittest
 
 from atlaspm.historical import load_adjusted_prices
 from atlaspm.selection.ai_stock_ranker import _history_arrays, create_training_rows
-from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.selection.price_arrays import load_stock_price_arrays, load_recent_stock_price_arrays
 
 
 class StockPriceArrayTests(unittest.TestCase):
@@ -78,6 +78,77 @@ class StockPriceArrayTests(unittest.TestCase):
                 self.write(rows)
                 with self.assertRaises(ValueError):
                     load_stock_price_arrays(self.path)
+
+    def test_bounded_recent_history_matches_full_arrays_across_input_orders(self):
+        days = []
+        cursor = date(2024, 1, 2)
+        while len(days) < 290:
+            if cursor.weekday() < 5:
+                days.append(cursor)
+            cursor += timedelta(days=1)
+        cutoff = days[269]
+        rows = []
+        for i, day in enumerate(days):
+            for j, symbol in enumerate(("AAPL", "AMD", "NVDA")):
+                rows.append((day.isoformat(), symbol, 100 + i * (j + 1) * 0.2))
+        # Future-only symbol is still counted in the original source universe,
+        # but has no features at the current decision close.
+        rows.append((days[-1].isoformat(), "NEW", 100))
+        for ordering in ("date_major", "ticker_major", "shuffled"):
+            with self.subTest(ordering=ordering):
+                if ordering == "ticker_major":
+                    candidate = sorted(rows, key=lambda r: (r[1], r[0]))
+                elif ordering == "shuffled":
+                    candidate = rows[::2] + rows[1::2]
+                else:
+                    candidate = rows
+                self.write(candidate)
+                full = load_stock_price_arrays(self.path)
+                recent = load_recent_stock_price_arrays(self.path, as_of=cutoff)
+                expected = {
+                    symbol: (
+                        [d for d in ds if d <= cutoff][-253:],
+                        [px for d, px in zip(ds, prices) if d <= cutoff][-253:],
+                    )
+                    for symbol, (ds, prices) in full.items()
+                }
+                self.assertEqual(recent, expected)
+                self.assertEqual(recent["AAPL"][0][-1], cutoff)
+                self.assertEqual(len(recent["AAPL"][0]), 253)
+                self.assertEqual(recent["NEW"], ([], []))
+
+    def test_bounded_recent_history_ignores_future_values_but_validates_them(self):
+        self.write([
+            ("2026-01-02", "AAPL", 100),
+            ("2026-01-05", "AAPL", 110),
+            ("2026-01-06", "AAPL", 120),
+        ])
+        cutoff = date(2026, 1, 5)
+        original = load_recent_stock_price_arrays(self.path, as_of=cutoff)
+        self.write([
+            ("2026-01-02", "AAPL", 100),
+            ("2026-01-05", "AAPL", 110),
+            ("2026-01-06", "AAPL", 999999),
+        ])
+        updated = load_recent_stock_price_arrays(self.path, as_of=cutoff)
+        self.assertEqual(original, updated)
+        self.write([
+            ("2026-01-02", "AAPL", 100),
+            ("2026-01-05", "AAPL", 110),
+            ("2026-01-06", "AAPL", float("inf")),
+        ])
+        with self.assertRaisesRegex(ValueError, "Invalid symbol or adjusted_close"):
+            load_recent_stock_price_arrays(self.path, as_of=cutoff)
+
+    def test_bounded_recent_history_rejects_nonadjacent_duplicate(self):
+        self.write([
+            ("2026-01-02", "AMD", 50),
+            ("2026-01-05", "AMD", 60),
+            ("2026-01-03", "NVDA", 100),
+            ("2026-01-02", "AMD", 70),
+        ])
+        with self.assertRaisesRegex(ValueError, "Duplicate price for AMD"):
+            load_recent_stock_price_arrays(self.path, as_of=date(2026, 1, 5))
 
     def test_training_labels_match_reference_rows(self):
         # Reference path is deliberately independent of the new CSV loader.

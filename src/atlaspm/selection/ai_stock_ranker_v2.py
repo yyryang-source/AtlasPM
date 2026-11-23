@@ -19,7 +19,7 @@ from statistics import fmean
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
-from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.selection.price_arrays import load_recent_stock_price_arrays
 from atlaspm.ai_stock_ranker import (
     FEATURE_NAMES, _RISK_DISCLOSURES, _candidate_rows,
     _load_lightgbm, _matrix, _midrank, chronological_splits,
@@ -394,7 +394,7 @@ def rank_stocks_v2(
     dates = sorted(d for d in benchmark if d <= cutoff)
     if not dates or dates[-1] != cutoff:
         raise ValueError("as-of must have a completed benchmark trading close")
-    histories = load_stock_price_arrays(prices_path)
+    histories = load_recent_stock_price_arrays(prices_path, as_of=cutoff)
     histories.pop(metadata["benchmark_symbol"], None)
     candidates = _candidate_rows(
         histories, dates, benchmark, len(dates) - 1, horizon=None

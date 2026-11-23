@@ -143,6 +143,22 @@ class USMarketQualityTest(unittest.TestCase):
         self.assertEqual(result["market_data_status"], "REVIEW_REQUIRED")
         self.assertIn("UNKNOWN", result["out_of_manifest_symbols_sample"])
 
+    def test_recent_weekend_quote_is_still_flagged(self):
+        # A weekend bar inside the last 21 sessions must remain a QC failure.
+        with self.prices.open("r", encoding="utf-8", newline="") as handle:
+            raw = list(csv.reader(handle))
+        anchor = next(
+            i for i, row in enumerate(raw)
+            if row[:2] == ["2026-10-23", "AAPL"]
+        )
+        raw.insert(anchor + 1, ["2026-10-24", "AAPL", "135"])
+        with self.prices.open("w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerows(raw)
+        audit = self.audit()
+        self.assertEqual(audit["off_nyse_calendar_recent_quote_rows"], 1)
+        self.assertEqual(audit["duplicate_or_out_of_order_quote_rows"], 0)
+        self.assertEqual(audit["market_data_status"], "REVIEW_REQUIRED")
+
     def test_future_records_never_qualify_as_decision_date_history(self):
         self.write_prices(skip_last={"AMD"}, future=True)
         result = self.audit()
