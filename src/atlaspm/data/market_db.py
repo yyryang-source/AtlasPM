@@ -265,6 +265,23 @@ def register_parser(sub):
     actions = p.add_subparsers(dest='db_action',required=True)
     actions.add_parser('init')
     actions.add_parser('status')
+    t = actions.add_parser('fetch-treasury', help='Download official US Treasury auction CSV pages')
+    t.add_argument('--max-pages', type=int, default=0, help='0=all pages, otherwise limit download')
+    t.add_argument('--refresh', action='store_true')
+    t = actions.add_parser('fetch-option-contracts', help='Download Massive options contract reference CSV')
+    t.add_argument('--underlyings', nargs='+', required=True)
+    t.add_argument('--as-of', required=True)
+    t.add_argument('--expiry', default=None)
+    t.add_argument('--max-contracts', type=int, default=20)
+    t.add_argument('--rpm', type=int, default=5)
+    t = actions.add_parser('fetch-option-bars', help='Download selected contract daily/5m/1m aggregates')
+    t.add_argument('--contracts', type=Path, default=Path('local_data/options/massive/selected_contracts.csv'))
+    t.add_argument('--start', required=True)
+    t.add_argument('--end', required=True)
+    t.add_argument('--timeframes', nargs='+', default=['1d','5m'])
+    t.add_argument('--max-contracts', type=int, default=10)
+    t.add_argument('--rpm', type=int, default=5)
+    t.add_argument('--refresh', action='store_true')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -274,6 +291,16 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action.startswith('fetch-'):
+        from atlaspm.data import market_fetch
+        if args.db_action == 'fetch-treasury':
+            return market_fetch.treasury(max_pages=args.max_pages, refresh=args.refresh)
+        if args.db_action == 'fetch-option-contracts':
+            return market_fetch.contracts(underlyings=args.underlyings,as_of=args.as_of,
+                                          expiry=args.expiry,max_contracts=args.max_contracts,rpm=args.rpm)
+        return market_fetch.bars(contracts_file=args.contracts,start=args.start,end=args.end,
+                                 timeframes=args.timeframes,max_contracts=args.max_contracts,
+                                 rpm=args.rpm,refresh=args.refresh)
     cx = connect(args.db)
     try:
         if args.db_action == 'init':
