@@ -95,6 +95,7 @@ real-time execution and live broker permissions are not implemented.**
 - [Documentation index](docs/README.md)
 - [Stock selection and ranking](docs/selection/AI_STOCK_RANKER_V2.md)
 - [Market data coverage](docs/selection/US_MARKET_DATA_EXPANSION.md)
+- [Hugging Face 1m stocks to 5m local Parquet (rights & PowerShell)](docs/HF_STOCK5M.md)
 - [Split reconciliation](docs/selection/CORPORATE_ACTION_PRICE_RECONCILIATION.md)
 - [Research-only alpha eligibility](docs/selection/ALPHA_ELIGIBILITY_GATE.md)
 - [Native risk models](docs/quant/ATLAS_FUSIONNET_V1.md)
