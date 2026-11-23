@@ -187,17 +187,27 @@ def _sqlite_temp_csv(month: str, database: Path, output: Path) -> int:
         con.close()
 
 
+def _sqlite_month_fingerprint(database: Path, month: str) -> str:
+    """Hash actual month rows, not WAL checkpoint side effects or unrelated months."""
+    con = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    checksum = hashlib.sha256()
+    try:
+        rows = con.execute("""SELECT symbol,trade_date,adjusted_close,source
+            FROM equity_daily WHERE substr(trade_date,1,7)=?
+            ORDER BY symbol,trade_date""", (month,))
+        for row in rows:
+            checksum.update((json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8"))
+    finally:
+        con.close()
+    return checksum.hexdigest()
+
+
 def _materialize_daily(con, month: str, source: str, session: str,
                        sqlite_db: Path, refresh: bool) -> tuple[Path, dict[str, Any]]:
     dest = _path(month, source, session, "daily")
     source_path = _month_source(month, source, session, sqlite_db)
-    # SQLite in WAL mode may change without touching the main .sqlite3 file.
-    # Include its WAL sidecar in the cache key to avoid stale factor inputs.
-    fingerprint_inputs = [source_path]
-    wal = Path(str(source_path) + "-wal")
-    if source == "sqlite" and wal.is_file():
-        fingerprint_inputs.append(wal)
-    input_fp = _fingerprint(fingerprint_inputs)
+    input_fp = (_sqlite_month_fingerprint(source_path, month) if source == "sqlite"
+                else _fingerprint([source_path]))
     meta_path = dest.with_suffix(".json")
     meta = _read_meta(meta_path)
     if not refresh and dest.is_file() and meta and meta.get("input_fingerprint") == input_fp:
