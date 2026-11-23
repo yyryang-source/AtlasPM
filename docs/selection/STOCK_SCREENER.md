@@ -87,6 +87,40 @@ Run with licensed, manually prepared, publication-dated financial data:
 
 This command **does not fetch or infer fundamentals**.
 
+### Import a normalized annual filing feed
+
+`stock-import-fundamentals` joins verified annual financial statement inputs to
+point-in-time market capitalization. Prepare the filing inputs from annual
+reports or an as-published feed, preserving each original and amended filing
+as a separate row. Retain accession numbers or report URLs as `source_ref`.
+
+```csv
+symbol,sector,accepted_at,filed_date,period_start,period_end,prior_period_end,source_ref,revenue_usd,prior_revenue_usd,net_income_usd,equity_usd,prior_equity_usd,debt_usd,operating_cash_flow_usd,capex_usd,operating_income_usd,depreciation_amortization_usd,cash_usd
+```
+
+Supply amounts in USD without scaling. Use the same fiscal-year definitions
+for current and prior-year amounts. `accepted_at` includes a UTC offset. The
+first eligible close is the first supplied benchmark session after the New York
+acceptance date and on or after `filed_date`. This daily-close policy applies
+to intraday and after-hours filings alike. Provide the market capitalization
+on that exact session using `date,symbol,market_cap_usd,source_ref`. The
+benchmark CSV supplies the calendar, including holidays.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-import-fundamentals --filings local_data\annual_filings.csv --market-caps local_data\historical_market_caps.csv --benchmark-prices local_data\benchmark.csv --output local_data\published_fundamentals.csv
+```
+
+The import computes ROE using average equity, revenue growth using prior-year
+revenue, debt-to-equity using period-end equity, and FCF yield using operating
+cash flow less capex. It estimates EV as market cap plus debt less cash and
+EBITDA as operating income plus depreciation and amortization. Valuations are
+fixed to each emitted snapshot date. Missing exact-date valuations and input
+ratios outside the screener's accepted range appear in the import summary.
+Amendments to an older fiscal period leave newer fiscal periods in effect.
+The output preserves filing and valuation references. SEC documents the source
+fields in its [Financial Statement Data Sets guide](https://www.sec.gov/files/financial-statement-data-sets.pdf)
+and [EDGAR API guide](https://www.sec.gov/search-filings/edgar-application-programming-interfaces).
+
 ## Factor ranking methodology
 
 All factors are measured only on eligible snapshots **at or before the

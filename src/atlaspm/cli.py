@@ -42,6 +42,7 @@ from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
 from atlaspm.selection.stock_comparison import compare_stock_selection
+from atlaspm.selection.stock_fundamentals_import import import_stock_fundamentals
 from atlaspm.selection.stock_history_audit import audit_stock_history
 from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
@@ -688,6 +689,15 @@ def build_parser() -> argparse.ArgumentParser:
     comparison.add_argument("--min-train-rows", type=int, default=300)
     comparison.add_argument("--output", type=Path, default=Path("local_data/stock_comparison.json"))
 
+    fundamentals_import = sub.add_parser(
+        "stock-import-fundamentals", help="Convert annual filings and dated valuations to screener CSV",
+    )
+    fundamentals_import.add_argument("--filings", type=Path, required=True)
+    fundamentals_import.add_argument("--market-caps", type=Path, required=True)
+    fundamentals_import.add_argument("--benchmark-prices", type=Path, required=True)
+    fundamentals_import.add_argument("--benchmark-symbol", default="SPY")
+    fundamentals_import.add_argument("--output", type=Path, default=Path("local_data/published_fundamentals.csv"))
+
     stock = sub.add_parser(
         "stock-screen",
         help="Offline point-in-time-capped multi-factor stock ranking; no orders",
@@ -1132,6 +1142,17 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(details, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8",
             )
             report = {key: value for key, value in details.items() if key != "decisions"}
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "stock-import-fundamentals":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".csv":
+                raise ValueError("Fundamentals import requires a private .csv output")
+            if destination.exists():
+                raise ValueError("Fundamentals import needs a new output file")
+            report = import_stock_fundamentals(
+                args.filings, args.market_caps, args.benchmark_prices, destination,
+                benchmark_symbol=args.benchmark_symbol,
+            )
             report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
         elif args.command == "stock-compare":
             destination = require_private_output(args.output)

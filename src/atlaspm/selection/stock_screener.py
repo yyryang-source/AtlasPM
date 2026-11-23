@@ -18,7 +18,7 @@ from typing import Any
 from atlaspm.historical import load_adjusted_prices
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS, HistoricalUniverse
 
-_FUND_COLUMNS = (
+FUNDAMENTAL_COLUMNS = (
     "as_of_date", "symbol", "sector", "market_cap_usd", "roe",
     "revenue_growth_yoy", "debt_to_equity", "fcf_yield", "ev_to_ebitda",
 )
@@ -40,14 +40,25 @@ _LOWER_BETTER = {"annual_volatility", "debt_to_equity", "ev_to_ebitda"}
 FundamentalHistory = dict[str, list[dict[str, Any]]]
 
 
+def fundamental_value_issue(values: dict[str, float]) -> str | None:
+    if any(not isfinite(x) for x in values.values()):
+        return "Non-finite fundamentals"
+    if values["market_cap_usd"] <= 0 or values["debt_to_equity"] < 0 or values["ev_to_ebitda"] <= 0:
+        return "Invalid market cap, debt/equity or EV/EBITDA"
+    if not (-5 <= values["roe"] <= 5 and -1 <= values["revenue_growth_yoy"] <= 10
+            and -5 <= values["fcf_yield"] <= 5):
+        return "Check decimal ratio units"
+    return None
+
+
 def load_fundamental_history(path: Path, cutoff: date) -> FundamentalHistory:
     """Read publication-dated snapshots through the last decision date."""
     history: FundamentalHistory = {}
     seen: set[tuple[str, date]] = set()
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        if not reader.fieldnames or not set(_FUND_COLUMNS).issubset(reader.fieldnames):
-            raise ValueError("Fundamentals CSV needs: " + ",".join(_FUND_COLUMNS))
+        if not reader.fieldnames or not set(FUNDAMENTAL_COLUMNS).issubset(reader.fieldnames):
+            raise ValueError("Fundamentals CSV needs: " + ",".join(FUNDAMENTAL_COLUMNS))
         for number, record in enumerate(reader, 2):
             try:
                 symbol = record["symbol"].strip().upper()
@@ -64,19 +75,12 @@ def load_fundamental_history(path: Path, cutoff: date) -> FundamentalHistory:
             if observed > cutoff:
                 continue  # Future-publication snapshots must never influence historical ranks.
             try:
-                vals = {name: float(record[name]) for name in _FUND_COLUMNS[3:]}
+                vals = {name: float(record[name]) for name in FUNDAMENTAL_COLUMNS[3:]}
             except (ValueError, TypeError, KeyError) as exc:
                 raise ValueError(f"Invalid fundamentals numeric data at row {number}") from exc
-            if any(not isfinite(x) for x in vals.values()):
-                raise ValueError(f"Non-finite fundamentals at row {number}")
-            if (vals["market_cap_usd"] <= 0 or vals["debt_to_equity"] < 0
-                    or vals["ev_to_ebitda"] <= 0):
-                raise ValueError(f"Invalid market cap, debt/equity or EV/EBITDA at row {number}")
-            # Ratios must be decimals, e.g. 0.20 means 20%, not 20.
-            if (not -5 <= vals["roe"] <= 5
-                    or not -1 <= vals["revenue_growth_yoy"] <= 10
-                    or not -5 <= vals["fcf_yield"] <= 5):
-                raise ValueError(f"Check decimal ratio units at fundamentals row {number}")
+            issue = fundamental_value_issue(vals)
+            if issue is not None:
+                raise ValueError(f"{issue} at fundamentals row {number}")
             history.setdefault(symbol, []).append(
                 {"as_of_date": observed, "sector": sector, **vals}
             )
@@ -285,7 +289,7 @@ def screen_stocks_from_prices(
         }
         if source:
             row["market_cap_usd"] = source["market_cap_usd"]
-            factors.update({name: source[name] for name in _FUND_COLUMNS[4:]})
+            factors.update({name: source[name] for name in FUNDAMENTAL_COLUMNS[4:]})
         eligible.append(row)
     ranked = rank_factor_rows(eligible, use_fundamentals=use_fundamentals)
     picks: list[dict[str, Any]] = []
