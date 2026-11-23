@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import json
 import os
 import sys
 
@@ -17,6 +18,9 @@ EARLIEST_MONTH = "1992-01"
 LATEST_ADVERTISED_MONTH = "2026-03"  # snapshot; NOT a promise of present-day bars
 ROOT = Path("local_data/stock_5m/huggingface")
 FIVE_MINUTES_MS = 300_000
+MAX_AMBIGUOUS_FRACTION = 0.001  # 0.1% of month/session ticker-buckets
+MAX_AMBIGUOUS_BUCKETS = 10_000  # absolute fail-closed guard
+AMBIGUOUS = '(source_minute_bars > 5 OR source_minute_bars <> unique_source_minutes)'
 REQUIRED = {"timestamp", "ticker", "open", "high", "low", "close", "volume"}
 
 
@@ -65,6 +69,16 @@ def output_path(month: str, session: str = "rth") -> Path:
     year, mm = month.split("-")
     return private_path(ROOT / "parquet" / f"session={session}" /
                         f"year={year}" / f"month={mm}" / f"ohlcv_{month}.parquet")
+
+
+def quality_paths(out: Path) -> tuple[Path, Path]:
+    """Separate invalid metadata from queryable price partitions."""
+    base = private_path(ROOT / "parquet")
+    relative = private_path(out).relative_to(base)
+    quarantine = private_path(ROOT / "quality" / relative).with_name(
+        Path(out).stem + ".quarantine.parquet")
+    audit = quarantine.with_suffix(".json")
+    return quarantine, audit
 
 
 def _quote(path: Path) -> str:
@@ -140,6 +154,12 @@ def _check_raw(cx, raw: Path) -> int:
 
 
 def convert(raw: Path, out: Path, session: str = "rth") -> dict:
+    """Quarantine ambiguous 5m buckets; never choose arbitrary duplicate minutes.
+
+    Refuse the entire month if ambiguity exceeds a conservative ceiling.
+    All kept bars have 1..5 distinct minute timestamps; missing bars are
+    left missing and never filled or counted as reliable coverage.
+    """
     if session not in {"rth", "all"}:
         raise ValueError("session must be rth or all")
     raw = private_path(Path(raw), exists=True)
@@ -147,30 +167,97 @@ def convert(raw: Path, out: Path, session: str = "rth") -> dict:
     if not raw.is_file() or raw.stat().st_size < 100:
         raise ValueError(f"Missing or empty source Parquet: {raw}")
     out.parent.mkdir(parents=True, exist_ok=True)
+    stage = out.with_suffix(".parquet.aggregate.part")
     temp = out.with_suffix(".parquet.part")
-    temp.unlink(missing_ok=True)
+    quarantine, audit = quality_paths(out)
+    quarantine.parent.mkdir(parents=True, exist_ok=True)
+    qtemp = quarantine.with_suffix(".parquet.part")
+    atemp = audit.with_suffix(".json.part")
+    for candidate in (stage, temp, qtemp, atemp):
+        candidate.unlink(missing_ok=True)
     cx = _open_duckdb()
     try:
-        total = _check_raw(cx, raw)
-        cx.execute(f"COPY ({source_sql(raw,session)}) TO '{_quote(temp)}' "
+        source_rows = _check_raw(cx, raw)
+        # Stage the unfiltered aggregates once, avoiding a second full
+        # scan of the large source (and avoiding an all-month memory table).
+        cx.execute(f"COPY ({source_sql(raw,session)}) TO '{_quote(stage)}' "
                    "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)")
-        bars, duplicates, min_ts, max_ts = cx.execute(f"""
-            SELECT count(*),
-                   count(*) FILTER (WHERE source_minute_bars > 5 OR source_minute_bars <> unique_source_minutes),
-                   min(timestamp_ms), max(timestamp_ms)
+        candidate_bars, ambiguous_buckets = cx.execute(f"""
+            SELECT count(*), count(*) FILTER (WHERE {AMBIGUOUS})
+            FROM read_parquet('{_quote(stage)}')
+        """).fetchone()
+        candidate_bars, ambiguous_buckets = int(candidate_bars), int(ambiguous_buckets)
+        if not candidate_bars:
+            raise ValueError("5m QC failed: no session bars in source file")
+        ratio = ambiguous_buckets / candidate_bars
+        if (ambiguous_buckets > MAX_AMBIGUOUS_BUCKETS or
+                ratio > MAX_AMBIGUOUS_FRACTION):
+            raise ValueError(
+                f"5m QC failed: {candidate_bars} candidate bars, "
+                f"{ambiguous_buckets} ambiguous buckets ({ratio:.6%}); "
+                f"limit {MAX_AMBIGUOUS_FRACTION:.4%} or "
+                f"{MAX_AMBIGUOUS_BUCKETS} buckets. Raw file preserved."
+            )
+        good = f"NOT {AMBIGUOUS}"
+        cx.execute(f"""
+            COPY (
+              SELECT symbol,trade_date_et,timestamp_ms,open,high,low,close,
+                     volume_shares,transactions,source_minute_bars,unique_source_minutes
+              FROM read_parquet('{_quote(stage)}') WHERE {good}
+              ORDER BY symbol,timestamp_ms
+            ) TO '{_quote(temp)}'
+            (FORMAT PARQUET,COMPRESSION ZSTD,ROW_GROUP_SIZE 100000)
+        """)
+        bars, first_ts, last_ts = cx.execute(f"""
+            SELECT count(*),min(timestamp_ms),max(timestamp_ms)
             FROM read_parquet('{_quote(temp)}')
         """).fetchone()
-        if not bars or duplicates:
-            raise ValueError(f"5m QC failed: {bars} bars, {duplicates} duplicated-minute buckets")
+        if not bars or int(bars) != candidate_bars - ambiguous_buckets:
+            raise ValueError("5m QC failed: clean output count mismatch")
         if temp.stat().st_size < 100:
             raise ValueError("5m conversion produced a trivial/empty file")
-        os.replace(temp, out)
-        return {"source_rows": total, "bars_5m": int(bars),
-                "first_timestamp_ms": int(min_ts), "last_timestamp_ms": int(max_ts),
-                "output": str(out)}
+        if ambiguous_buckets:
+            # For reproducibility, preserve *only identifiers and counts*
+            # of excluded buckets; aggregated ambiguous OHLCV is not tradable.
+            cx.execute(f"""
+                COPY (
+                  SELECT symbol,trade_date_et,timestamp_ms,source_minute_bars,
+                         unique_source_minutes
+                  FROM read_parquet('{_quote(stage)}') WHERE {AMBIGUOUS}
+                  ORDER BY symbol,timestamp_ms
+                ) TO '{_quote(qtemp)}' (FORMAT PARQUET,COMPRESSION ZSTD)
+            """)
+        report = {
+            "source_rows": source_rows,
+            "candidate_bars_5m": candidate_bars,
+            "bars_5m": int(bars),
+            "excluded_ambiguous_5m_buckets": ambiguous_buckets,
+            "excluded_ambiguous_fraction": round(ratio, 9),
+            "max_allowed_ambiguous_fraction": MAX_AMBIGUOUS_FRACTION,
+            "first_timestamp_ms": int(first_ts),
+            "last_timestamp_ms": int(last_ts),
+            "quality_status": "REVIEW_REQUIRED" if ambiguous_buckets else "NO_DUPLICATE_BUCKETS_DETECTED",
+            "quarantine": str(quarantine) if ambiguous_buckets else None,
+            "output": str(out),
+            "raw_source_preserved": True,
+            "coverage_verified": False,
+            "research_only": True,
+            "live_execution_enabled": False,
+        }
+        with atemp.open("w",encoding="utf-8") as f:
+            json.dump(report,f,indent=2,sort_keys=True)
+        # Final files are only promoted after all QC and artifact writes pass.
+        if ambiguous_buckets:
+            os.replace(qtemp,quarantine)
+        else:
+            quarantine.unlink(missing_ok=True)
+        os.replace(temp,out)
+        os.replace(atemp,audit)
+        return report
     finally:
         cx.close()
-        temp.unlink(missing_ok=True)
+        for candidate in (stage,temp,qtemp,atemp):
+            candidate.unlink(missing_ok=True)
 
 
 def download(month: str, refresh: bool = False) -> Path:
@@ -229,10 +316,21 @@ def backfill(start_month: str, end_month: str, *, max_months: int = 1,
 def status() -> dict:
     base = private_path(ROOT / "parquet")
     files = sorted(base.glob("session=*/year=*/month=*/*.parquet"))
+    audits = sorted(private_path(ROOT / "quality").glob(
+        "session=*/year=*/month=*/*.quarantine.json"))
+    quarantined = 0
+    for file in audits:
+        try:
+            with file.open("r",encoding="utf-8") as stream:
+                quarantined += int(json.load(stream)["excluded_ambiguous_5m_buckets"])
+        except (ValueError,KeyError,TypeError, OSError) as exc:
+            raise ValueError(f"Invalid Hugging Face QC audit: {file}") from exc
     return {"provider":"Hugging Face", "repo_id": REPO_ID,
             "parquet_files":len(files),
             "parquet_gib":round(sum(p.stat().st_size for p in files)/1073741824,3),
             "first_file":files[0].name if files else None,
             "last_file":files[-1].name if files else None,
+            "quarantined_5m_buckets":quarantined,
+            "quality_status":"REVIEW_REQUIRED" if quarantined else "NOT_CERTIFIED",
             "coverage_verified":False,"data_rights_verified":False,
             "research_only":True,"live_execution_enabled":False}
