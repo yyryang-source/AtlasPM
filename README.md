@@ -25,19 +25,19 @@ src/atlaspm/
   cli.py            # public entry point (offline research)
   commands/         # quant_cli.py, selection_cli.py, broker_cli.py
   framework/        # 8-stage quant workflow registry (inspection only)
-  quant/            # existing allocation, backtests and risk research
-  selection/        # existing equity screeners and model research
-  data/            # placeholder: multi-asset market/reference data
-  research/        # placeholder: factor/model research and validation
+  data/            # stock quotes, history, universe and quality (migrated)
+  research/        # AI ranking, model validation and walk-forward (migrated)
   strategies/
-    equity/         # placeholder: equity sleeve
-    options/        # placeholder: options sleeve
-    bonds/          # placeholder: fixed-income sleeve
-  portfolio/        # placeholder: cross-asset construction/rebalancing
-  risk/             # placeholder: cross-cutting risk controls
-  hedging/          # placeholder: exposure-neutralizing overlays
-  execution/        # placeholder: future order/execution adapters
-  monitoring/       # placeholder: production monitoring/attribution
+    equity/         # stock screener, candidate gate, monthly strategy (migrated)
+    options/        # planned: options research (no implementation)
+    bonds/          # planned: bond research (no implementation)
+  risk/             # risk models, stress scenarios and margin controls (migrated)
+  execution/        # synthetic OMS, read-only IBKR and ledger (migrated)
+  monitoring/       # historical reports, audits and local dashboard (migrated)
+  portfolio/        # reserved: root portfolio.py legacy module takes precedence
+  hedging/          # planned: no hedge engine implementation
+  quant/            # core backtest/optimizer + compatible legacy import aliases
+  selection/        # compatible legacy import aliases
 tests/
   quant/            # quantitative/risk regression tests
   selection/        # research ranking/data-quality regression tests
@@ -48,9 +48,10 @@ docs/
 examples/           # synthetic inputs only
 ```
 
-**New directories are empty placeholders only** (tracked with `.gitkeep`).
-No new Python packages, implementations or trading permissions were introduced.
-See [framework directory map](docs/QUANT_WORKFLOW.md#directory-skeleton-only).
+**Source code is now reclassified by domain**, with old import paths retained
+as compatibility aliases. See [complete source map](docs/CODE_LAYOUT.md).
+This code organization does **not** implement portfolio/hedging/options/bonds
+engines or enable live broker execution.
 
 Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatibility with existing tests and external scripts. **New code should use `atlaspm.quant.*` and `atlaspm.selection.*`.**
 
@@ -86,6 +87,7 @@ real-time execution and live broker permissions are not implemented.**
 - [Architecture and safety boundaries](docs/ARCHITECTURE.md)
 - [Standard quantitative trading flowchart](docs/QUANT_WORKFLOW.md)
 - [Command interface and module layout](docs/CLI.md)
+- [Canonical source-code map](docs/CODE_LAYOUT.md)
 - [Documentation index](docs/README.md)
 - [Stock selection and ranking](docs/selection/AI_STOCK_RANKER_V2.md)
 - [Market data coverage](docs/selection/US_MARKET_DATA_EXPANSION.md)

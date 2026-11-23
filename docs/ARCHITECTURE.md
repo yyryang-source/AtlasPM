@@ -7,8 +7,18 @@ src/atlaspm/
   cli.py                 # public command interface, JSON/error handling
   commands/              # selection_cli.py, quant_cli.py, broker_cli.py (CLI adapters)
   framework/             # machine-readable eight-stage quant workflow (NO execution)
-  selection/             # actual US stock screening/ranking algorithms and quote QC
-  quant/                 # actual portfolio, risk, margin and synthetic OMS algorithms
+  data/                  # quote ingestion/universe, point-in-time and action audits
+  research/              # AI/ML studies, stock ranking and walk-forward evidence
+  strategies/equity/     # screening, consensus, candidate gates
+  risk/                  # margin risk, RiskNet/FusionNet and stress testing
+  execution/             # synthetic OMS, ledger and read-only IBKR
+  monitoring/            # offline performance, dashboard and audit
+  quant/                 # optimizer/backtests + compatibility aliases
+  selection/             # legacy compatibility aliases
+  strategies/options/    # planned: no implemented options strategy
+  strategies/bonds/      # planned: no implemented bond strategy
+  portfolio/             # reserved; root portfolio.py legacy module still exists
+  hedging/               # planned: no standalone hedge engine
   *.py                   # temporary compatibility aliases for original module imports
 scripts/selection/       # PowerShell runners
 tests/quant/             # risk/backtest/regression suite
@@ -17,6 +27,10 @@ docs/quant/              # independent risk and research methods
 docs/selection/          # stock-selection methods
 examples/                # fictional/synthetic data only
 ```
+
+The [canonical code migration map](CODE_LAYOUT.md) documents source locations
+and module-object-preserving legacy imports. Source files were moved without
+changing their algorithms; new code should use canonical domain imports.
 
 The [standard quantitative trading architecture](QUANT_WORKFLOW.md) now maps
 **Data → Alpha → Validation → Equity/Options/Bonds → Portfolio & Hedging →
