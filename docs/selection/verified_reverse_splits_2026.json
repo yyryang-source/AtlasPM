@@ -1,0 +1,13 @@
+{
+  "schema": "atlaspm_verified_reverse_splits_v1",
+  "events": [
+    {
+      "type": "reverse_split",
+      "symbol": "DUKR",
+      "effective_date": "2026-03-06",
+      "old_shares_per_new_share": 25,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1638911/000121390026024093/ea0279505-8k_duke.htm",
+      "explanation": "DUKR 2026-03-05 close 0.30 to 2026-03-06 close 7.66; provider returned Stock Splits=0 for March 6. Official 8-K verifies 1-for-25 reverse split effective March 6. Manifest is a research correction candidate: user must audit local CSV before applying."
+    }
+  ]
+}
