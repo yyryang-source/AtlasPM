@@ -7,6 +7,7 @@ import json
 import sys
 
 from atlaspm.commands import broker_cli, quant_cli, selection_cli
+from atlaspm.data import market_db
 # Backward-compatible public injection point used by offline data CLI tests.
 from atlaspm.quant.historical import download_yahoo_adjusted_prices
 
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     broker_cli.register_parsers(sub)
     quant_cli.register_model_parsers(sub)
     selection_cli.register_parsers(sub)
+    market_db.register_parser(sub)
     return parser
 
 
@@ -28,7 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command in selection_cli.COMMANDS:
+        if args.command == "market-db":
+            report = market_db.run(args)
+        elif args.command in selection_cli.COMMANDS:
             report = selection_cli.run(args)
         elif args.command in broker_cli.COMMANDS:
             report = broker_cli.run(args)
