@@ -19,7 +19,7 @@ class ModularCLIContractTests(unittest.TestCase):
         parsers = [action for action in parser._actions
                    if isinstance(action, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
-        self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)))
+        self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)) | {'market-db'})
 
     def test_command_modules_do_not_shadow_algorithm_packages(self):
         """CLI adapters are distinct from the actual quant/selection implementations."""

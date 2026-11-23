@@ -30,7 +30,8 @@ class FocusedCLIContractTests(unittest.TestCase):
         parsers = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
         names = set(parsers[0].choices)
-        self.assertEqual(names, selection_cli.COMMANDS | broker_cli.COMMANDS | quant_cli.COMMANDS)
+        self.assertEqual(names, selection_cli.COMMANDS | broker_cli.COMMANDS | quant_cli.COMMANDS | {'market-db'})
+        self.assertEqual(parser.parse_args(['market-db', 'status']).db_action, 'status')
         self.assertEqual(parser.parse_args(["allocate","--vol","SPY=0.2"]).command,"allocate")
         self.assertIn("stock-ai-rank-v2", parsers[0].choices)
         self.assertEqual(parser.parse_args(["stock-ai-train-v2","--prices","p.csv","--benchmark-prices","b.csv"]).top,10)
