@@ -25,8 +25,19 @@ src/atlaspm/
   cli.py            # public entry point (offline research)
   commands/         # quant_cli.py, selection_cli.py, broker_cli.py
   framework/        # 8-stage quant workflow registry (inspection only)
-  quant/            # allocation, backtests, RiskNet/FusionNet, IBKR risk
-  selection/        # stock universe, quote QC, rankers, monthly shortlist
+  quant/            # existing allocation, backtests and risk research
+  selection/        # existing equity screeners and model research
+  data/            # placeholder: multi-asset market/reference data
+  research/        # placeholder: factor/model research and validation
+  strategies/
+    equity/         # placeholder: equity sleeve
+    options/        # placeholder: options sleeve
+    bonds/          # placeholder: fixed-income sleeve
+  portfolio/        # placeholder: cross-asset construction/rebalancing
+  risk/             # placeholder: cross-cutting risk controls
+  hedging/          # placeholder: exposure-neutralizing overlays
+  execution/        # placeholder: future order/execution adapters
+  monitoring/       # placeholder: production monitoring/attribution
 tests/
   quant/            # quantitative/risk regression tests
   selection/        # research ranking/data-quality regression tests
@@ -36,6 +47,10 @@ docs/
   selection/        # stock selection, data quality and ranking
 examples/           # synthetic inputs only
 ```
+
+**New directories are empty placeholders only** (tracked with `.gitkeep`).
+No new Python packages, implementations or trading permissions were introduced.
+See [framework directory map](docs/QUANT_WORKFLOW.md#directory-skeleton-only).
 
 Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatibility with existing tests and external scripts. **New code should use `atlaspm.quant.*` and `atlaspm.selection.*`.**
 
