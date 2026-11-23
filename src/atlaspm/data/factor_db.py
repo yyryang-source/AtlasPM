@@ -159,7 +159,7 @@ def _check_hf(con, path: Path) -> None:
     if invalid:
         raise ValueError(f"HF input contains {invalid} invalid RTH bars; refuse factor construction")
     duplicate = con.execute(f"""
-        SELECT 1 FROM {s} GROUP BY symbol,timestamp_ms HAVING count(*) > 1 LIMIT 1
+        SELECT 1 FROM {s} GROUP BY upper(trim(symbol)),timestamp_ms HAVING count(*) > 1 LIMIT 1
     """).fetchone()
     if duplicate:
         raise ValueError("HF input contains duplicate (symbol,timestamp_ms) rows")
@@ -191,7 +191,13 @@ def _materialize_daily(con, month: str, source: str, session: str,
                        sqlite_db: Path, refresh: bool) -> tuple[Path, dict[str, Any]]:
     dest = _path(month, source, session, "daily")
     source_path = _month_source(month, source, session, sqlite_db)
-    input_fp = _fingerprint([source_path])
+    # SQLite in WAL mode may change without touching the main .sqlite3 file.
+    # Include its WAL sidecar in the cache key to avoid stale factor inputs.
+    fingerprint_inputs = [source_path]
+    wal = Path(str(source_path) + "-wal")
+    if source == "sqlite" and wal.is_file():
+        fingerprint_inputs.append(wal)
+    input_fp = _fingerprint(fingerprint_inputs)
     meta_path = dest.with_suffix(".json")
     meta = _read_meta(meta_path)
     if not refresh and dest.is_file() and meta and meta.get("input_fingerprint") == input_fp:
@@ -449,11 +455,26 @@ def batch(start_month: str, end_month: str, *, max_months: int = 0,
     start, end = _month_first(start_month), _month_first(end_month)
     if start > end or max_months < 0:
         raise ValueError("Invalid batch month range or max-months")
+    # A single SQLite file contains many possible months, not all of them.
+    # Discover distinct recorded months rather than interpreting file existence
+    # as historical equity coverage for every month in the requested range.
+    sqlite_months = None
+    if source == "sqlite":
+        database = _month_source(start_month, source, session, sqlite_db)
+        if not database.is_file():
+            raise ValueError(f"Missing sqlite database: {database}")
+        con = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            sqlite_months = {row[0] for row in con.execute(
+                "SELECT DISTINCT substr(trade_date,1,7) FROM equity_daily")}
+        finally:
+            con.close()
     jobs = []
     y, m = start.year, start.month
     while (y, m) <= (end.year, end.month):
         month = f"{y:04d}-{m:02d}"
-        if _month_source(month, source, session, sqlite_db).is_file():
+        if (month in sqlite_months if sqlite_months is not None
+            else _month_source(month, source, session, sqlite_db).is_file()):
             jobs.append(month)
             if max_months and len(jobs) >= max_months:
                 break
