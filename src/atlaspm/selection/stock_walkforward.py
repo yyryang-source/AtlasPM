@@ -16,6 +16,8 @@ from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS, HistoricalUniverse
+from atlaspm.selection.stock_backtest_portfolio import StockBacktestPortfolio
+from atlaspm.selection.stock_delistings import load_stock_delistings
 from atlaspm.stock_screener import load_fundamental_history, screen_stocks_from_prices
 
 
@@ -30,7 +32,7 @@ def _ratio_drawdown(values: list[float]) -> float:
 
 def _performance(curve: list[dict[str, Any]], key: str) -> dict[str, Any]:
     levels = [float(row[key]) for row in curve]
-    returns = [b / a - 1.0 for a, b in zip(levels, levels[1:])]
+    returns = [b / a - 1.0 if a else 0.0 for a, b in zip(levels, levels[1:])]
     total = levels[-1] / levels[0] - 1.0
     years = len(returns) / 252.0
     vol = stdev(returns) * sqrt(252) if len(returns) > 1 else None
@@ -51,12 +53,13 @@ def _yearly(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for previous, current in zip(curve, curve[1:]):
         year = current["date"][:4]
         row = annual.setdefault(year, {"year": year, "sessions": 0,
-                                       "portfolio_growth": 1.0, "spy_growth": 1.0})
-        row["portfolio_growth"] *= current["equity_index"] / previous["equity_index"]
+                                       "portfolio_growth": 1.0, "spy_growth": 1.0,
+                                       "universe_growth": 1.0})
+        if previous["equity_index"]:
+            row["portfolio_growth"] *= current["equity_index"] / previous["equity_index"]
         row["spy_growth"] *= current["spy_index"] / previous["spy_index"]
-        row["universe_growth"] = row.get("universe_growth", 1.0) * (
-            current["universe_index"] / previous["universe_index"]
-        )
+        if previous["universe_index"]:
+            row["universe_growth"] *= current["universe_index"] / previous["universe_index"]
         row["sessions"] += 1
     return [{
         "year": r["year"], "sessions": r["sessions"],
@@ -119,6 +122,7 @@ def backtest_stock_screener(
     require_uptrend: bool = False,
     universe_history_path: Path | None = None,
     max_universe_age_days: int = DEFAULT_MAX_UNIVERSE_AGE_DAYS,
+    delistings_path: Path | None = None,
     fundamentals_path: Path | None = None,
     max_fundamental_age_days: int = 200,
     minimum_market_cap_usd: float = 0.0,
@@ -126,9 +130,8 @@ def backtest_stock_screener(
 ) -> dict[str, Any]:
     """Equal-weight long-only, all-cash if no qualified names.
 
-    Cash yield is 0%; no financing or shorts. A selected or held symbol missing
-    a required market close raises ValueError rather than forward-filling or
-    borrowing future prices. Backtest is retrospective research, not trading.
+    Cash earns 0%. Documented delisting events settle outstanding shares in cash.
+    Missing closes outside a documented delisting stop the simulation.
     """
     if isinstance(top, bool) or top < 1:
         raise ValueError("top must be a positive integer")
@@ -157,21 +160,15 @@ def backtest_stock_screener(
         if universe_history_path is not None else None
     )
     universe_members_seen: set[str] = set()
+    delistings = (
+        load_stock_delistings(delistings_path, price_history, dates[first_index:])
+        if delistings_path is not None else {}
+    )
 
-    equity = 1.0
-    cash = 1.0
-    shares: dict[str, float] = {}
-    # Independently capitalized 1x cash ledger for the entire historically
-    # price-qualified universe (no factor rank/risk threshold exclusion).
-    universe_cash = 1.0
-    universe_shares: dict[str, float] = {}
-    universe_equity = 1.0
-    universe_turnover_sum = 0.0
-    universe_cost_sum = 0.0
+    strategy_account = StockBacktestPortfolio()
+    universe_account = StockBacktestPortfolio(baseline=True)
     universe_executions: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
-    turnover_sum = 0.0
-    cost_sum = 0.0
     costs_per_dollar = (fee_bps + slippage_bps) / 10_000.0
     start_benchmark_price = spy_prices[dates[first_index]]
     curve: list[dict[str, Any]] = []
@@ -180,115 +177,34 @@ def backtest_stock_screener(
 
     for i in range(first_index, last_index + 1):
         observed = dates[i]
-        marks: dict[str, float] = {}
-        for symbol in shares:
-            price = price_history[symbol].get(observed)
-            if price is None:
-                raise ValueError(f"MISSING_HELD_PRICE: {symbol} {observed}; no forward fill allowed")
-            marks[symbol] = price
-        equity = cash + sum(quantity * marks[symbol] for symbol, quantity in shares.items())
-        if not isfinite(equity) or equity <= 0:
-            raise ValueError(f"Invalid equity on {observed}")
-        universe_marks: dict[str, float] = {}
-        for symbol in universe_shares:
-            price = price_history[symbol].get(observed)
-            if price is None:
-                raise ValueError(
-                    f"MISSING_UNIVERSE_HELD_PRICE: {symbol} {observed}; no forward fill"
-                )
-            universe_marks[symbol] = price
-        universe_equity = universe_cash + sum(
-            quantity * universe_marks[symbol]
-            for symbol, quantity in universe_shares.items()
-        )
-        if not isfinite(universe_equity) or universe_equity <= 0:
-            raise ValueError(f"Invalid universe baseline equity on {observed}")
+        strategy_account.mark(observed, price_history, delistings)
+        universe_account.mark(observed, price_history, delistings)
 
         if pending is not None and pending["execution_index"] == i:
             chosen = pending["selected"]
-            # Forbid using a future close to decide membership; use it ONLY to
-            # price an already-scheduled next-close hypothetical execution.
-            for symbol in chosen:
-                close = price_history[symbol].get(observed)
-                if close is None:
-                    raise ValueError(
-                        f"MISSING_EXECUTION_PRICE: {symbol} {observed}; no future data substitution"
-                    )
-                marks[symbol] = close
-            fraction = 1.0 / len(chosen) if chosen else 0.0
-            current = {symbol: qty * marks[symbol] / equity
-                       for symbol, qty in shares.items()}
-            target = {symbol: fraction for symbol in chosen}
-            turnover = sum(abs(target.get(s, 0.0) - current.get(s, 0.0))
-                           for s in set(current) | set(target))
-            fee = equity * turnover * costs_per_dollar
-            if fee >= equity:
-                raise ValueError("Transaction cost exceeded modeled equity")
-            after_fee = equity - fee
-            shares = {symbol: (after_fee * fraction / marks[symbol]) for symbol in chosen}
-            cash = after_fee - sum(shares[s] * marks[s] for s in chosen)
-            # Decimal rounding noise is permitted around zero, not leverage.
-            if cash < -1e-10:
-                raise ValueError("Simulated holdings exceed equity")
-            cash = max(0.0, cash)
-            equity = cash + sum(shares[s] * marks[s] for s in shares)
-            cost_sum += fee
-            turnover_sum += turnover
+            turnover, fee, unfilled = strategy_account.rebalance(
+                chosen, observed, price_history, delistings, costs_per_dollar,
+            )
             orders.append({
                 "decision_date": pending["decision_date"],
                 "execution_date": observed.isoformat(),
                 "selected": list(chosen),
+                "unfilled_due_to_delisting": unfilled,
                 "turnover_one_way_notional_over_equity": turnover,
                 "estimated_transaction_cost_index": fee,
-                "equity_after_cost": equity,
+                "equity_after_cost": strategy_account.equity,
             })
-            # Same decision and next-close execution for the separate
-            # full-universe equal-weight comparison. No strategy ranking
-            # enters its membership or target weights.
-            universe_chosen = pending["universe_selected"]
-            for symbol in universe_chosen:
-                price = price_history[symbol].get(observed)
-                if price is None:
-                    raise ValueError(
-                        f"MISSING_UNIVERSE_EXECUTION_PRICE: {symbol} {observed}"
-                    )
-                universe_marks[symbol] = price
-            universe_fraction = 1.0 / len(universe_chosen) if universe_chosen else 0.0
-            universe_current = {
-                symbol: quantity * universe_marks[symbol] / universe_equity
-                for symbol, quantity in universe_shares.items()
-            }
-            universe_target = {symbol: universe_fraction for symbol in universe_chosen}
-            universe_turnover = sum(
-                abs(universe_target.get(s, 0.0) - universe_current.get(s, 0.0))
-                for s in set(universe_current) | set(universe_target)
+            universe_turnover, universe_fee, universe_unfilled = universe_account.rebalance(
+                pending["universe_selected"], observed, price_history, delistings, costs_per_dollar,
             )
-            universe_fee = universe_equity * universe_turnover * costs_per_dollar
-            if universe_fee >= universe_equity:
-                raise ValueError("Universe comparison transaction cost exceeded equity")
-            universe_after_fee = universe_equity - universe_fee
-            universe_shares = {
-                symbol: universe_after_fee * universe_fraction / universe_marks[symbol]
-                for symbol in universe_chosen
-            }
-            universe_cash = universe_after_fee - sum(
-                universe_shares[s] * universe_marks[s] for s in universe_shares
-            )
-            if universe_cash < -1e-10:
-                raise ValueError("Universe comparison exceeds 1x exposure")
-            universe_cash = max(0.0, universe_cash)
-            universe_equity = universe_cash + sum(
-                universe_shares[s] * universe_marks[s] for s in universe_shares
-            )
-            universe_turnover_sum += universe_turnover
-            universe_cost_sum += universe_fee
             universe_executions.append({
                 "decision_date": pending["decision_date"],
                 "execution_date": observed.isoformat(),
-                "holdings_count": len(universe_chosen),
+                "holdings_count": len(universe_account.shares),
+                "unfilled_due_to_delisting": universe_unfilled,
                 "turnover_ratio_at_execution": universe_turnover,
                 "estimated_transaction_cost_index": universe_fee,
-                "equity_after_cost": universe_equity,
+                "equity_after_cost": universe_account.equity,
             })
             pending = None
 
@@ -343,15 +259,21 @@ def backtest_stock_screener(
                 "universe_selected": universe_chosen,
             }
 
+        strategy_account.settle_delistings(observed)
+        universe_account.settle_delistings(observed)
+        equity = strategy_account.equity
+        universe_equity = universe_account.equity
         curve.append({
             "date": observed.isoformat(),
             "equity_index": equity,
             "spy_index": spy_prices[observed] / start_benchmark_price,
             "universe_index": universe_equity,
-            "universe_holdings_count": len(universe_shares),
-            "universe_cash_weight": universe_cash / universe_equity,
-            "holdings_count": len(shares),
-            "cash_weight": cash / equity,
+            "universe_holdings_count": len(universe_account.shares),
+            "universe_cash_weight": universe_account.cash / universe_equity if universe_equity else 0.0,
+            "universe_delisting_receivable_index": universe_account.receivable_value,
+            "holdings_count": len(strategy_account.shares),
+            "cash_weight": strategy_account.cash / equity if equity else 0.0,
+            "delisting_receivable_index": strategy_account.receivable_value,
         })
 
     portfolio = _performance(curve, "equity_index")
@@ -374,6 +296,7 @@ def backtest_stock_screener(
             "maximum_drawdown_magnitude": max_drawdown,
             "require_uptrend": require_uptrend,
             "ranking_mode": ranking_mode,
+            "delisting_events_in_window": len(delistings),
             "universe_source": "historical_snapshots" if universe_history is not None else "supplied_prices",
             "max_universe_age_days": max_universe_age_days if universe_history is not None else None,
             "max_fundamental_age_days": (
@@ -409,13 +332,15 @@ def backtest_stock_screener(
                 100 * (portfolio["total_return"] - universe_benchmark["total_return"]),
         },
         "execution_summary": {
-            "total_turnover_as_multiple_of_initial_equity": turnover_sum,
-            "total_modeled_transaction_cost_as_fraction_of_initial_equity": cost_sum,
+            "total_turnover_as_multiple_of_initial_equity": strategy_account.turnover,
+            "total_modeled_transaction_cost_as_fraction_of_initial_equity": strategy_account.cost,
         },
         "equal_weight_universe_execution_summary": {
-            "sum_of_execution_turnover_ratios": universe_turnover_sum,
-            "sum_of_costs_in_normalized_initial_equity_units": universe_cost_sum,
+            "sum_of_execution_turnover_ratios": universe_account.turnover,
+            "sum_of_costs_in_normalized_initial_equity_units": universe_account.cost,
         },
+        "delisting_settlements": strategy_account.settlements,
+        "equal_weight_delisting_settlements": universe_account.settlements,
         "equal_weight_universe_executions": universe_executions,
         "yearly_returns": _yearly(curve),
         "decisions": decisions,
@@ -429,7 +354,8 @@ def backtest_stock_screener(
                 if universe_history is not None else
                 "Strategy and baseline use membership inferred from the supplied prices, which can introduce survivorship bias."
             ),
-            "Delistings require price coverage through simulated exits; missing marks or fills abort the backtest.",
+            "Documented cash delistings carry a non-spendable last-close receivable until cash is credited after the modeled close.",
+            "Unexplained missing quotes stop the simulation; only documented delistings can cancel a scheduled fill.",
             "The full-universe comparison is 1x equal-weight, next-close rebalanced with matched turnover costs; not a free buy-and-hold portfolio.",
             "Provider-adjusted historical prices may be revised retrospectively; true vintage point-in-time data are not certified.",
             "Supplied fundamentals must use availability dates known by the decision close; data vintages are not independently verified.",

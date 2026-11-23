@@ -647,6 +647,8 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="CSV of complete dated snapshots: as_of_date,symbol")
     stock_backtest.add_argument("--max-universe-age-days", type=int,
                                 default=DEFAULT_MAX_UNIVERSE_AGE_DAYS)
+    stock_backtest.add_argument("--delistings", type=Path,
+                                help="Optional CSV of documented cash delisting events")
     stock_backtest.add_argument("--start", default="2000-01-01")
     stock_backtest.add_argument("--end", default="2026-11-20")
     stock_backtest.add_argument("--top", type=int, default=10)
@@ -1123,6 +1125,8 @@ def main(argv: list[str] | None = None) -> int:
                 sources.add(args.fundamentals.expanduser().resolve())
             if args.universe_history is not None:
                 sources.add(args.universe_history.expanduser().resolve())
+            if args.delistings is not None:
+                sources.add(args.delistings.expanduser().resolve())
             if destination in sources:
                 raise ValueError("Stock backtest cannot overwrite its inputs")
             result = backtest_stock_screener(
@@ -1136,6 +1140,7 @@ def main(argv: list[str] | None = None) -> int:
                 require_uptrend=args.require_uptrend,
                 universe_history_path=args.universe_history,
                 max_universe_age_days=args.max_universe_age_days,
+                delistings_path=args.delistings,
                 fundamentals_path=args.fundamentals,
                 max_fundamental_age_days=args.max_fundamental_age_days,
                 minimum_market_cap_usd=args.min_market_cap,
@@ -1154,6 +1159,8 @@ def main(argv: list[str] | None = None) -> int:
                 "actual_window": result["actual_window"],
                 "ranking_mode": result["parameters"]["ranking_mode"],
                 "universe_source": result["parameters"]["universe_source"],
+                "delisting_settlements": len(result["delisting_settlements"]),
+                "equal_weight_delisting_settlements": len(result["equal_weight_delisting_settlements"]),
                 "universe_count": result["universe_count_excluding_benchmark"],
                 "decision_count": result["decision_count"],
                 "executed_rebalances": result["executed_rebalances"],

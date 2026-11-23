@@ -71,11 +71,9 @@ each decision and the number of distinct members used across decisions.
 .\.venv\Scripts\python.exe -m atlaspm.cli stock-backtest --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --universe-history local_data\historical_members.csv --output local_data\stock_historical_universe.json
 ```
 
-Holdings stay in the simulation until the next scheduled rebalance executes.
-Supply closes through their simulated exit. If a delisting leaves a held
-position without a required mark or exit price, the backtest stops. The
-quality of a historical run depends on the completeness and timing of the
-provided membership data.
+Supply closes through each simulated exit or supply the documented cash
+delisting events below. The quality of a historical run depends on the
+completeness and timing of the provided membership data.
 
 ### Audit the inputs before running
 
@@ -92,6 +90,40 @@ during the backtest itself.
 $audit = Get-Content local_data\stock_history_audit.json -Raw | ConvertFrom-Json
 $audit.decisions | Where-Object status -ne COMPLETE
 ```
+
+### Account for cash delistings
+
+Pass `--delistings local_data\delistings.csv` for cash-only terminal events.
+Use a stable security identifier across prices, membership, and events when a
+ticker was reused. These values are illustrative.
+
+```csv
+symbol,last_trade_date,cash_date,return_from_last_close
+EXAMPLE_A,2024-04-11,2024-04-29,-0.50
+EXAMPLE_B,2024-06-03,2024-06-14,-1.00
+```
+
+Use the documented final trading close and a later date on which the net cash
+is available or the loss is confirmed. The return must be expressed relative to
+the final adjusted close, with `-1.00` for a confirmed total loss. Normalize
+vendor missing-value codes and avoid counting a terminal return already
+embedded in the price series. Check the cash basis of each event because data
+providers can also quote off-exchange values or stock consideration.
+
+After the final trading session, an open position becomes a receivable carried
+at the last close. The amount cannot fund a rebalance. The engine applies the
+verified cash value after the first modeled close on or after `cash_date`, so
+the proceeds are usable at the next session. A selected stock that delists
+between the decision and the execution stays in the decision record, and its
+unfilled allocation stays in cash. Both portfolios apply the same rules and
+report settlements and unsettled balances. Use historical snapshots that
+remove the security from subsequent decisions. An unexplained missing close
+continues to stop the run.
+
+Market data inputs for stock consideration, multiple payouts, and intraday
+events require more detailed event modeling. The current single-payout format
+is informed by [CRSP's delisting return convention](https://www.crsp.org/crsp_pdf/crsp-us-stock-indexes-databases-data-descriptions-guide-crspaccess/)
+and [LEAN's treatment of delisting as a separate event](https://www.quantconnect.com/docs/v2/writing-algorithms/securities/asset-classes/us-equity/corporate-actions).
 
 ## Include publication-dated fundamentals
 
@@ -193,10 +225,8 @@ on the same schedule as the strategy.
 - The caller supplies the historical company-financial publication archive.
   Fee/slippage are approximations. Transaction volume, spreads, market impact
   and taxes are outside the model.
-- A missing held or newly selected share price on a required date causes an
-  explicit failure, rather than inventing a return. Existing history may
-  require a point-in-time data-quality audit before the experiment runs end
-  to end.
+- A missing held or newly selected close requires a documented cash delisting
+  event or a price correction before the backtest can continue.
 - All earlier 2000–2026 research and this user-selected sample have already
   influenced development. They are **not untouched out-of-sample data**.
 - An annualized historical gain, Sharpe or drawdown is **descriptive**, not a

@@ -25,6 +25,7 @@ class StockWalkforwardTest(unittest.TestCase):
         self.benchmark = self.base / "benchmark.csv"
         self.fundamentals = self.base / "fundamentals.csv"
         self.universe = self.base / "universe.csv"
+        self.delistings = self.base / "delistings.csv"
         self.dates = []
         day = date(2024, 1, 1)
         while len(self.dates) < 370:
@@ -35,7 +36,7 @@ class StockWalkforwardTest(unittest.TestCase):
         self.end = self.dates[355].isoformat()
         self._write_prices()
 
-    def _write_prices(self, missing=None):
+    def _write_prices(self, missing=None, last_trade=None):
         with self.stocks.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["date", "symbol", "adjusted_close"])
@@ -45,6 +46,8 @@ class StockWalkforwardTest(unittest.TestCase):
                     ("B", 70 * 1.0002 ** i),
                     ("C", 90 * 0.9998 ** i),
                 ]:
+                    if last_trade is not None and symbol == last_trade[0] and day > last_trade[1]:
+                        continue
                     if (symbol, day) != missing:
                         writer.writerow([day.isoformat(), symbol, value])
         with self.benchmark.open("w", newline="", encoding="utf-8") as handle:
@@ -62,6 +65,61 @@ class StockWalkforwardTest(unittest.TestCase):
             writer = csv.writer(handle)
             writer.writerow(["as_of_date", "symbol"])
             writer.writerows(rows)
+
+    def _write_delisting(self, last_trade, cash_date, terminal_return):
+        with self.delistings.open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerows([
+                ["symbol", "last_trade_date", "cash_date", "return_from_last_close"],
+                ["A", last_trade, cash_date, terminal_return],
+            ])
+
+    def test_delisting_proceeds_are_unavailable_until_booked_and_can_be_zero(self):
+        last_trade, cash_date = self.dates[270], self.dates[287]
+        self._write_prices(last_trade=("A", last_trade))
+        self._write_universe([(self.start, "A"), (self.dates[281], "B")])
+        options = {"universe_history_path": self.universe, "max_universe_age_days": 110,
+                   "delistings_path": self.delistings, "fee_bps": 0, "slippage_bps": 0}
+        self._write_delisting(last_trade, cash_date, -.5)
+        half = self._run(**options)
+        self._write_delisting(last_trade, cash_date, -1)
+        zero = self._run(**options)
+        settled = half["delisting_settlements"][0]
+
+        self.assertEqual(settled["booked_at_close"], cash_date.isoformat())
+        self.assertAlmostEqual(settled["cash_proceeds_index"], settled["carrying_value_index"] * .5)
+        self.assertEqual(half["delisting_settlements"], half["equal_weight_delisting_settlements"])
+        before_cash = self.dates.index(cash_date) - 260
+        self.assertEqual(half["equity_curve"][:before_cash], zero["equity_curve"][:before_cash])
+        rebalance = half["equity_curve"][282 - 260]
+        self.assertEqual(rebalance["holdings_count"], 0)
+        self.assertAlmostEqual(rebalance["delisting_receivable_index"], rebalance["equity_index"])
+        self.assertAlmostEqual(half["equity_curve"][before_cash]["cash_weight"], 1.0)
+        self.assertEqual(zero["portfolio"]["total_return"], -1.0)
+        self.assertEqual(zero["equal_weight_universe"]["max_drawdown"], -1.0)
+
+    def test_delisting_between_signal_and_fill_keeps_unfilled_budget_as_cash(self):
+        last_trade, cash_date = self.dates[260], self.dates[270]
+        self._write_prices(last_trade=("A", last_trade))
+        self._write_universe([(self.start, "A"), (self.start, "B"), (self.dates[281], "B")])
+        self._write_delisting(last_trade, cash_date, -.5)
+        result = self._run(universe_history_path=self.universe, max_universe_age_days=110,
+                           delistings_path=self.delistings, fee_bps=0, slippage_bps=0)
+
+        self.assertEqual(result["executions"][0]["unfilled_due_to_delisting"], ["A"])
+        self.assertEqual(result["equal_weight_universe_executions"][0]["unfilled_due_to_delisting"], ["A"])
+        self.assertAlmostEqual(result["equity_curve"][1]["cash_weight"], .5)
+        self.assertAlmostEqual(result["equity_curve"][1]["universe_cash_weight"], .5)
+        self.assertEqual(result["delisting_settlements"], [])
+
+    def test_delisting_requires_matching_last_trade_and_real_marks_before_it(self):
+        last_trade, cash_date = self.dates[270], self.dates[287]
+        self._write_delisting(last_trade, cash_date, -1)
+        with self.assertRaisesRegex(ValueError, "conflicts with a close after"):
+            self._run(delistings_path=self.delistings)
+
+        self._write_prices(missing=("A", self.dates[265]), last_trade=("A", last_trade))
+        with self.assertRaisesRegex(ValueError, "MISSING_HELD_PRICE: A"):
+            self._run(delistings_path=self.delistings)
 
     def test_historical_membership_drives_strategy_and_equal_weight_baseline(self):
         later_date = self.dates[281].isoformat()
