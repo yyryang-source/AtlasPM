@@ -295,6 +295,17 @@ def register_parser(sub):
     q.add_argument('--remove-raw',action='store_true')
     q.add_argument('--refresh',action='store_true')
     actions.add_parser('stock-5m-status')
+    h=actions.add_parser('hf-5m-backfill',help='HF minute OHLCV to local 5m research lake')
+    h.add_argument('--start-month',default='2026-03')
+    h.add_argument('--end-month',default='2026-03')
+    h.add_argument('--max-months',type=int,default=1)
+    h.add_argument('--session',choices=['rth','all'],default='rth')
+    h.add_argument('--dry-run',action='store_true')
+    h.add_argument('--refresh',action='store_true')
+    h.add_argument('--remove-raw',action='store_true')
+    h.add_argument('--acknowledge-rights',action='store_true')
+    h.add_argument('--input',type=Path,default=None)
+    actions.add_parser('hf-5m-status')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -304,6 +315,14 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action.startswith('hf-5m-'):
+        from atlaspm.data import hf_stock5m
+        if args.db_action == 'hf-5m-status':
+            return hf_stock5m.status()
+        return hf_stock5m.backfill(args.start_month,args.end_month,
+            max_months=args.max_months,session=args.session,dry_run=args.dry_run,
+            refresh=args.refresh,remove_raw=args.remove_raw,
+            acknowledge_rights=args.acknowledge_rights,input_file=args.input)
     if args.db_action.startswith('stock-5m-'):
         from atlaspm.data import stock5m_flatfiles
         if args.db_action == 'stock-5m-probe':
