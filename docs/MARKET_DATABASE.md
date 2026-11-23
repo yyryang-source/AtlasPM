@@ -122,3 +122,84 @@ Daily moving averages use daily bars; 5-minute averages reset across time gaps.
 These trade aggregates are *not* executable bid/ask quotes. For full US OPRA
 minute history prefer appropriately licensed daily flat files and a partitioned
 Parquet/DuckDB data lake rather than millions of single-contract API calls.
+
+
+## Full US stock 5-minute Parquet lake (Massive, 2003–2026)
+
+Important limits: Massive's US Stocks SIP aggregate archive starts
+2003-09-10, not in 2000. No prices from 2000-01-01 to 2003-09-09 are
+silently invented. Massive's Basic free Stocks plan does not include
+Flat Files; Starter/Developer/Advanced have distinct historical windows.
+Each trading-day flat file covers **all stocks**, including securities that
+are now delisted, not merely AtlasPM's 5,831 currently listed stocks.
+
+The existing Massive REST API key can verify one day of Stock 5-minute
+access, but Flat Files use a **different S3 Access Key and Secret Key**
+provided by Massive Dashboard. Do not send either credential to anyone
+or commit them to GitHub.
+
+Windows PowerShell from the project root:
+
+    cd C:\Users\Kevin\Desktop\AtlasPM
+    git switch main
+    git pull --ff-only origin main
+    $py = ".\.venv\Scripts\python.exe"
+
+    # Test one ticker/date with your existing session MASSIVE_API_KEY.
+    & $py -m atlaspm.cli market-db stock-5m-probe --symbol AAPL --date 2026-11-20
+
+    # Plan the complete request without downloading or S3 credentials.
+    & $py -m atlaspm.cli market-db stock-5m-backfill --start 2000-01-01 --end 2026-11-23 --dry-run
+
+    # For actual bulk ingest: install AWS CLI and configure separate S3 keys.
+    winget install --id Amazon.AWSCLI -e
+    aws configure --profile massive
+    # Supply your S3 Access Key, Secret Key, region us-east-1, output json.
+    & $py -m pip install -e ".[lake,calendar]"
+
+    # Start with only 2 sessions; inspect storage and speed.
+    & $py -m atlaspm.cli market-db stock-5m-backfill --start 2026-11-19 --end 2026-11-20 --max-days 2 --profile massive
+    & $py -m atlaspm.cli market-db stock-5m-status
+
+    # Only once credentials, storage, and short test are verified:
+    & $py -m atlaspm.cli market-db stock-5m-backfill --start 2000-01-01 --end 2026-11-23 --profile massive
+
+The downloader uses the official NYSE calendar for real backfills, clips
+requested dates to 2003-09-10, and fetches the daily market-wide raw gzip
+source us_stocks_sip/minute_aggs_v1/YYYY/MM/YYYY-MM-DD.csv.gz.
+It converts each day to a ZSTD Parquet file under:
+local_data/stock_5m/parquet/session=rth/year=YYYY/month=MM/YYYY-MM-DD.parquet
+
+Default session is regular trading hours, 09:30–16:00 America/New_York;
+specify --session all to preserve pre/post-market. Each resulting bar
+stores symbol, trade_date_et, timestamp_ms (UTC milliseconds), earliest
+minute open, highest high, lowest low, latest close, summed volume and
+trades, and source_minute_bars (actual constituent minutes). Missing
+minute bars are NOT forward-filled. Prices are raw/unadjusted; do not
+compare directly to yfinance auto-adjusted historical closes.
+
+All files are private under gitignored local_data. The downloader
+skips complete Parquet date files on rerun; it keeps original source
+gzip files by default. --remove-raw deletes an original gzip only
+AFTER its Parquet output is successfully generated. Missing or not-yet-
+published exchange-day files are reported; they are not counted covered.
+The 2026-11-23 flat file is ordinarily published about 11 AM ET on
+2026-11-24, so it may not be available on Nov 23.
+
+Large-scale minute data do NOT go in AtlasPM's SQLite database; DuckDB
+can query the Parquet date partitions directly. Historical delisted
+tickers in files do not by themselves prove complete point-in-time
+eligibility metadata. Expect large network traffic and storage.
+
+Example Python query (after Parquet files have been created):
+
+    import duckdb
+    db = duckdb.connect()
+    data = db.execute(
+       "SELECT trade_date_et,timestamp_ms,open,high,low,close,volume_shares "
+       "FROM read_parquet("
+       "'local_data/stock_5m/parquet/session=rth/year=*/month=*/*.parquet') "
+       "WHERE symbol='AAPL' ORDER BY timestamp_ms LIMIT 20"
+    ).fetchall()
+    print(data)
+
