@@ -9,6 +9,9 @@ from pathlib import Path
 
 from atlaspm.optimizer import inverse_volatility_weights
 from atlaspm.quant.stock_allocation import StockAllocationSettings
+from atlaspm.quant.option_history import OptionHistory
+from atlaspm.quant.option_replay import replay_long_options
+from atlaspm.quant.lean_option_quotes import import_lean_option_quotes
 from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
 from atlaspm.portfolio import analyze_accounts, parse_accounts
@@ -736,6 +739,18 @@ def build_parser() -> argparse.ArgumentParser:
     stock.add_argument("--output", type=Path,
                        default=Path("local_data/stock_screen.json"))
 
+    option_replay = sub.add_parser(
+        "option-history-replay", help="Replay long options against historical quotes and official settlements",
+    )
+    for option in ("contracts", "quotes", "settlements", "plan"):
+        option_replay.add_argument(f"--{option}", type=Path, required=True)
+    option_replay.add_argument("--output", type=Path, default=Path("local_data/option_history_replay.json"))
+
+    lean_quotes = sub.add_parser("option-import-lean-quotes", help="Normalize LEAN US minute option quote ZIPs")
+    lean_quotes.add_argument("--zip", dest="archives", type=Path, nargs="+", required=True)
+    lean_quotes.add_argument("--contracts", type=Path, required=True)
+    lean_quotes.add_argument("--output", type=Path, default=Path("local_data/option_quotes.csv"))
+
     return parser
 
 
@@ -743,7 +758,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "stock-alpha-gate":
+        if args.command == "option-import-lean-quotes":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".csv" or destination.exists():
+                raise ValueError("LEAN quote import requires a new private .csv output")
+            report = import_lean_option_quotes(args.archives, args.contracts, destination)
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "option-history-replay":
+            destination = require_private_output(args.output)
+            sources = {path.expanduser().resolve() for path in (
+                args.contracts, args.quotes, args.settlements, args.plan,
+            )}
+            if destination.suffix.lower() != ".json" or destination in sources:
+                raise ValueError("Option replay requires a private .json output distinct from inputs")
+            history = OptionHistory(args.contracts, args.quotes, args.settlements)
+            result = replay_long_options(history, json.loads(args.plan.read_text(encoding="utf-8-sig")))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                                   encoding="utf-8")
+            report = {
+                "written": destination.relative_to(Path.cwd().resolve()).as_posix(),
+                "fill_count": len(result["fills"]), "expiration_count": len(result["expirations"]),
+                "premium_paid_usd": result["premium_paid_usd"], "premium_sold_usd": result["premium_sold_usd"],
+                "execution_fees_usd": result["execution_fees_usd"],
+                "spread_cost_vs_mid_usd": result["spread_cost_vs_mid_usd"], "live_execution_enabled": False,
+            }
+        elif args.command == "stock-alpha-gate":
             source = require_private_output(args.monthly_report)
             destination = require_private_output(args.output)
             if source.suffix.lower() != ".json" or destination.suffix.lower() != ".json":
