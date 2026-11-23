@@ -1,0 +1,24 @@
+name: Stock 5m Parquet lake checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  duckdb-lake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install lake and NYSE calendar extras
+        run: python -m pip install -e ".[lake,calendar]"
+      - name: Verify 1-minute to 5-minute DuckDB Parquet transformation
+        run: python -m unittest discover -s tests -p "test_stock5m_flatfiles.py" -v
+      - name: Verify offline complete-archive plan
+        run: python -m atlaspm.cli market-db stock-5m-backfill --start 2000-01-01 --end 2026-11-23 --dry-run
+      - name: Confirm no live data download or order access
+        run: python -m atlaspm.cli market-db stock-5m-status
