@@ -11,6 +11,7 @@ from atlaspm.optimizer import inverse_volatility_weights
 from atlaspm.quant.stock_allocation import StockAllocationSettings
 from atlaspm.quant.option_history import OptionHistory
 from atlaspm.quant.option_replay import replay_long_options
+from atlaspm.quant.protective_put import ProtectivePutSettings, compare_protective_put, load_stock_marks
 from atlaspm.quant.lean_option_quotes import import_lean_option_quotes
 from atlaspm.historical import download_yahoo_adjusted_prices, estimate_from_prices
 from atlaspm.mean_variance import optimize_mean_variance
@@ -751,6 +752,21 @@ def build_parser() -> argparse.ArgumentParser:
     lean_quotes.add_argument("--contracts", type=Path, required=True)
     lean_quotes.add_argument("--output", type=Path, default=Path("local_data/option_quotes.csv"))
 
+    protective_put = sub.add_parser("protective-put-backtest", help="Compare a rolling put hedge with the same stock holding")
+    for option in ("contracts", "quotes", "settlements", "stock-marks"):
+        protective_put.add_argument(f"--{option}", type=Path, required=True)
+    protective_put.add_argument("--underlying", required=True)
+    protective_put.add_argument("--shares", type=int, required=True)
+    protective_put.add_argument("--cash-usd", type=float, required=True)
+    protective_put.add_argument("--otm-fraction", type=float, default=0.05)
+    protective_put.add_argument("--target-dte", type=int, default=45)
+    protective_put.add_argument("--max-dte", type=int, default=65)
+    protective_put.add_argument("--roll-sessions", type=int, default=21)
+    protective_put.add_argument("--fee-per-contract-usd", type=float, default=1.0)
+    protective_put.add_argument("--max-quote-age-minutes", type=int, default=1)
+    protective_put.add_argument("--eod-snapshot", action="store_true", help="Input quote times represent modeled EOD snapshots")
+    protective_put.add_argument("--output", type=Path, default=Path("local_data/protective_put_backtest.json"))
+
     return parser
 
 
@@ -764,6 +780,30 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("LEAN quote import requires a new private .csv output")
             report = import_lean_option_quotes(args.archives, args.contracts, destination)
             report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "protective-put-backtest":
+            destination = require_private_output(args.output)
+            sources = {path.expanduser().resolve() for path in (
+                args.contracts, args.quotes, args.settlements, args.stock_marks,
+            )}
+            if destination.suffix.lower() != ".json" or destination in sources:
+                raise ValueError("Protective put backtest requires a private .json output distinct from inputs")
+            history = OptionHistory(args.contracts, args.quotes, args.settlements)
+            settings = ProtectivePutSettings(
+                underlying=args.underlying.strip().upper(), shares=args.shares, cash_usd=args.cash_usd,
+                fee_per_contract_usd=args.fee_per_contract_usd, otm_fraction=args.otm_fraction,
+                target_dte=args.target_dte, max_dte=args.max_dte, roll_sessions=args.roll_sessions,
+                max_quote_age_minutes=args.max_quote_age_minutes, eod_snapshot=args.eod_snapshot,
+            )
+            result = compare_protective_put(history, load_stock_marks(args.stock_marks), settings)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+            report = {"written": destination.relative_to(Path.cwd().resolve()).as_posix(),
+                      "hedged": result["hedged"], "unhedged": result["unhedged"],
+                      "sessions": len(result["curve"]), "fills": len(result["option_replay"]["fills"]),
+                      **{metric: result["option_replay"][metric] for metric in (
+                          "premium_paid_usd", "premium_sold_usd", "execution_fees_usd", "spread_cost_vs_mid_usd",
+                      )},
+                      "live_execution_enabled": False}
         elif args.command == "option-history-replay":
             destination = require_private_output(args.output)
             sources = {path.expanduser().resolve() for path in (
