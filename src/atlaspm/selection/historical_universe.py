@@ -39,13 +39,12 @@ class HistoricalUniverse:
         self._snapshots = snapshots
         self._dates = sorted(snapshots)
 
-    def prices_at(
+    def members_at(
         self,
-        prices: dict[str, dict[date, float]],
         decision: date,
         *,
         benchmark_symbol: str | None = None,
-    ) -> tuple[date, dict[str, dict[date, float]]]:
+    ) -> tuple[date, list[str]]:
         index = bisect_right(self._dates, decision)
         if not index:
             raise ValueError(f"No historical universe snapshot available by {decision}")
@@ -56,6 +55,16 @@ class HistoricalUniverse:
         members = sorted(self._snapshots[snapshot] - {benchmark_symbol})
         if not members:
             raise ValueError(f"No non-benchmark historical universe members on {decision}")
+        return snapshot, members
+
+    def prices_at(
+        self,
+        prices: dict[str, dict[date, float]],
+        decision: date,
+        *,
+        benchmark_symbol: str | None = None,
+    ) -> tuple[date, dict[str, dict[date, float]]]:
+        snapshot, members = self.members_at(decision, benchmark_symbol=benchmark_symbol)
         missing = [symbol for symbol in members if decision not in prices.get(symbol, {})]
         if missing:
             raise ValueError(

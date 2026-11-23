@@ -41,6 +41,7 @@ from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tour
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
+from atlaspm.selection.stock_history_audit import audit_stock_history
 from atlaspm.stock_screener import screen_stocks
 from atlaspm.stock_walkforward import backtest_stock_screener
 from atlaspm.us_market_universe import build_us_listed_universe
@@ -619,6 +620,22 @@ def build_parser() -> argparse.ArgumentParser:
     market_sync.add_argument("--cache-only", action="store_true",
                              help="Rebuild price CSV + coverage report using existing cache only; no provider calls")
 
+    history_audit = sub.add_parser(
+        "stock-history-audit",
+        help="Audit dated stock membership and close-price coverage on backtest decision dates",
+    )
+    history_audit.add_argument("--prices", type=Path, required=True)
+    history_audit.add_argument("--benchmark-prices", type=Path, required=True)
+    history_audit.add_argument("--universe-history", type=Path, required=True)
+    history_audit.add_argument("--start", required=True)
+    history_audit.add_argument("--end", required=True)
+    history_audit.add_argument("--benchmark-symbol", default="SPY")
+    history_audit.add_argument("--rebalance-days", type=int, default=21)
+    history_audit.add_argument("--max-universe-age-days", type=int,
+                               default=DEFAULT_MAX_UNIVERSE_AGE_DAYS)
+    history_audit.add_argument("--output", type=Path,
+                               default=Path("local_data/stock_history_audit.json"))
+
     stock_backtest = sub.add_parser(
         "stock-backtest",
         help="Long-only 2000-2026 walk-forward stock ranking vs adjusted SPY, no orders",
@@ -1074,6 +1091,28 @@ def main(argv: list[str] | None = None) -> int:
                 "report": str(report_path.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
             }
+        elif args.command == "stock-history-audit":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("Stock history audit output must be a private local_data .json")
+            sources = {
+                path.expanduser().resolve()
+                for path in (args.prices, args.benchmark_prices, args.universe_history)
+            }
+            if destination in sources:
+                raise ValueError("Stock history audit cannot overwrite its inputs")
+            details = audit_stock_history(
+                args.prices, args.benchmark_prices, args.universe_history,
+                start=args.start, end=args.end, benchmark_symbol=args.benchmark_symbol,
+                rebalance_days=args.rebalance_days,
+                max_universe_age_days=args.max_universe_age_days,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(details, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8",
+            )
+            report = {key: value for key, value in details.items() if key != "decisions"}
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
         elif args.command == "stock-backtest":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":

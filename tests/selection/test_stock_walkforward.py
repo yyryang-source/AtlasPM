@@ -12,6 +12,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
+from atlaspm.selection.stock_history_audit import audit_stock_history
 from atlaspm.stock_walkforward import backtest_stock_screener
 
 
@@ -82,6 +83,13 @@ class StockWalkforwardTest(unittest.TestCase):
                          [1, 2])
         self.assertAlmostEqual(result["portfolio"]["total_return"],
                                result["equal_weight_universe"]["total_return"])
+        audit = audit_stock_history(self.stocks, self.benchmark, self.universe,
+                                    start=self.start, end=self.end, max_universe_age_days=100)
+        self.assertEqual(audit["status"], "DECISION_CLOSES_COMPLETE")
+        self.assertEqual(
+            [(row["decision_date"], row["next_close_date"]) for row in audit["decisions"]],
+            [(row["date"], row["execution_date"]) for row in result["decisions"]],
+        )
 
     def test_historical_membership_rejects_future_stale_and_duplicate_snapshots(self):
         invalid_cases = [
@@ -105,6 +113,34 @@ class StockWalkforwardTest(unittest.TestCase):
         self._write_prices(missing=("A", self.dates[282]))
         with self.assertRaisesRegex(ValueError, "MISSING_HELD_PRICE: A"):
             self._run(universe_history_path=self.universe)
+
+    def test_history_audit_reports_all_gaps_in_one_cli_run(self):
+        from atlaspm.cli import main
+        self._write_universe([(self.dates[281], "A"), (self.dates[281], "C"), (self.dates[281], "SPY")])
+        self._write_prices(missing=("C", self.dates[281]))
+        cwd = Path.cwd()
+        try:
+            os.chdir(self.base)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                status = main([
+                    "stock-history-audit", "--prices", str(self.stocks), "--benchmark-prices", str(self.benchmark),
+                    "--universe-history", str(self.universe), "--start", self.start, "--end", self.end,
+                    "--max-universe-age-days", "7",
+                ])
+            self.assertEqual(status, 0)
+            summary = json.loads(output.getvalue())
+            self.assertNotIn("decisions", summary)
+            self.assertEqual(summary["status"], "REVIEW_REQUIRED")
+            self.assertEqual(summary["decisions_without_usable_snapshot"], 4)
+            self.assertEqual(summary["decision_close_coverage_pct_on_usable_snapshots"], 50.0)
+            report = json.loads(Path(summary["written"]).read_text(encoding="utf-8"))
+            early, missing_close, stale = report["decisions"][:3]
+            self.assertIn("No historical universe snapshot", early["error"])
+            self.assertEqual(missing_close["missing_decision_close_symbols"], ["C"])
+            self.assertIn("is stale", stale["error"])
+        finally:
+            os.chdir(cwd)
 
     def _write_fundamentals(self, *, later_snapshots=False):
         with self.fundamentals.open("w", newline="", encoding="utf-8") as handle:

@@ -77,6 +77,22 @@ position without a required mark or exit price, the backtest stops. The
 quality of a historical run depends on the completeness and timing of the
 provided membership data.
 
+### Audit the inputs before running
+
+`stock-history-audit` checks every scheduled decision using the same benchmark
+calendar, date window, rebalance interval and snapshot freshness rules as
+`stock-backtest`. The report lists missing member closes and unusable snapshots
+by date. Coverage is calculated over decisions with usable snapshots, with
+the number of other decisions reported separately. Review both fields before
+running the backtest. Held-position quotes and execution prices are checked
+during the backtest itself.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-history-audit --prices local_data\us_stocks_2000_2026.csv --benchmark-prices local_data\market_2000_2026.csv --universe-history local_data\historical_members.csv --start 2000-01-01 --end 2026-11-20
+$audit = Get-Content local_data\stock_history_audit.json -Raw | ConvertFrom-Json
+$audit.decisions | Where-Object status -ne COMPLETE
+```
+
 ## Include publication-dated fundamentals
 
 Use the [stock-screen fundamentals format](STOCK_SCREENER.md#inputs). For each

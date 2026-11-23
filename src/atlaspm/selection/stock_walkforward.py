@@ -7,7 +7,7 @@ Membership can come from dated snapshots supplied by the caller.
 
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
+from bisect import bisect_left
 from datetime import date
 from math import isfinite, sqrt
 from pathlib import Path
@@ -67,6 +67,42 @@ def _yearly(curve: list[dict[str, Any]]) -> list[dict[str, Any]]:
     } for r in annual.values()]
 
 
+def stock_backtest_schedule(
+    benchmark_prices_path: Path,
+    benchmark_symbol: str,
+    start: str,
+    end: str,
+    rebalance_days: int,
+) -> tuple[dict[date, float], list[date], range]:
+    try:
+        first = date.fromisoformat(start)
+        last = date.fromisoformat(end)
+    except ValueError as exc:
+        raise ValueError("start/end must use YYYY-MM-DD") from exc
+    if first >= last:
+        raise ValueError("end must be later than start")
+    if type(rebalance_days) is not int or rebalance_days < 1:
+        raise ValueError("rebalance-days must be a positive integer")
+
+    ticker = benchmark_symbol.strip().upper()
+    if not ticker:
+        raise ValueError("Benchmark symbol is required")
+    benchmark_all = load_adjusted_prices(benchmark_prices_path)
+    if ticker not in benchmark_all:
+        raise ValueError(f"Benchmark {ticker} missing in benchmark price file")
+    benchmark_prices = benchmark_all[ticker]
+    dates = sorted(day for day in benchmark_prices if day <= last)
+    first_index = max(252, bisect_left(dates, first))
+    last_index = len(dates) - 1
+    if first_index + 2 > last_index:
+        raise ValueError("Need 253 benchmark warmup sessions and 3+ test sessions")
+    if any((b - a).days > 14 for a, b in zip(dates[first_index:-1], dates[first_index + 1:])):
+        raise ValueError("Gap in benchmark calendar > 14 days; inspect historical source")
+
+    # Each decision must leave a subsequent session for execution.
+    return benchmark_prices, dates, range(first_index, last_index, rebalance_days)
+
+
 def backtest_stock_screener(
     prices_path: Path,
     benchmark_prices_path: Path,
@@ -94,15 +130,8 @@ def backtest_stock_screener(
     a required market close raises ValueError rather than forward-filling or
     borrowing future prices. Backtest is retrospective research, not trading.
     """
-    try:
-        first = date.fromisoformat(start)
-        last = date.fromisoformat(end)
-    except ValueError as exc:
-        raise ValueError("start/end must use YYYY-MM-DD") from exc
-    if first >= last:
-        raise ValueError("end must be later than start")
-    if isinstance(top, bool) or isinstance(rebalance_days, bool) or top < 1 or rebalance_days < 1:
-        raise ValueError("top and rebalance-days must be positive integers")
+    if isinstance(top, bool) or top < 1:
+        raise ValueError("top must be a positive integer")
     if not (isfinite(fee_bps) and isfinite(slippage_bps)
             and 0 <= fee_bps <= 100 and 0 <= slippage_bps <= 100):
         raise ValueError("fee-bps and slippage-bps must be finite within 0..100")
@@ -110,32 +139,17 @@ def backtest_stock_screener(
             and isfinite(max_drawdown) and 0 < max_drawdown <= 1):
         raise ValueError("Invalid volatility or drawdown cap")
     ticker = benchmark_symbol.strip().upper()
-    if not ticker:
-        raise ValueError("Benchmark symbol is required")
-
     price_history = load_adjusted_prices(prices_path)
-    benchmark_all = load_adjusted_prices(benchmark_prices_path)
-    if ticker not in benchmark_all:
-        raise ValueError(f"Benchmark {ticker} missing in benchmark price file")
-    if ticker in price_history:
-        price_history.pop(ticker)  # Never recommend the comparison benchmark itself.
+    price_history.pop(ticker, None)
     if universe_history_path is None and len(price_history) < 2:
         raise ValueError("Need at least two non-benchmark symbols")
-    spy_prices = benchmark_all[ticker]
-    dates = sorted(d for d in spy_prices if d <= last)
-    first_index = max(252, bisect_left(dates, first))
-    last_index = bisect_right(dates, last) - 1
-    if first_index + 2 > last_index:
-        raise ValueError("Need 253 benchmark warmup sessions and 3+ test sessions")
-    if any((b - a).days > 14 for a, b in zip(dates[first_index:last_index],
-                                              dates[first_index+1:last_index+1])):
-        raise ValueError("Gap in benchmark calendar > 14 days; inspect historical source")
-    decision_indices = set(range(first_index, last_index, rebalance_days))
-    # Executions are always one benchmark session after a completed decision close.
-    if not decision_indices:
-        raise ValueError("No eligible decision dates")
+    spy_prices, dates, decision_indices = stock_backtest_schedule(
+        benchmark_prices_path, ticker, start, end, rebalance_days,
+    )
+    first_index = decision_indices.start
+    last_index = len(dates) - 1
     fundamental_history = (
-        load_fundamental_history(fundamentals_path, dates[max(decision_indices)])
+        load_fundamental_history(fundamentals_path, dates[decision_indices[-1]])
         if fundamentals_path is not None else None
     )
     universe_history = (
