@@ -50,6 +50,7 @@ from atlaspm.ml_model_tournament import backtest_model_tournament, redacted_tour
 from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native_console
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
+from atlaspm.selection.historical_stock_imports import import_cash_exits, import_membership_spans
 from atlaspm.selection.stock_comparison import compare_stock_selection
 from atlaspm.selection.stock_fundamentals_import import import_stock_fundamentals
 from atlaspm.selection.stock_history_audit import audit_stock_history
@@ -716,6 +717,19 @@ def build_parser() -> argparse.ArgumentParser:
     comparison.add_argument("--min-train-rows", type=int, default=300)
     comparison.add_argument("--output", type=Path, default=Path("local_data/stock_comparison.json"))
 
+    membership = sub.add_parser("stock-import-membership-spans", help="Expand dated universe membership to benchmark sessions")
+    membership.add_argument("--spans", type=Path, required=True)
+    membership.add_argument("--benchmark-prices", type=Path, required=True)
+    membership.add_argument("--benchmark-symbol", default="SPY")
+    membership.add_argument("--start", type=date.fromisoformat, required=True)
+    membership.add_argument("--end", type=date.fromisoformat, required=True)
+    membership.add_argument("--output", type=Path, default=Path("local_data/historical_membership.csv"))
+
+    cash_exits = sub.add_parser("stock-import-cash-exits", help="Translate source-backed cash exit amounts into terminal returns")
+    for option in ("events", "raw-prices", "adjusted-prices"):
+        cash_exits.add_argument(f"--{option}", type=Path, required=True)
+    cash_exits.add_argument("--output", type=Path, default=Path("local_data/stock_cash_exits.csv"))
+
     fundamentals_import = sub.add_parser(
         "stock-import-fundamentals", help="Convert annual filings and dated valuations to screener CSV",
     )
@@ -1291,6 +1305,19 @@ def main(argv: list[str] | None = None) -> int:
                 "report": str(report_path.relative_to(Path.cwd().resolve())),
                 "live_execution_enabled": False,
             }
+        elif args.command == "stock-import-membership-spans":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".csv" or destination.exists():
+                raise ValueError("Membership import requires a new private .csv output")
+            report = import_membership_spans(args.spans, args.benchmark_prices, args.start, args.end, destination,
+                                             benchmark_symbol=args.benchmark_symbol)
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "stock-import-cash-exits":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".csv" or destination.exists():
+                raise ValueError("Cash exit import requires a new private .csv output")
+            report = import_cash_exits(args.events, args.raw_prices, args.adjusted_prices, destination)
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
         elif args.command == "stock-history-audit":
             destination = require_private_output(args.output)
             if destination.suffix.lower() != ".json":

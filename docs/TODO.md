@@ -10,11 +10,15 @@
 - [x] `stock-backtest --delistings` 处理有记录的单笔现金退市结算。合成数据已验证延迟回款、归零、未成交资金和等权基线对账。
 - [x] `stock-import-fundamentals` 生成按披露时间可用的年度财报快照，保留财报和市值来源。已用苹果 2020 年 10-K 验证收盘后披露的生效日期。
 - [x] 用四只股票和 SPY 的真实日线跑通单日排名及 60 次历史调仓，本地数据、报告和哈希记录在 `local_data/stock_research_public_sample_manifest.json`。样本为现存股票，验证范围是流程。
+- [x] 导入 2020–2023 年按日开放标普 500 历史成员记录，生成 1,006 个日期的研究股票池并保留来源置信度。
+- [x] `stock-import-cash-exits` 接入 TWTR 和 ATVI 的实际每股现金对价。在 5 股受控案例中用真实行情完成 `stock-screen`、`stock-backtest` 和两笔模拟退市入账。
 - [ ] 整理真实历史成分、行情、退市退出数据和按公布日期保存的财报，记录数据来源与覆盖率。
 - [x] `stock-compare` 对齐等权、技术因子、技术加基本面、LightGBM 的调仓日、可投资范围和成本。合成数据已验证四组指标、训练与测试隔离，以及输入和模型哈希。
 - [ ] 用真实历史数据固定训练、验证和最终测试期，保留配置和数据版本，完成样本外收益、回撤和换手对比。
 
 已有入口见[选股回测说明](selection/STOCK_WALKFORWARD.md)。第一版使用 Python 和本地文件。
+
+历史股票池、现金退出和实际覆盖率见[历史股票池验收](selection/HISTORICAL_MEMBERSHIP_AND_EXITS.md)。
 
 财报可从 [SEC EDGAR](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) 获取。历史上市状态和退市回报分别核对 [Alpha Vantage 上市状态文档](https://www.alphavantage.co/documentation/#listing-status)和 [CRSP 退市回报定义](https://www.crsp.org/crsp_pdf/crsp-us-stock-indexes-databases-data-descriptions-guide-crspaccess/)，再确认团队数据的可用年份与覆盖率。
 
