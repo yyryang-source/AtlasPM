@@ -163,6 +163,7 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         edge_skipped = 0
         close_mismatches = 0
         volume_mismatches = 0
+        partial_volume_days = 0
         for day in days:
             row = local.get((symbol,day))
             if row is None:
@@ -188,7 +189,11 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                 continue
             ref_close,ref_volume = observations[(symbol,day)]
             diff = 100*abs(float(close)-ref_close)/ref_close
-            volume_diff = 100*abs(float(vol)-ref_volume)/ref_volume if ref_volume>0 else None
+            complete_rth = int(n) == (closing-opening)//300_000 and int(partial) == 0
+            if not complete_rth:
+                partial_volume_days += 1
+            volume_diff = (100*abs(float(vol)-ref_volume)/ref_volume
+                           if complete_rth and ref_volume>0 else None)
             compared += 1
             max_close=max(max_close,diff)
             if volume_diff is not None:
@@ -217,6 +222,7 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                         "skipped_incomplete_daily_boundaries":edge_skipped,
                         "close_outliers":close_mismatches,
                         "volume_outliers":volume_mismatches,
+                        "incomplete_rth_volume_days":partial_volume_days,
                         "max_close_difference_pct":round(max_close,4) if compared else None,
                         "max_volume_difference_pct":round(max_volume,4) if compared else None})
     compared_total = sum(x["compared_days"] for x in results)
@@ -227,6 +233,8 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         issues.append("REFERENCE_CLOSE_DIVERGENCE")
     if any(x["volume_outliers"] for x in results):
         issues.append("REFERENCE_VOLUME_DIVERGENCE")
+    if any(x["incomplete_rth_volume_days"] for x in results):
+        issues.append("PARTIAL_RTH_VOLUME_NOT_COMPARABLE")
     if any(x["skipped_incomplete_daily_boundaries"] for x in results):
         issues.append("INCOMPLETE_DAY_START_OR_END")
     if any(x["missing_hf_days"] or x["local_days_without_reference"] for x in results):
@@ -255,7 +263,7 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         "warnings":[
             "Yahoo Close is generally split-adjusted; HF source adjustment status is not verified.",
             "Price discrepancies are diagnostic. Do not rescale price series automatically.",
-            "5-minute RTH sum(volume) may differ from published daily volume including closing auctions.",
+            "Daily volume is only compared when all expected RTH 5m buckets contain five distinct source minutes; closing auctions can still differ.",
             "High benchmark agreement does not prove all 22k symbols are historically valid equities.",
             "Only one month's data are present; no training approval or out-of-sample signal validation.",
         ],
