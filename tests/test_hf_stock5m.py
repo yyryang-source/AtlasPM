@@ -155,6 +155,7 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
     def test_clean_refresh_clears_obsolete_quarantine(self):
         self.seed(duplicate=True,extra_symbols=2000)
         mod.convert(self.raw,self.out)
+        self.raw.unlink()
         self.seed(duplicate=False)
         new=mod.convert(self.raw,self.out)
         self.assertEqual(0,new["excluded_ambiguous_5m_buckets"])
