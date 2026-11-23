@@ -203,3 +203,12 @@ Example Python query (after Parquet files have been created):
     ).fetchall()
     print(data)
 
+
+
+## Alternate opt-in public-hosted US stock minute archive (rights unverified)
+
+Hugging Face 'mito0o852/OHLCV-1m' is exposed as a separate monthly 1m-to-5m
+Parquet research adapter. It does not replace Massive, change daily adjusted-close
+research, or enable IBKR/live orders. See [PowerShell, data-rights warning and
+schema details](HF_STOCK5M.md). Public hosting does not establish an open-data
+license for its Finnhub-derived historical prices.
