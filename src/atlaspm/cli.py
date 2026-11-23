@@ -51,6 +51,7 @@ from atlaspm.atlas_regimenet import backtest_atlas_native, redacted_atlas_native
 from atlaspm.atlas_robustness_audit import audit_atlas_risknet, redacted_audit_console
 from atlaspm.selection.historical_universe import DEFAULT_MAX_UNIVERSE_AGE_DAYS
 from atlaspm.selection.historical_stock_imports import import_cash_exits, import_membership_spans
+from atlaspm.selection.sec_fundamental_history import import_sec_factors
 from atlaspm.selection.stock_comparison import compare_stock_selection
 from atlaspm.selection.stock_fundamentals_import import import_stock_fundamentals
 from atlaspm.selection.stock_history_audit import audit_stock_history
@@ -730,6 +731,14 @@ def build_parser() -> argparse.ArgumentParser:
         cash_exits.add_argument(f"--{option}", type=Path, required=True)
     cash_exits.add_argument("--output", type=Path, default=Path("local_data/stock_cash_exits.csv"))
 
+    sec_factors = sub.add_parser("stock-import-sec-factors", help="Build publication-dated factors from SEC Company Facts")
+    for option in ("securities", "facts-directory", "raw-prices", "benchmark-prices"):
+        sec_factors.add_argument(f"--{option}", type=Path, required=True)
+    sec_factors.add_argument("--benchmark-symbol", default="SPY")
+    sec_factors.add_argument("--start", type=date.fromisoformat, required=True)
+    sec_factors.add_argument("--end", type=date.fromisoformat, required=True)
+    sec_factors.add_argument("--output", type=Path, default=Path("local_data/sec_stock_factors.csv"))
+
     fundamentals_import = sub.add_parser(
         "stock-import-fundamentals", help="Convert annual filings and dated valuations to screener CSV",
     )
@@ -1317,6 +1326,13 @@ def main(argv: list[str] | None = None) -> int:
             if destination.suffix.lower() != ".csv" or destination.exists():
                 raise ValueError("Cash exit import requires a new private .csv output")
             report = import_cash_exits(args.events, args.raw_prices, args.adjusted_prices, destination)
+            report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
+        elif args.command == "stock-import-sec-factors":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".csv" or destination.exists():
+                raise ValueError("SEC factor import requires a new private .csv output")
+            report = import_sec_factors(args.securities, args.facts_directory, args.raw_prices, args.benchmark_prices,
+                                        args.start, args.end, destination, benchmark_symbol=args.benchmark_symbol)
             report["written"] = destination.relative_to(Path.cwd().resolve()).as_posix()
         elif args.command == "stock-history-audit":
             destination = require_private_output(args.output)

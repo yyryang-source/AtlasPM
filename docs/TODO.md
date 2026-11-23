@@ -12,13 +12,15 @@
 - [x] 用四只股票和 SPY 的真实日线跑通单日排名及 60 次历史调仓，本地数据、报告和哈希记录在 `local_data/stock_research_public_sample_manifest.json`。样本为现存股票，验证范围是流程。
 - [x] 导入 2020–2023 年按日开放标普 500 历史成员记录，生成 1,006 个日期的研究股票池并保留来源置信度。
 - [x] `stock-import-cash-exits` 接入 TWTR 和 ATVI 的实际每股现金对价。在 5 股受控案例中用真实行情完成 `stock-screen`、`stock-backtest` 和两笔模拟退市入账。
-- [ ] 整理真实历史成分、行情、退市退出数据和按公布日期保存的财报，记录数据来源与覆盖率。
+- [x] 整理标普 500 历史研究股票池、真实行情、所需退市和按公布日期保存的财报。47 个调仓日审计匹配 23,697 条收盘价，SEC 数据生成 1,004 条有效快照，保留来源、哈希与缺失说明。
 - [x] `stock-compare` 对齐等权、技术因子、技术加基本面、LightGBM 的调仓日、可投资范围和成本。合成数据已验证四组指标、训练与测试隔离，以及输入和模型哈希。
-- [ ] 用真实历史数据固定训练、验证和最终测试期，保留配置和数据版本，完成样本外收益、回撤和换手对比。
+- [x] 用真实历史数据固定训练、验证和最终测试期，保留配置和版本。四种策略完成 2022 年 2 月至 2023 年底的收益、回撤和换手对比。
 
 已有入口见[选股回测说明](selection/STOCK_WALKFORWARD.md)。第一版使用 Python 和本地文件。
 
 历史股票池、现金退出和实际覆盖率见[历史股票池验收](selection/HISTORICAL_MEMBERSHIP_AND_EXITS.md)。
+
+实际样本外报告、财报来源和 Quant 敏感性见[SEC 财报与固定样本外验证](selection/SEC_FUNDAMENTALS_AND_HOLDOUT.md)。
 
 财报可从 [SEC EDGAR](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) 获取。历史上市状态和退市回报分别核对 [Alpha Vantage 上市状态文档](https://www.alphavantage.co/documentation/#listing-status)和 [CRSP 退市回报定义](https://www.crsp.org/crsp_pdf/crsp-us-stock-indexes-databases-data-descriptions-guide-crspaccess/)，再确认团队数据的可用年份与覆盖率。
 
@@ -27,7 +29,7 @@
 - [x] `stock-backtest --quant` 将选股排名接到目标仓位计算，保留同一批入选股的等权分仓作为对照。
 - [x] 纳入相关性、单股和行业集中度、换手上限及交易成本。合成数据已验证约束、权重、现金和成交成本对账。
 - [x] 用同一批候选和同一时间窗口比较优化前后的净收益、回撤和换手，报告限制触发和跳过原因。四股真实样本的报告在 `local_data/stock_research_public_sample_quant.json`。
-- [ ] 在独立测试期的历史股票池上复验 Quant，检查成本和参数敏感性。
+- [x] 用独立测试期的历史股票池复验 Quant。比对每次入选名单、仓位、回撤和换手，固定并核对三种交易成本、三种风险厌恶系数所对应的五个场景。
 
 ## 3. 期权
 
@@ -58,5 +60,5 @@
 ## 存储和界面
 
 - [x] 本地 CLI 和 HTML 风险看板可用于读取研究结果和查看风控报告。
-- [ ] 历史数据查询、版本管理或多人共享出现明确需求时，评估数据库选型。
-- [ ] 团队需要在浏览器操作参数和对照实验结果时，评估前端接入。
+- [x] 首版本地存储评估完成。主要输入约 57 MB，CSV、JSON 与哈希清单已支持按版本复跑；数据库选型留待多人共享或高频历史扫描出现明确需求时评估。
+- [x] 首版操作和展示评估完成。CLI 执行与本地报告覆盖本轮开发验收，静态 HTML 风险看板可查看已有风控报告。浏览器调参和对照实验界面按团队后续使用需求评估。
