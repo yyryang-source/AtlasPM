@@ -1,5 +1,16 @@
 # AtlasPM AI Stock Ranker V2: pure cross-sectional Learning-to-Rank
 
+## Bounded-memory monthly inference (V1 + V2)
+
+The monthly `stock-ai-rank` and `stock-ai-rank-v2` commands now stream
+adjusted prices and retain at most **253 closes per ticker** at the decision
+date instead of materializing the complete history. For out-of-order
+securities, the existing strict full-array reader is used as a fallback
+to preserve sorting, duplicate detection, and price validation.
+The complete feature vector, model weights and all training/backtesting
+logic remain unchanged. This changes RAM needs for normal large-universe
+month-end inference, not Rank IC or investment returns.
+
 **This is a stock PICKER only**. No order, broker API, weights, leverage,
 trade, risk budget, stop-loss or market-maker functions.
 

@@ -23,6 +23,7 @@ from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
 from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.selection.recent_prices import load_recent_stock_price_arrays
 
 
 FEATURE_NAMES = (
@@ -506,7 +507,9 @@ def rank_with_ai(
     bench_days = sorted(d for d in bench if d <= cutoff)
     if not bench_days or bench_days[-1] != cutoff:
         raise ValueError("as-of must be a completed benchmark trading close")
-    history = load_stock_price_arrays(prices_path)
+    # Month-end inference needs only 253 historical closes per ticker;
+    # the full-history array loader remains used during model training.
+    history = load_recent_stock_price_arrays(prices_path, as_of=cutoff)
     history.pop(ticker, None)
     rows = _candidate_rows(
         history, bench_days, bench,
