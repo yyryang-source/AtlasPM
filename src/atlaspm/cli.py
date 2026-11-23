@@ -49,6 +49,7 @@ from atlaspm.ai_stock_ranker import train_ai_stock_ranker, rank_with_ai
 from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank, rank_stocks_v2
 from atlaspm.selection.v2_momentum_diagnostics import diagnose_v2_momentum_extremes
 from atlaspm.selection.corporate_action_reconciliation import reconcile_reverse_splits
+from atlaspm.selection.consensus_20_screener import run_20_signal_research
 from atlaspm.monthly_stock_selection import monthly_candidates, write_monthly_research
 from atlaspm.alpha_eligibility import build_from_file, research_action_check, write_eligibility_json
 
@@ -464,6 +465,20 @@ def build_parser() -> argparse.ArgumentParser:
     monthly.add_argument("--overwrite", action="store_true",
                          help="Explicitly replace previous month's research snapshot")
 
+    ensemble = sub.add_parser(
+        "stock-consensus-20",
+        help="Offline 20 original price signal screener in five factor families; research only",
+    )
+    ensemble.add_argument("--prices", type=Path, required=True)
+    ensemble.add_argument("--universe", type=Path, default=None)
+    ensemble.add_argument("--as-of", required=True)
+    ensemble.add_argument("--top", type=int, default=10)
+    ensemble.add_argument("--min-price", type=float, default=5.0)
+    ensemble.add_argument("--max-daily-ratio", type=float, default=4.0)
+    ensemble.add_argument("--min-screenable", type=int, default=100)
+    ensemble.add_argument("--output", type=Path,
+                          default=Path("local_data/consensus_20_research.json"))
+
     ai_train_v2 = sub.add_parser(
         "stock-ai-train-v2",
         help="Train a pure stock learning-to-rank LightGBM rank_xendcg model",
@@ -743,6 +758,42 @@ def main(argv: list[str] | None = None) -> int:
                 "artifacts": artifacts,
                 "research_only": True,
                 "live_execution_enabled": False,
+            }
+        elif args.command == "stock-consensus-20":
+            destination = require_private_output(args.output)
+            if destination.suffix.lower() != ".json":
+                raise ValueError("20-signal research output must be a private JSON file")
+            inputs = {args.prices.expanduser().resolve()}
+            if args.universe is not None:
+                inputs.add(args.universe.expanduser().resolve())
+            if destination in inputs:
+                raise ValueError("Consensus report cannot overwrite input files")
+            result = run_20_signal_research(
+                args.prices, as_of=args.as_of,
+                top=args.top, min_price=args.min_price,
+                max_daily_ratio=args.max_daily_ratio,
+                universe_path=args.universe,
+                min_screenable=args.min_screenable,
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(
+                json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            report = {
+                "as_of": result["as_of"],
+                "status": result["status"],
+                "signal_count": result["n_signals"],
+                "family_count": result["n_families"],
+                "screenable_stocks": result["data_quality"]["eligible_price_only_names"],
+                "excluded_counts": result["data_quality"]["excluded_counts"],
+                "selected": result["selected"],
+                "preview_not_trade_instructions": result["preview_not_trade_instructions"][:10],
+                "review_reasons": result["review_reasons"],
+                "written": str(destination.relative_to(Path.cwd().resolve())),
+                "research_only": True,
+                "live_execution_enabled": False,
+                "automated_handoff_approved": False,
             }
         elif args.command == "stock-ai-train-v2":
             destination = require_private_output(args.model_output)
