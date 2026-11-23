@@ -24,6 +24,7 @@ For existing clones, run `git pull --ff-only origin main` instead of cloning aga
 src/atlaspm/
   cli.py            # public entry point (offline research)
   commands/         # quant_cli.py, selection_cli.py, broker_cli.py
+  framework/        # 8-stage quant workflow registry (inspection only)
   quant/            # allocation, backtests, RiskNet/FusionNet, IBKR risk
   selection/        # stock universe, quote QC, rankers, monthly shortlist
 tests/
@@ -53,9 +54,22 @@ Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatib
 
 **Current evidence limits:** The expanded current-listed US dataset has about 5,830 cached symbols, but it is not a historical point-in-time universe; it is vulnerable to survivorship bias. In the first full-market LightGBM V2 experiment, held-out Rank IC was **-0.01774** versus **+0.11176** for a simple momentum baseline, and Top-10 scores tied across decision dates. This model is **not eligible for automatic trading**. The separate RiskNet/FusionNet historical results have also been examined repeatedly and require independent validation.
 
+## Standard quantitative workflow (research specification)
+
+The target architecture is **Data & governance → Alpha research →
+independent validation → equity / options / bonds sleeves →
+cross-asset portfolio optimization + hedging + continuous risk →
+pretrade controls → OMS & reconciliation → monitoring + research feedback**.
+
+The [GitHub Mermaid flowchart](docs/QUANT_WORKFLOW.md) and read-only
+`python -m atlaspm.framework --format json` command show the current
+research-vs-planned status. **Options/bonds engines, unified hedge optimizer,
+real-time execution and live broker permissions are not implemented.**
+
 ## Documentation
 
 - [Architecture and safety boundaries](docs/ARCHITECTURE.md)
+- [Standard quantitative trading flowchart](docs/QUANT_WORKFLOW.md)
 - [Command interface and module layout](docs/CLI.md)
 - [Documentation index](docs/README.md)
 - [Stock selection and ranking](docs/selection/AI_STOCK_RANKER_V2.md)

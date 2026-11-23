@@ -2,6 +2,18 @@
 
 This file describes **outstanding work**, not a promise of profitability or a release date.
 
+## Architecture — end-to-end lifecycle
+
+See [Standard Quant Workflow](QUANT_WORKFLOW.md) and run
+`python -m atlaspm.framework --format json` to inspect the status of every
+stage. This is a **contract and roadmap**, not a newly enabled trading bot.
+
+Research steps: data governance → Alpha and factor research → sample-out
+validation → asset-specific research → joint portfolio/risk/hedge design →
+independent pretrade gate → synthetic execution/reconciliation →
+monitoring/attribution → research feedback. Risk and compliance are
+cross-cutting controls at every stage.
+
 ## Current — research stabilization
 
 - Audit and reconcile verified corporate actions without rewriting raw quotes; add regression tests for repeated events and already-adjusted data.
@@ -14,6 +26,15 @@ This file describes **outstanding work**, not a promise of profitability or a re
 - Link verified candidate allowlist to a deterministic portfolio optimizer **in offline preview only**.
 - Separate cash vs margin account ledgers, fee/cost estimates, concentration limits, stress tests and explicit no-trade state.
 - Report rejected names, position sizing rationale, financing expense and scenario risk; do not force ten holdings when there are too few qualifying equities.
+
+## Later — multi-asset strategy research
+
+- Build separate options volatility/Greeks and bond curve/duration/credit
+  research pipelines with honest contract-level data and cost models.
+- Design a common risk exposure schema for equity beta, option Greeks,
+  interest-rate duration, financing and tail protection.
+- Jointly optimize hedges and portfolio construction in an offline preview.
+  Nothing in the architecture registry generates live orders.
 
 ## Later — broker paper integration
 

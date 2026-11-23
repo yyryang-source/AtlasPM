@@ -6,6 +6,7 @@ AtlasPM is a **local-first research toolkit**, not a production trading service.
 src/atlaspm/
   cli.py                 # public command interface, JSON/error handling
   commands/              # selection_cli.py, quant_cli.py, broker_cli.py (CLI adapters)
+  framework/             # machine-readable eight-stage quant workflow (NO execution)
   selection/             # actual US stock screening/ranking algorithms and quote QC
   quant/                 # actual portfolio, risk, margin and synthetic OMS algorithms
   *.py                   # temporary compatibility aliases for original module imports
@@ -16,6 +17,12 @@ docs/quant/              # independent risk and research methods
 docs/selection/          # stock-selection methods
 examples/                # fictional/synthetic data only
 ```
+
+The [standard quantitative trading architecture](QUANT_WORKFLOW.md) now maps
+**Data → Alpha → Validation → Equity/Options/Bonds → Portfolio & Hedging →
+Pretrade Gate → Synthetic OMS → Monitoring & Research Feedback**.
+The `atlaspm.framework` registry is read-only and does not imply any missing
+asset engine, broker permission, or production execution has been implemented.
 
 ## Research flow
 
@@ -35,4 +42,4 @@ examples/                # fictional/synthetic data only
 - Broker execution requires a separately built, audited authorization and order lifecycle; none is present today.
 - Preserve import compatibility aliases until a versioned API migration updates consumers and regression tests.
 
-For current work, see [ROADMAP.md](ROADMAP.md), [selection docs](selection/) and [quant docs](quant/).
+For current work, see [QUANT_WORKFLOW.md](QUANT_WORKFLOW.md), [ROADMAP.md](ROADMAP.md), [selection docs](selection/) and [quant docs](quant/).
