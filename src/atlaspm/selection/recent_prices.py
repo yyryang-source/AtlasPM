@@ -1,11 +1,9 @@
-"""Bounded-memory close-history loader for monthly stock-ranking inference.
+"""Bounded-memory adjusted-close arrays for month-end ranking inference.
 
-This is not a replacement for full-history training, backtests, or exchange
-universe audits. On chronologically ordered per-symbol rows (ticker-major or
-date-major), retain only the last 253 prices on or before the decision date.
-For any out-of-order or duplicate date, defer to the canonical strict loader:
-it sorts valid unordered input and still rejects duplicate records. That
-fallback sacrifices the memory advantage instead of changing data semantics.
+Retains at most 253 decision-date prices per ticker for the nine ranking
+features. Model training and walk-forward backtests MUST continue using the
+full-history loader. Out-of-order dates fall back to the canonical strict
+array loader, preserving valid unordered input and duplicate rejection.
 """
 
 from __future__ import annotations
@@ -16,21 +14,20 @@ from datetime import date
 from math import isfinite
 from pathlib import Path
 
-from atlaspm.quant.historical import load_adjusted_prices
+from atlaspm.selection.price_arrays import load_stock_price_arrays
 
 _FEATURE_WINDOW = 253
 
 
-def load_recent_adjusted_prices(
+def load_recent_stock_price_arrays(
     path: Path, *, as_of: date,
-) -> dict[str, dict[date, float]]:
-    """Load only the closes actually used by ranking features.
+) -> dict[str, tuple[list[date], list[float]]]:
+    """Return symbol -> (dates, adjusted_closes) as of a completed close.
 
-    Every input row is validated, INCLUDING rows after as_of. Duplicates
-    and nonchronological per-symbol data trigger a strict full-file fallback
-    so results and fail-closed behavior match load_adjusted_prices().
-    Each output includes all encountered symbols, even if a symbol has no
-    pre-cutoff observations (important for universe/exclusion counts).
+    Per-symbol chronological CSV is streamed without storing earlier bars.
+    For unordered/duplicate per-ticker dates, the existing full-array loader
+    is used: it accepts unordered input and rejects duplicates. All rows
+    (even future-dated) are validated, avoiding silent data-quality changes.
     """
     if not isinstance(as_of, date):
         raise ValueError("as_of must be a datetime.date")
@@ -47,7 +44,7 @@ def load_recent_adjusted_prices(
             raise ValueError("CSV needs columns: date,symbol,adjusted_close")
         for line_no, record in enumerate(reader, start=2):
             try:
-                observed_date = date.fromisoformat(record["date"].strip())
+                day = date.fromisoformat(record["date"].strip())
                 symbol = record["symbol"].strip().upper()
                 close = float(record["adjusted_close"])
             except (TypeError, ValueError, AttributeError) as exc:
@@ -57,26 +54,33 @@ def load_recent_adjusted_prices(
                     f"Invalid symbol or adjusted_close in row {line_no}"
                 )
             previous = last_seen.get(symbol)
-            if previous is not None and observed_date <= previous:
+            if previous is not None and day <= previous:
                 unordered = True
                 break
-            last_seen[symbol] = observed_date
-            # Keep the ticker in the historical universe even when its
-            # available closes are all later than the decision date.
-            history = recent[symbol]
-            if observed_date <= as_of:
-                history.append((observed_date, close))
+            last_seen[symbol] = day
+            # Include symbols whose only observations are after as_of so
+            # the candidate universe and exclusion counts do not change.
+            series = recent[symbol]
+            if day <= as_of:
+                series.append((day, close))
     if unordered:
-        # Exact compatibility with the full loader, including duplicate
-        # rejection even for dates too old to fit the 253-close window.
-        full = load_adjusted_prices(Path(path))
-        return {
-            symbol: dict(sorted(
-                ((day, close) for day, close in observations.items()
-                 if day <= as_of)
-            )[-_FEATURE_WINDOW:])
-            for symbol, observations in full.items()
-        }
+        full = load_stock_price_arrays(Path(path))
+        result = {}
+        for symbol, (days, closes) in full.items():
+            # Old data may be unordered, but the full reader sorted it.
+            # Preserve values exactly; no forward-fill or split adjustment.
+            retained = [
+                (day, close) for day, close in zip(days, closes)
+                if day <= as_of
+            ][-_FEATURE_WINDOW:]
+            result[symbol] = (
+                [day for day, _ in retained],
+                [close for _, close in retained],
+            )
+        return result
     if not recent:
         raise ValueError("No valid price rows in CSV")
-    return {symbol: dict(history) for symbol, history in recent.items()}
+    return {
+        symbol: ([day for day, _ in series], [close for _, close in series])
+        for symbol, series in recent.items()
+    }

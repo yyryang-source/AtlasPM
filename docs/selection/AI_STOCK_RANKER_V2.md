@@ -2,19 +2,14 @@
 
 ## Bounded-memory monthly inference (V1 + V2)
 
-Monthly `stock-ai-rank` / `stock-ai-rank-v2` now stream each adjusted-close
-CSV once and keep **at most 253 decision-date closes per ticker** in memory,
-rather than keeping every observed historical bar. This is an inference-only
-optimization: training, backtesting, the price-data source, model weights and
-the nine factor definitions are not changed.
-
-Date-major and ticker-major files both work when observations for each ticker
-are chronologically ordered. Unexpected older/duplicate per-ticker dates
-fall back to the original full-history reader; duplicates still fail, and
-all rows including future-dated rows are validated. The loader does not
-repair splits, certify liquidity, establish historical listing membership,
-or make a weak V2 ranker profitable. Benchmark histories remain validated
-with the original strict reader.
+The monthly `stock-ai-rank` and `stock-ai-rank-v2` commands now stream
+adjusted prices and retain at most **253 closes per ticker** at the decision
+date instead of materializing the complete history. For out-of-order
+securities, the existing strict full-array reader is used as a fallback
+to preserve sorting, duplicate detection, and price validation.
+The complete feature vector, model weights and all training/backtesting
+logic remain unchanged. This changes RAM needs for normal large-universe
+month-end inference, not Rank IC or investment returns.
 
 **This is a stock PICKER only**. No order, broker API, weights, leverage,
 trade, risk budget, stop-loss or market-maker functions.
@@ -174,3 +169,25 @@ non-overlapping/appropriately purged forward-return labels, and
 compare V2 against the momentum baseline on untouched future windows.
 Do not repeatedly optimize against the same 2026 test period.
 
+
+
+## Large-universe price ingestion (memory optimization)
+
+Both V1 and V2 stock-ranker paths now share
+`atlaspm.selection.price_arrays.load_stock_price_arrays` for the
+**stock** CSV. It reads a long-form `date,symbol,adjusted_close` file
+straight into date/price lists, instead of allocating a separate date-keyed
+dictionary per symbol and then copying that dictionary into lists. Already
+chronological ticker histories are not sorted again; out-of-order symbols
+are sorted and checked for nonadjacent duplicate dates.
+
+This is an **ingestion/peak-memory improvement**, not a modification of
+the 9 input factors, labels, training scheme, ranks, top-N tie policy or
+historical performance. The generic `load_adjusted_prices` function is
+unchanged for portfolio uses. Regression tests compare prices with the old
+strict loader on ticker-major, date-major and shuffled files, including
+duplicate and bad-price rejection. No real brokerage permissions change.
+
+Do not interpret this as resolving 5,000-stock survivorship bias,
+corporate-action audit gaps, the previously negative V2 test IC, or
+missing true future out-of-sample validation.
