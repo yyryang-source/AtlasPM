@@ -194,3 +194,53 @@ may differ. Source divergence is diagnostic; the program never
 auto-rescales prices or approves AI training. An eight-symbol,
 one-month check cannot prove point-in-time market membership or
 fully validate historical corporate actions or data rights.
+
+## Bulk all-market historical download (2000-01 through March 2026)
+
+The Windows PowerShell runner processes every available monthly source file;
+**it does not filter to a current stock watchlist**. Each source month
+contains all of its published ticker symbols. This is not proof of a
+complete historical US equity universe, point-in-time listings, or
+delisted-company correctness.
+
+The previously requested range was 2000-01 through 2026-11. The Hugging
+Face publisher's latest visible monthly file remains **2026-03**, so
+the 2026-04..2026-11 months are logged as unavailable, not fabricated.
+
+~~~powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git switch main
+git pull --ff-only origin main
+$py = ".\.venv\Scripts\python.exe"
+& $py -m pip install -e ".[lake,calendar,hf]"
+
+# Verify monthly counts and unavailable months; no network:
+& .\scripts\data\Invoke-HFAllMarketBackfill.ps1 -DryRun
+
+# Only after verifying your Finnhub-derived market-data usage rights:
+& .\scripts\data\Invoke-HFAllMarketBackfill.ps1 -AcknowledgeRights
+~~~
+
+The default full request is `-StartMonth 2000-01 -EndMonth 2026-11`.
+`-MaxMonths 0` means all available months, **not** a one-month cap.
+Use `-MaxMonths 2` for a small initial batch, then rerun without that
+limit. When resumed, months with both completed Parquet and QC JSON
+are skipped; failed months are retried. Any failure is recorded and
+the full run reports which months did not complete.
+
+Source monthly 1m Parquet and converted 5m Parquet remain on the local
+Windows disk by default. **Expect substantial disk use**: the complete
+1992..2026 publisher archive is labeled 87.7 GB *before* adding
+converted files, temporary files and Hugging Face caches. For the
+2000..2026 subset, capacity depends on selected monthly sizes; having
+well over 100 GB free is prudent. A disk-space guard stops processing
+when under 5 GiB remain. If you only want 5m and knowingly do not need
+1m source history, opt into `-RemoveRaw` (irreversible without another
+download); do NOT use this if you want the original 1m data too.
+
+Logs and a durable summary are private, under:
+`local_data/stock_5m/huggingface/bulk/progress.jsonl` and
+`local_data/stock_5m/huggingface/bulk/latest_summary.json`.
+Do not push local_data/ or the source data to GitHub. No background
+execution is performed by ChatGPT: this command runs only on your
+Windows computer while PowerShell is executing.
