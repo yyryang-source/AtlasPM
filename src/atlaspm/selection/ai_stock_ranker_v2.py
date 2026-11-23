@@ -15,6 +15,7 @@ import hashlib
 import json
 from math import floor, isfinite
 from pathlib import Path
+from statistics import fmean
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
@@ -120,23 +121,133 @@ def _rank_scores(
 
 
 def _rank_evaluation(rows: list[dict[str, Any]], scores: Any, top: int) -> dict[str, Any]:
-    evaluated = evaluate_ranker(rows, list(scores), top=top)
+    """Evaluate ordinal model, but never treat arbitrary Top-N tie breaks as alpha.
+
+    The shared generic evaluate_ranker() reports every date's Top N after
+    falling back to symbol-order tie breaks. Preserve those historic figures
+    ONLY as explicitly labeled legacy diagnostics. V2's headline Top N
+    metrics include exclusively dates with an unambiguous selection boundary.
+    Also evaluate the raw momentum factor 0 on the same dates.
+    """
+    values = list(scores)
+    evaluated = evaluate_ranker(rows, values, top=top)
     cohorts: dict[str, list[tuple[dict[str, Any], float]]] = defaultdict(list)
-    for row, pred in zip(rows, scores):
+    for row, pred in zip(rows, values):
         cohorts[row["date"]].append((row, float(pred)))
-    levels = []
+
+    fractions: list[float] = []
     cutoff_ties = 0
+    model_excess: list[float] = []
+    model_spread: list[float] = []
+    momentum_excess: list[float] = []
+    momentum_spread: list[float] = []
+    momentum_ties = 0
+
     for cohort in cohorts.values():
-        _, d = _rank_scores([r for r, _ in cohort], [p for _, p in cohort], top)
-        levels.append(d["fraction_unique_levels"])
-        cutoff_ties += bool(d["ties_cross_top_n_cutoff"])
-    evaluated["mean_fraction_unique_levels"] = sum(levels) / len(levels)
+        day_rows = [row for row, _ in cohort]
+        predicted = [prediction for _, prediction in cohort]
+        selected, diagnostic = _rank_scores(day_rows, predicted, top)
+        fractions.append(diagnostic["fraction_unique_levels"])
+        cutoff_ties += bool(diagnostic["ties_cross_top_n_cutoff"])
+
+        realized = {row["symbol"]: float(row["forward_excess_return"]) for row in day_rows}
+        population_mean = fmean(realized.values())
+        if not diagnostic["ties_cross_top_n_cutoff"]:
+            observed = fmean(realized[item["symbol"]] for item in selected)
+            model_excess.append(observed)
+            model_spread.append(observed - population_mean)
+
+        momentum_selected, momentum_diagnostic = _rank_scores(
+            day_rows, [float(row["features"][0]) for row in day_rows], top,
+        )
+        momentum_ties += bool(momentum_diagnostic["ties_cross_top_n_cutoff"])
+        if not momentum_diagnostic["ties_cross_top_n_cutoff"]:
+            benchmark_observed = fmean(
+                realized[item["symbol"]] for item in momentum_selected
+            )
+            momentum_excess.append(benchmark_observed)
+            momentum_spread.append(benchmark_observed - population_mean)
+
+    # Explicitly relocate the old symbol-tie-broken Top N figures to a
+    # non-actionable diagnostics field. Do NOT report them as a valid Top N.
+    evaluated["legacy_symbol_tiebroken_top_n_diagnostic"] = {
+        "mean_forward_excess_return": evaluated["mean_top_n_forward_excess_return"],
+        "mean_minus_same_universe_mean": evaluated["mean_top_n_minus_same_universe_mean"],
+        "not_a_valid_portfolio_result": True,
+        "warning": (
+            "Historical generic evaluation broke tied model scores by ticker "
+            "alphabetically. These statistics are NOT selection alpha."
+        ),
+    }
+    evaluated["mean_top_n_forward_excess_return"] = (
+        fmean(model_excess) if model_excess else None
+    )
+    evaluated["mean_top_n_minus_same_universe_mean"] = (
+        fmean(model_spread) if model_spread else None
+    )
+    evaluated["top_n_unambiguous_decision_dates"] = len(model_excess)
     evaluated["top_n_ambiguous_decision_dates"] = cutoff_ties
+    evaluated["top_n_selection_quality"] = (
+        "ALL_AMBIGUOUS" if not model_excess else
+        "PARTIALLY_AMBIGUOUS" if cutoff_ties else
+        "ALL_UNAMBIGUOUS"
+    )
+    evaluated["mean_fraction_unique_levels"] = fmean(fractions)
+    evaluated["simple_momentum_top_n"] = {
+        "unambiguous_decision_dates": len(momentum_excess),
+        "ambiguous_decision_dates": momentum_ties,
+        "mean_forward_excess_return": (
+            fmean(momentum_excess) if momentum_excess else None
+        ),
+        "mean_minus_same_universe_mean": (
+            fmean(momentum_spread) if momentum_spread else None
+        ),
+    }
     evaluated["interpretation"] = (
-        "Test IC and observed Top-N forward excess are research metrics, "
-        "not a costed portfolio simulation or expected future profitability."
+        "Only unambiguous Top-N cohort boundaries contribute to the headline "
+        "return diagnostic; None means no evaluable Top N. Mean per-date "
+        "forward SPY excess is not a compounded or costed tradable strategy. "
+        "Simple momentum is an explicitly reported baseline."
     )
     return evaluated
+
+
+def _model_research_review(
+    validation: dict[str, Any],
+    test: dict[str, Any],
+) -> dict[str, Any]:
+    """Research-only fail-closed diagnostics, not a broker/risk authorization."""
+    reasons: list[str] = []
+    for name, metrics in (("VALIDATION", validation), ("TEST", test)):
+        # 12 decision dates is a minimum diagnostic sanity threshold, NOT
+        # statistical proof of out-of-sample alpha.
+        if metrics["decision_dates"] < 12:
+            reasons.append(
+                f"{name}_TOO_FEW_DECISION_DATES: {metrics['decision_dates']} < 12"
+            )
+        if metrics["top_n_ambiguous_decision_dates"]:
+            reasons.append(
+                f"{name}_TOP_N_BOUNDARY_TIES: "
+                f"{metrics['top_n_ambiguous_decision_dates']} ambiguous dates"
+            )
+        if metrics["top_n_unambiguous_decision_dates"] == 0:
+            reasons.append(f"{name}_NO_UNAMBIGUOUS_TOP_N_EVALUATION")
+    test_ic = test["mean_spearman_ic"]
+    baseline_ic = test["simple_momentum_mean_spearman_ic"]
+    if test_ic is None or test_ic <= 0:
+        reasons.append("TEST_IC_NOT_POSITIVE")
+    if baseline_ic is not None and (test_ic is None or test_ic <= baseline_ic):
+        reasons.append("TEST_IC_NOT_BETTER_THAN_SIMPLE_MOMENTUM")
+    return {
+        "status": "REVIEW_REQUIRED" if reasons else "PRELIMINARY_RESEARCH_REVIEW",
+        "reasons": reasons,
+        "no_trading_authorization": True,
+        "note": (
+            "Even PRELIMINARY_RESEARCH_REVIEW is not an alpha validation or "
+            "automated trading approval. Requires historical PIT universe, "
+            "more genuinely unseen decision periods and costed portfolio tests."
+        ),
+    }
 
 
 def train_stock_learning_to_rank(
@@ -206,6 +317,7 @@ def train_stock_learning_to_rank(
     test_scores = model.predict(_matrix(test_rows), num_iteration=iteration)
     val_metrics = _rank_evaluation(val_rows, val_scores, top)
     test_metrics = _rank_evaluation(test_rows, test_scores, top)
+    research_review = _model_research_review(val_metrics, test_metrics)
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(model_path), num_iteration=iteration)
     sha = hashlib.sha256(model_path.read_bytes()).hexdigest()
@@ -248,11 +360,13 @@ def train_stock_learning_to_rank(
         },
         "validation": val_metrics,
         "test": test_metrics,
+        "model_research_review": research_review,
         "live_execution_enabled": False,
         "warnings": list(_RISK_DISCLOSURES) + [
             "Ranking model score is not a forecast of percentage return.",
             "Compare test IC and tie frequency against regression V1; a less tied ranking is not automatically more accurate.",
             "Historical 2023-2026 test period was previously analyzed; future untouched data still needed.",
+            "Naive Top-N means from ticker-alphabetical tie breaks are diagnostics only and never count as validated alpha.",
         ],
     }
 
