@@ -148,3 +148,47 @@ data usage rights, or point-in-time availability. No model is approved
 for training or live trading by the audit.
 
 This is a local research data inspection, not a performance backtest.
+
+## Independent daily reference comparison
+
+This next check compares selected liquid symbols' local RTH 5m-derived
+daily closes and volumes with a separate daily feed. Nothing is downloaded
+without the explicitly requested --fetch-yahoo flag. The existing HF
+monthly source file is never re-downloaded or rewritten.
+
+Windows PowerShell, project root:
+
+~~~powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git switch main
+git pull --ff-only origin main
+$py = ".\.venv\Scripts\python.exe"
+& $py -m pip install -e ".[lake,calendar,market]"
+& $py -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
+& $py -m atlaspm.cli market-db hf-5m-reconcile --month 2026-03 --symbols SPY QQQ AAPL MSFT NVDA GOOGL AMZN META --fetch-yahoo
+~~~
+
+Alternatively, use a locally prepared independent reference CSV without
+any network request:
+
+~~~powershell
+& $py -m atlaspm.cli market-db hf-5m-reconcile --month 2026-03 --symbols SPY QQQ --reference-csv local_data\reference_daily.csv
+~~~
+
+CSV headers: date,symbol,close,volume. All rows must be independently
+obtained from a separate source for the same sessions. No example
+fake market prices should be used for actual comparisons.
+
+Daily close differences above 1% and RTH-only vs reference daily
+volume differences above 25% are flagged. Incomplete first/last
+5-minute time buckets are omitted from comparisons and explicitly
+counted, not silently filled. The report is written to
+local_data/stock_5m/huggingface/quality/reconciliations/2026-03.json.
+
+WARNING: Yahoo Close may be split-adjusted, while the HF minute
+provider's corporate-action adjustment semantics remain unknown.
+Volume conventions, coverage, closing auctions and venue aggregation
+may differ. Source divergence is diagnostic; the program never
+auto-rescales prices or approves AI training. An eight-symbol,
+one-month check cannot prove point-in-time market membership or
+fully validate historical corporate actions or data rights.
