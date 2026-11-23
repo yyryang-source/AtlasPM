@@ -306,6 +306,14 @@ def register_parser(sub):
     h.add_argument('--acknowledge-rights',action='store_true')
     h.add_argument('--input',type=Path,default=None)
     actions.add_parser('hf-5m-status')
+    h=actions.add_parser('hf-5m-reconcile',help='Compare local 5m daily close with independent reference')
+    h.add_argument('--month',required=True)
+    h.add_argument('--symbols',nargs='+',default=None)
+    h.add_argument('--reference-csv',type=Path,default=None)
+    h.add_argument('--fetch-yahoo',action='store_true')
+    h.add_argument('--close-tolerance-pct',type=float,default=1.0)
+    h.add_argument('--volume-tolerance-pct',type=float,default=25.0)
+    h.add_argument('--no-save',action='store_true')
     h=actions.add_parser('hf-5m-audit',help='Audit local HF 5m bars against NYSE calendar and major symbols')
     h.add_argument('--month',required=True)
     h.add_argument('--session',choices=['rth','all'],default='rth')
@@ -319,6 +327,14 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action == 'hf-5m-reconcile':
+        from atlaspm.data import hf_stock5m_reconcile
+        return hf_stock5m_reconcile.reconcile(
+            args.month,symbols=args.symbols,
+            reference_csv=args.reference_csv,fetch_yahoo=args.fetch_yahoo,
+            close_tolerance_pct=args.close_tolerance_pct,
+            volume_tolerance_pct=args.volume_tolerance_pct,
+            save=not args.no_save)
     if args.db_action == 'hf-5m-audit':
         from atlaspm.data import hf_stock5m_audit
         return hf_stock5m_audit.audit(args.month,session=args.session,save=not args.no_save)
