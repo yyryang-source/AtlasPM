@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date
 from html.parser import HTMLParser
+from fractions import Fraction
 import json
 import os
 import re
@@ -160,7 +161,12 @@ def select(ciks, start, end, kind, limit):
         indexed = [r[0] for r in cx.execute("SELECT quarter FROM partitions ORDER BY quarter").fetchall()]
     finally:
         cx.close()
+    first, last = _iso(start), _iso(end)
+    expected = [f"{year:04d}-Q{q}" for year in range(first.year,last.year+1)
+                for q in range(1,5) if (first.year,(first.month-1)//3+1)
+                <= (year,q) <= (last.year,(last.month-1)//3+1)]
     return {"schema":"atlaspm_sec_filing_selection_v52",**v4.GUARDS,
+            "missing_requested_quarters":sorted(set(expected)-set(indexed)),
             "kind":kind,"indexed_quarters":indexed,"truncated":len(rows)>limit,
             "filings":[{"cik":c,"issuer":i,"form":f,"filed_date":d.isoformat(),"source_url":u}
                        for c,i,f,d,u in rows[:limit]]}
@@ -223,8 +229,15 @@ def extract(data, filing):
                 hint["ratio_terms"] = [int(m.group(1)),int(m.group(2))]
             hints.append(hint)
             if len(hints)>=MAX_HINTS:
-                return {"hints":hints,"truncated":True}
-    return {"hints":hints,"truncated":False}
+                return _hint_summary(hints, True)
+    return _hint_summary(hints, False)
+
+
+def _hint_summary(hints, truncated):
+    ratios = {Fraction(*h["ratio_terms"]) for h in hints if h["kind"]=="SPLIT_RATIO"
+              and min(h["ratio_terms"])>0}
+    return {"hints":hints,"truncated":truncated,
+            "multiple_ratio_candidates":len(ratios)>1}
 
 
 def collect(ciks,start,end,kind,limit=20,*,fetch=False,max_requests=20):
@@ -276,6 +289,7 @@ def collect(ciks,start,end,kind,limit=20,*,fetch=False,max_requests=20):
             ev._json(BASE / "hints" / (key+"-"+digest+"-"+filing["form"].replace("/","_")+".json"),item)
             report["results"].append({**filing,"sha256":digest,
                                      "hint_count":len(result["hints"]),"truncated":result["truncated"],
+                                     "multiple_ratio_candidates":result["multiple_ratio_candidates"],
                                      "status":"REVIEW_REQUIRED"})
         except Exception as exc:
             report["results"].append({**filing,"error":str(exc)})
