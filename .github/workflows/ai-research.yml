@@ -19,6 +19,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[portfolio,research-ml,research-io]"
       - run: python -m unittest discover -s tests -p "test_training*.py" -v
+      - run: python -m atlaspm.research.training_benchmark --days 40 --assets 32 --array-budget-mib 1
   sequence:
     strategy:
       matrix:
