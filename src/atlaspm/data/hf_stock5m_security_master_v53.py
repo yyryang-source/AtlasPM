@@ -1,0 +1,316 @@
+"""V5.3 append-only, date-precision historical evidence ledger.
+
+Explicit reviewed assertions only. Source families are declared, not proven
+independent. Agreement is a research candidate, never training authorization.
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+from contextlib import closing
+from datetime import date
+from decimal import Decimal, InvalidOperation, localcontext
+import json
+from pathlib import Path
+import re
+import sqlite3
+
+from atlaspm.data import hf_stock5m_evidence_v51 as ev
+from atlaspm.data import hf_stock5m_session_v4 as v4
+from atlaspm.data.hf_stock5m_certification_v5 import EXCHANGES, ROOT, fingerprint
+from atlaspm.data.market_db import private_path
+
+BASE = ROOT / "security_master_v53"
+FIELDS = {"record_id","record_type","source_family","source_url","evidence_path",
+          "evidence_sha256","known_date","reviewer","state","payload"}
+TYPES = {"IDENTITY","ACTION"}
+ACTION_KINDS = {"SPLIT","CASH_DIVIDEND","CASH_EXIT","MERGER","DELISTING","TICKER_CHANGE"}
+TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
+SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,31}")
+SHA = re.compile(r"[0-9a-f]{64}")
+
+
+def _date(s):
+    if not isinstance(s,str) or date.fromisoformat(s).isoformat()!=s:
+        raise ValueError("Dates must be canonical YYYY-MM-DD")
+    return s
+
+
+def _token(s):
+    if not isinstance(s,str) or not TOKEN.fullmatch(s):
+        raise ValueError("Invalid identifier")
+    return s
+
+
+def _canonical(value):
+    return json.dumps(value,sort_keys=True,separators=(",",":"),allow_nan=False)
+
+
+def _decimal(value):
+    if not isinstance(value,str) or len(value)>80:
+        raise ValueError("Economic values must be bounded decimal strings")
+    try:
+        d = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("Invalid decimal") from exc
+    if not d.is_finite() or d<=0 or d.adjusted() not in range(-18,19):
+        raise ValueError("Economic value out of supported range")
+    return format(d,"f").rstrip("0").rstrip(".") if "." in format(d,"f") else format(d,"f")
+
+
+def _payload(kind,p):
+    if not isinstance(p,dict):
+        raise ValueError("Payload must be an object")
+    if kind=="IDENTITY":
+        if set(p)!={"security_id","symbol","exchange","valid_from","valid_to"}:
+            raise ValueError("Invalid identity payload fields")
+        _token(p["security_id"])
+        if not isinstance(p["symbol"],str) or not SYMBOL.fullmatch(p["symbol"]) or p["exchange"] not in EXCHANGES:
+            raise ValueError("Invalid ticker or MIC")
+        _date(p["valid_from"])
+        if p["valid_to"] is not None and _date(p["valid_to"])<=p["valid_from"]:
+            raise ValueError("Invalid exclusive end")
+        return dict(p)
+    if set(p)!={"security_id","kind","effective_date","value","currency","successor_id","new_symbol"}:
+        raise ValueError("Invalid action payload fields")
+    _token(p["security_id"])
+    _date(p["effective_date"])
+    k=p["kind"]
+    if k not in ACTION_KINDS:
+        raise ValueError("Unsupported action")
+    p=dict(p)
+    if k in {"SPLIT","CASH_DIVIDEND","CASH_EXIT"}:
+        p["value"]=_decimal(p["value"])
+        if k=="SPLIT":
+            if Decimal(p["value"])==1 or p["currency"] is not None:
+                raise ValueError("Split must be non-unit new/old share ratio, without currency")
+        elif p["currency"]!="USD":
+            raise ValueError("Cash value must be USD per share")
+    elif p["value"] is not None or p["currency"] is not None:
+        raise ValueError("Unsupported economic terms")
+    if k=="MERGER":
+        if _token(p["successor_id"])==p["security_id"]:
+            raise ValueError("Merger successor must differ")
+    elif p["successor_id"] is not None:
+        raise ValueError("Unexpected successor")
+    if k=="TICKER_CHANGE":
+        if not isinstance(p["new_symbol"],str) or not SYMBOL.fullmatch(p["new_symbol"]):
+            raise ValueError("Invalid new ticker")
+    elif p["new_symbol"] is not None:
+        raise ValueError("Unexpected ticker")
+    return p
+
+
+def validate(row, checked):
+    if not isinstance(row,dict) or set(row)!=FIELDS:
+        raise ValueError("Unexpected reviewed claim fields")
+    r=dict(row)
+    for k in ("record_id","source_family","reviewer"):
+        _token(r[k])
+    if r["record_type"] not in TYPES or r["state"] not in {"ASSERTED","RETRACTED"}:
+        raise ValueError("Unknown record type or revision state")
+    _date(r["known_date"])
+    if not isinstance(r["source_url"],str) or not re.fullmatch(r"https://[^\s]{1,2048}",r["source_url"]):
+        raise ValueError("Require HTTPS provenance URL")
+    if not isinstance(r["evidence_sha256"],str) or not SHA.fullmatch(r["evidence_sha256"]):
+        raise ValueError("Invalid evidence SHA-256")
+    path=private_path(Path(r["evidence_path"]),exists=True)
+    # Do not allow an extracted V5.2 hint to masquerade as primary evidence.
+    hint_dir=private_path(ROOT/"filings_v52"/"hints")
+    if path.is_relative_to(hint_dir):
+        raise ValueError("V5.2 text hints are not primary source evidence")
+    key=str(path)
+    if key not in checked:
+        checked[key]=fingerprint(path)["sha256"]
+    if checked[key]!=r["evidence_sha256"]:
+        raise ValueError("Evidence hash mismatch")
+    r["evidence_path"]=str(path.relative_to(Path.cwd().resolve()))
+    if r["state"]=="RETRACTED":
+        if r["payload"] is not None:
+            raise ValueError("Retraction must have null payload")
+    else:
+        r["payload"]=_payload(r["record_type"],r["payload"])
+    return r
+
+
+def _db():
+    path=private_path(BASE/"ledger.sqlite3")
+    path.parent.mkdir(parents=True,exist_ok=True)
+    cx=sqlite3.connect(path)
+    cx.execute("""CREATE TABLE IF NOT EXISTS claims(
+        claim_id TEXT PRIMARY KEY, record_type TEXT NOT NULL, record_id TEXT NOT NULL,
+        source_family TEXT NOT NULL, known_date TEXT NOT NULL, claim_json TEXT NOT NULL)""")
+    cx.execute("""CREATE INDEX IF NOT EXISTS claims_pit
+        ON claims(record_type,record_id,source_family,known_date)""")
+    return cx
+
+
+def ingest(filename):
+    """Atomic append, idempotent exact claims; no destructive revision."""
+    path=private_path(Path(filename),exists=True)
+    checked={}
+    added=0
+    total=0
+    with closing(_db()) as cx, cx:
+        with path.open(encoding="utf-8-sig") as handle:
+            for line_no,line in enumerate(handle,1):
+                if not line.strip():
+                    continue
+                try:
+                    row=validate(json.loads(line),checked)
+                    canonical=_canonical(row)
+                    key=ev._sha(canonical.encode())
+                    cur=cx.execute("INSERT OR IGNORE INTO claims VALUES (?,?,?,?,?,?)",
+                                   (key,row["record_type"],row["record_id"],
+                                    row["source_family"],row["known_date"],canonical))
+                    added+=cur.rowcount
+                    total+=1
+                except Exception as exc:
+                    raise ValueError(f"Claim line {line_no}: {exc}") from exc
+        if not total:
+            raise ValueError("Empty claim file")
+    return {"schema":"atlaspm_security_master_ingest_v53",**v4.GUARDS,
+            "claims_read":total,"claims_added":added,"claims_reused":total-added,
+            "status":"REVIEWED_ASSERTIONS_IMPORTED"}
+
+
+def _groups(cx,as_of):
+    # Same-day evidence is unavailable. Retain all latest-date ties so that
+    # contradictory statements from the same source cannot be silently chosen.
+    sql="""WITH visible AS (
+        SELECT *,max(known_date) OVER(PARTITION BY record_type,record_id,source_family) AS last_known
+        FROM claims WHERE known_date < ?)
+        SELECT record_type,record_id,claim_json FROM visible
+        WHERE known_date=last_known ORDER BY record_type,record_id,source_family,claim_id"""
+    from itertools import groupby
+    for key,group in groupby(cx.execute(sql,(as_of,)),key=lambda x:x[:2]):
+        yield key,[json.loads(x[2]) for x in group]
+
+
+def _resolve(rows,checked):
+    values={_canonical([r["state"],r["payload"]]) for r in rows}
+    if len(values)!=1:
+        return None,"CONFLICTING_VISIBLE_ASSERTIONS"
+    try:
+        for r in rows:
+            path=private_path(Path(r["evidence_path"]),exists=True)
+            key=str(path)
+            if key not in checked:
+                checked[key]=fingerprint(path)["sha256"]
+            if checked[key]!=r["evidence_sha256"]:
+                return None,"EVIDENCE_HASH_MISMATCH"
+    except (OSError,ValueError):
+        return None,"EVIDENCE_UNAVAILABLE"
+    if len({r["source_family"] for r in rows})<2 or len({r["evidence_sha256"] for r in rows})<2:
+        return None,"INSUFFICIENT_DECLARED_CORROBORATION"
+    r=rows[0]
+    if r["state"]=="RETRACTED":
+        return None,"RETRACTED"
+    return {**r["payload"],"record_id":r["record_id"],
+            "known_date":max(x["known_date"] for x in rows),
+            "sources":[{k:x[k] for k in ("source_family","source_url","evidence_sha256","reviewer","known_date")} for x in rows]},None
+
+
+def snapshot(as_of,trade_date=None):
+    """Research-only PIT projection using latest visible revision per family."""
+    as_of=_date(as_of)
+    trade_date=_date(trade_date or as_of)
+    if trade_date>as_of:
+        raise ValueError("Cannot query a future observation")
+    identities,actions,unresolved=[],[],[]
+    checked={}
+    retracted=0
+    with closing(_db()) as cx:
+        for (kind,key),rows in _groups(cx,as_of):
+            result,reason=_resolve(rows,checked)
+            if reason=="RETRACTED":
+                retracted+=1
+            elif reason:
+                unresolved.append({"record_type":kind,"record_id":key,"reason":reason})
+            else:
+                (identities if kind=="IDENTITY" else actions).append(result)
+    # Never choose between overlapping assignments, even if both have agreement.
+    bad=set()
+    for field in ("symbol","security_id"):
+        groups=defaultdict(list)
+        for r in identities:
+            groups[r[field]].append(r)
+        for group in groups.values():
+            group.sort(key=lambda x:x["valid_from"])
+            active=[]
+            for row in group:
+                active=[x for x in active if x["valid_to"] is None or x["valid_to"]>row["valid_from"]]
+                if active:
+                    bad.add(row["record_id"])
+                    bad.update(x["record_id"] for x in active)
+                active.append(row)
+    unresolved.extend({"record_type":"IDENTITY","record_id":key,"reason":"OVERLAPPING_IDENTITY"}
+                      for key in sorted(bad))
+    identities=[x for x in identities if x["record_id"] not in bad]
+    by_id=defaultdict(list)
+    for r in identities:
+        by_id[r["security_id"]].append(r)
+    economic=defaultdict(list)
+    for a in actions:
+        economic[(a["security_id"],a["kind"],a["effective_date"])].append(a)
+    valid_actions=[]
+    for group in economic.values():
+        for a in group:
+            if len(group)>1:
+                reason="DUPLICATE_OR_CONFLICTING_ECONOMIC_EVENT"
+            elif not any(i["valid_from"]<=a["effective_date"] and
+                         (i["valid_to"] is None or a["effective_date"]<i["valid_to"] or
+                          (a["kind"] in {"CASH_EXIT","DELISTING","MERGER","TICKER_CHANGE"} and a["effective_date"]==i["valid_to"]))
+                         for i in by_id[a["security_id"]]):
+                reason="NO_CORROBORATED_EFFECTIVE_IDENTITY"
+            else:
+                valid_actions.append(a)
+                continue
+            unresolved.append({"record_type":"ACTION","record_id":a["record_id"],"reason":reason})
+    members=[i for i in identities if i["valid_from"]<=trade_date and
+             (i["valid_to"] is None or trade_date<i["valid_to"])]
+    return {"schema":"atlaspm_security_master_snapshot_v53",**v4.GUARDS,
+            "as_of":as_of,"trade_date":trade_date,"identities":identities,"members":members,
+            "actions":valid_actions,"unresolved":unresolved,"retracted_records":retracted,
+            "status":"EVIDENCE_REVIEW_REQUIRED",
+            "blockers":["SOURCE_INDEPENDENCE_AND_AUTHENTICITY_UNVERIFIED",
+                        "HISTORICAL_UNIVERSE_AND_ACTION_COMPLETENESS_UNVERIFIED",
+                        "PRICE_ADJUSTMENT_SEMANTICS_AND_RIGHTS_UNVERIFIED"]}
+
+
+def adjustment(security_id,bar_date,as_of,*,raw_unadjusted=False):
+    _token(security_id)
+    bar_date=_date(bar_date)
+    report=snapshot(as_of,bar_date)
+    if not raw_unadjusted or report["unresolved"]:
+        raise ValueError("Require explicit unadjusted input and no unresolved visible evidence")
+    if not any(i["security_id"]==security_id for i in report["members"]):
+        raise ValueError("No corroborated security identity on bar date")
+    # This is only the multiplier from currently visible assertions. Unknown
+    # actions cannot be excluded and completeness is never claimed.
+    ratio=Decimal(1)
+    with localcontext() as ctx:
+        ctx.prec=50
+        for a in report["actions"]:
+            if a["security_id"]==security_id and bar_date<a["effective_date"]<=as_of:
+                if a["kind"]=="SPLIT":
+                    ratio*=Decimal(a["value"])
+                elif a["kind"] in {"CASH_EXIT","MERGER","DELISTING"}:
+                    raise ValueError("Unsupported exit economics in adjustment interval")
+        price=Decimal(1)/ratio
+    return {"schema":"atlaspm_visible_split_adjustment_v53",**v4.GUARDS,
+            "security_id":security_id,"bar_date":bar_date,"as_of":as_of,
+            "price_multiplier":str(price),"volume_multiplier":str(ratio),
+            "status":"PROVISIONAL_VISIBLE_ACTIONS_ONLY","completeness_verified":False}
+
+
+def inventory():
+    with closing(_db()) as cx:
+        counts=dict(cx.execute("SELECT record_type,count(*) FROM claims GROUP BY record_type").fetchall())
+    hints=private_path(ROOT/"filings_v52"/"hints")
+    report={"schema":"atlaspm_security_master_inventory_v53",**v4.GUARDS,
+            "claim_counts":counts,"unverified_filing_hint_files":sum(1 for _ in hints.glob("*.json")),
+            "status":"EVIDENCE_REVIEW_REQUIRED",
+            "blockers":["REVIEWED_CLAIMS_REQUIRED"] if not counts else ["EXTERNAL_CERTIFICATION_REQUIRED"]}
+    report["summary_path"]=str(private_path(BASE/"latest.json"))
+    ev._json(BASE/"latest.json",report)
+    return report

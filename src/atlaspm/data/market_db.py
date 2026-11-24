@@ -357,6 +357,17 @@ def register_parser(sub):
         if name.endswith('collect-v52'):
             h.add_argument('--fetch',action='store_true')
             h.add_argument('--max-requests',type=int,default=20)
+    actions.add_parser('hf-5m-security-inventory-v53',help='Inventory reviewed historical evidence')
+    h=actions.add_parser('hf-5m-security-ingest-v53',help='Append explicitly reviewed local JSONL assertions')
+    h.add_argument('--claims',required=True)
+    h=actions.add_parser('hf-5m-security-snapshot-v53',help='Research-only point-in-time security and event snapshot')
+    h.add_argument('--as-of',required=True)
+    h.add_argument('--trade-date')
+    h=actions.add_parser('hf-5m-security-adjust-v53',help='Provisional visible split multiplier')
+    h.add_argument('--security-id',required=True)
+    h.add_argument('--bar-date',required=True)
+    h.add_argument('--as-of',required=True)
+    h.add_argument('--raw-unadjusted',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -516,6 +527,16 @@ def run(args):
             return filings.select(args.ciks,args.start,args.end,args.kind,args.limit)
         return filings.collect(args.ciks,args.start,args.end,args.kind,args.limit,
                                fetch=args.fetch,max_requests=args.max_requests)
+    if args.db_action.startswith('hf-5m-security-'):
+        from atlaspm.data import hf_stock5m_security_master_v53 as master
+        if args.db_action == 'hf-5m-security-inventory-v53':
+            return master.inventory()
+        if args.db_action == 'hf-5m-security-ingest-v53':
+            return master.ingest(args.claims)
+        if args.db_action == 'hf-5m-security-snapshot-v53':
+            return master.snapshot(args.as_of,args.trade_date)
+        return master.adjustment(args.security_id,args.bar_date,args.as_of,
+                                 raw_unadjusted=args.raw_unadjusted)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
