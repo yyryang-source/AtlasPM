@@ -160,3 +160,24 @@ class ContinuousTests(unittest.TestCase):
         result=multiasset_position_review(bond,as_of=stamp,risk_inputs={"observed_at":stamp})
         self.assertAlmostEqual(result["metrics"]["dv01_usd_per_bp"],7)
         self.assertFalse(result["trade_authorized"])
+
+
+    @unittest.skipUnless(__import__("importlib").util.find_spec("scipy") and
+                         __import__("importlib").util.find_spec("pandas_market_calendars"),
+                         "portfolio/calendar extras required")
+    def test_offline_entry_real_modules_and_isolated_fixture(self):
+        out=orchestrator.offline_release(checkpoint="local_data/rc.continuous.json")
+        self.assertEqual(out["status"],"OFFLINE_FIXTURE_PASS",out["checks"])
+        self.assertTrue(all(out["checks"].values()))
+        self.assertFalse(out["release_candidate_approved"])
+        self.assertFalse(out["real_api_connected"])
+        self.assertFalse(event_queue.PATH.exists())
+        orchestrator.set_control("takeover")
+        self.assertEqual(orchestrator.offline_release()["status"],"PAUSED")
+
+    def test_synthetic_event_cannot_claim_real_subject(self):
+        row=fixture()["sessions"][0]["events"][0]
+        raw={k:v for k,v in row.items() if k not in {"received_at","event_id","revision","rights_status"}}
+        raw["subjects"]=["conid:123"]
+        with self.assertRaisesRegex(ValueError,"synthetic subject"):
+            normalize(raw,received_at=row["received_at"])

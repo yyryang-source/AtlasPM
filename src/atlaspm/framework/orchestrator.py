@@ -94,15 +94,129 @@ def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
             "training_started":False,"model_promoted":False}
 
 
+def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
+    """One reproducible, credential-free integration acceptance entry.
+
+    Built-in synthetic fixture only. Isolated fixture event queue (same
+    implementation), existing persistent simulation checkpoint. No real
+    data/model inference or real execution. A pause blocks new work between
+    stages, but cannot interrupt an in-progress atomic local calculation.
+    """
+    import json,tempfile
+    from pathlib import Path
+    from time import perf_counter,process_time
+    from atlaspm.data.market_db import private_path
+    from atlaspm.framework.continuous_simulation import continuous,synthetic_fixture
+    from atlaspm.framework.autonomous_cycle import run_fixture
+    from atlaspm.monitoring.api_management import inventory
+    from atlaspm.research.intelligence import model_inventory,offline_model_responses
+    from atlaspm.execution.oms_controls import verify_audit_chain
+
+    start,cpu=perf_counter(),process_time()
+    checks={}
+    def paused():
+        control=status()["control"]
+        return control.get("stopped") or control.get("manual_takeover")
+    def result(state,**details):
+        return {**FLAGS,"status":state,"mode":"synthetic_offline_acceptance",
+                "checks":checks,"network_calls":0,"broker_side_effects":False,
+                "wall_seconds":perf_counter()-start,"cpu_seconds":process_time()-cpu,
+                "production_performance_verified":False,**details}
+    if paused():
+        return result("PAUSED")
+    providers=inventory()
+    models=model_inventory()
+    checks["credential_free_inventory"]=all(row["connection_verified"] is False for row in providers)
+    data=synthetic_fixture()
+    weights={"m1":2,"m2":1}
+    root=private_path(Path("local_data/runs"))
+    root.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="offline-fixture-",dir=root) as temp:
+        queue_path=Path(temp)/"events.json"
+        count=0
+        for session in data["sessions"]:
+            if paused():
+                return result("PAUSED")
+            events=session["events"]
+            added=event_queue.enqueue(events,path=queue_path)
+            count+=added["added"]
+            checks["event_dedup"]=event_queue.enqueue(events,path=queue_path)["added"]==0 and checks.get("event_dedup",True)
+            out=tick(as_of=session["close_at"],limit=100,path=queue_path)
+            checks["event_review"]=out["review"]["completed"]==len(events) and checks.get("event_review",True)
+            checks["tick_idempotent"]=tick(as_of=session["close_at"],path=queue_path)["review"]["status"]=="DUPLICATE_TICK" and checks.get("tick_idempotent",True)
+        checks["event_count"]=count>0
+        checks["calendar"]=market_phase(data["sessions"][0]["close_at"])=="post_market"
+    if paused():
+        return result("PAUSED")
+    model_report=offline_model_responses()
+    checks["three_model_schema_fixtures"]=len(model_report["models"])==3 and all(
+        m["findings"]>0 and m["actual_provider_call"] is False for m in model_report["models"])
+    # First run validates full prefix, second run proves identical restart.
+    sim=continuous(data,weights=weights,checkpoint=checkpoint)
+    repeated=continuous(data,weights=weights,checkpoint=checkpoint)
+    checks["restart_identical"]=repeated["checkpoint_reused"] and sim["result_sha256"]==repeated["result_sha256"]
+    replay=sim["simulation"]
+    checks["continuous_flat_settled"]=sim["flat_and_settled"]
+    checks["continuous_orders_audited"]=bool(replay["orders"]) and all(
+        verify_audit_chain(order["events"],order["audit_root_sha256"]) for order in replay["orders"])
+    checks["risk_exit"]=replay["risk_halt_latched"] and any(
+        e["kind"]=="POSITION_STOP" for e in replay["position_lifecycle_audit"])
+    checks["continuous_attribution"]=abs(replay["curve"][-1]["equity"]-data["initial_cash"]-
+        sum(row["overnight_pnl"]+row["intraday_pnl"]-row["trade_cost"] for row in replay["curve"]))<.01
+    if paused():
+        return result("PAUSED")
+    fixture=Path(__file__).resolve().parents[3]/"examples/unified_portfolio_synthetic.json"
+    single=run_fixture(json.loads(fixture.read_text(encoding="utf-8")))
+    checks["existing_oms_flat"]=single["decision"]=="SYNTHETIC_EVENT_TO_FLAT_COMPLETE"
+    checks["existing_oms_attribution"]=single.get("attribution",{}).get("reconciled") is True
+    if paused():
+        return result("PAUSED")
+    # Link fixed prediction observations to actual synthetic next-close
+    # outcomes only after their label dates. Baseline uses past returns.
+    streams={m:[] for m in ("historical_mean","m1","m2")}
+    sessions=data["sessions"]
+    for idx,session in enumerate(sessions[:-1]):
+        after=sessions[idx+1]
+        by_symbol={}
+        for row in session["research"]:
+            by_symbol.setdefault(row["security_id"],{})[row["model_version"]]=row["expected_return"]
+        for sid,values in sorted(by_symbol.items()):
+            if set(values)!={"m1","m2"}:
+                continue
+            sym=sid[4:]
+            past=[sessions[j]["close"][sym]/sessions[j-1]["close"][sym]-1 for j in range(1,idx+1)]
+            values["historical_mean"]=sum(past)/len(past) if past else 0.
+            base={"date":session["date"],"security_id":sid,"label_end_date":after["date"],
+                  "actual":after["close"][sym]/session["close"][sym]-1}
+            for model,prediction in values.items():
+                streams[model].append({**base,"prediction":prediction})
+    learning=learning_review(streams,as_of_date=sessions[-1]["date"],window_dates=3,minimum_dates=2)
+    checks["learning_no_promotion"]=learning["model_promoted"] is False and learning["training_started"] is False
+    checks["learning_outcome_links"]=all(streams.values())
+    return result("OFFLINE_FIXTURE_PASS" if all(checks.values()) else "OFFLINE_FIXTURE_FAIL",
+                  providers=providers,model_inventory=models,model_fixture=model_report,
+                  synthetic_simulation={"sessions":sim["sessions"],"orders":len(replay["orders"]),
+                      "flat_and_settled":sim["flat_and_settled"],"ending_equity":replay["curve"][-1]["equity"],
+                      "total_cost":replay["total_cost"],"result_sha256":sim["result_sha256"]},
+                  single_cycle_decision=single["decision"],learning=learning,
+                  historical_data_certified=False,real_api_connected=False,
+                  release_candidate_approved=False)
+
+
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
+    parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.action=="offline":
+        out=offline_release(checkpoint=args.checkpoint)
+        print(json.dumps(out,indent=2,allow_nan=False))
+        return 0 if out["status"]=="OFFLINE_FIXTURE_PASS" else 1
     if args.action=="status":
         print(json.dumps(status(),indent=2))
     elif args.action!="run":
@@ -118,4 +232,4 @@ def main():
 
 
 if __name__=="__main__":
-    main()
+    raise SystemExit(main())

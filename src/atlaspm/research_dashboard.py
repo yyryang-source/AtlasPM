@@ -286,6 +286,8 @@ def overview(pages: dict) -> None:
     except (OSError,ValueError):
         st.error("系统状态读取或控制失败；请检查本地锁及状态文件。")
     st.caption("此控制不连接券商，不会撤销真实订单，也不会启动正式训练。")
+    st.code("python -m atlaspm.framework.orchestrator offline",language="powershell")
+    st.caption("离线验收入口串接合成事件、模型响应契约、模拟交易、退出及学习复核，不代表真实连接。")
 
 
 def all_jobs() -> None:
