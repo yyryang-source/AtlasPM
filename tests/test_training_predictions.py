@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,7 +46,7 @@ class ArchiveTrainingTests(unittest.TestCase):
                 self.assertEqual(a["metrics"],b["metrics"])
                 self.assertIsNone(b["predictions"])
                 self.assertEqual(b["prediction_storage"],"sqlite")
-                with sqlite3.connect(b["prediction_archive_path"]) as con:
+                with closing(sqlite3.connect(b["prediction_archive_path"])) as con:
                     self.assertEqual(con.execute("SELECT status FROM prediction_state").fetchone(),("COMPLETE",))
                     self.assertEqual(con.execute("SELECT COUNT(*) FROM forecasts").fetchone()[0],
                                      sum(len(rows) for rows in a["predictions"].values()))
