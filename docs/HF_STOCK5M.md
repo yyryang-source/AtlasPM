@@ -625,3 +625,67 @@ Reports are under local_data/stock_5m/huggingface/quality/certification_v5/filin
 (index_report.json, evidence_report.json, index.duckdb, hints/).
 No external evidence is redistributed. Data rights and training/live
 approval remain unverified/false. No broker interfaces.
+
+
+## V5.3 historical security master (research only)
+
+An append-only local SQLite claim ledger records effective intervals and
+separate documented knowledge dates. It does not infer securities from
+CIKs or translate current ticker lists into historical membership.
+The latest revision per declared source family strictly before the
+decision date is considered; same-day publication is unavailable.
+Conflicting latest revisions, ties, missing or changed evidence bytes,
+overlapping identities and duplicate economic event keys are unresolved.
+A retraction needs the same corroboration as an assertion.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-security-inventory-v53
+& $py -m atlaspm.cli market-db hf-5m-security-snapshot-v53 --as-of 2020-01-02
+~~~
+
+An empty inventory is expected until evidence has been reviewed.
+V5.2 text hints are counted but not automatically imported. To ingest
+real reviewed evidence, prepare a local UTF-8 JSONL file with one claim
+per line and exactly the following fields:
+
+- record_id: stable logical interval/event ID, consistent across sources
+  and revisions; record_type: IDENTITY or ACTION.
+- source_family: declared original evidence producer (not a mirror);
+  source_url: HTTPS provenance; evidence_path: original local evidence
+  under local_data; evidence_sha256: SHA-256 of those bytes.
+- known_date: independently documented knowledge date, not effective date
+  or today's retrieval date; reviewer: explicit reviewer ID.
+- state: ASSERTED or RETRACTED; payload: null for retraction.
+- IDENTITY payload: security_id (stable share-class ID, not CIK), symbol,
+  exchange (supported MIC), valid_from, valid_to (exclusive or null).
+- ACTION payload: security_id, kind, effective_date, value, currency,
+  successor_id, new_symbol. SPLIT uses a positive non-unit decimal string
+  (new/old shares) and null currency; CASH_DIVIDEND and CASH_EXIT use
+  positive USD per share. MERGER uses successor_id; TICKER_CHANGE uses
+  new_symbol; DELISTING records date only. Unused fields must be null.
+  Complex merger economics, non-USD payouts and total-return computation
+  are not supported; record separate evidence rather than guessing.
+
+~~~powershell
+& $py -m atlaspm.cli market-db hf-5m-security-ingest-v53 --claims local_data/reviewed_claims.jsonl
+& $py -m atlaspm.cli market-db hf-5m-security-snapshot-v53 --as-of 2020-07-01 --trade-date 2020-06-30
+# Only with independently verified raw price semantics:
+& $py -m atlaspm.cli market-db hf-5m-security-adjust-v53 --security-id YOUR_VERIFIED_ID --bar-date 2020-06-01 --as-of 2020-07-01 --raw-unadjusted
+~~~
+
+At least two declared families and two different evidence hashes must
+agree on a payload. This is a provisional policy, not independent source
+authentication. Different bytes do not prove independent origins, and
+reviewer IDs are declarations, not cryptographic attestations. Snapshot
+output includes known future effective events; members are only those
+effective on the requested trade date. A provisional split multiplier
+uses only visible resolved splits and refuses unresolved records or
+unsupported exits; it cannot prove missing actions do not exist.
+No destructive rewriting of canonical bars, no export of a revised
+snapshot as a globally PIT-correct V5 CSV, no automatic training approval.
+V5 remains the external certification gate; its unresolved authenticity,
+coverage, adjustment and rights requirements remain in force.
+
+Local SQLite ledger and inventory: local_data/stock_5m/huggingface/quality/certification_v5/security_master_v53/.
+Do not commit source data or reviewed claims to GitHub.
