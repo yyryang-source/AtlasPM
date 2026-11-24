@@ -94,6 +94,12 @@ class MarketRegimes:
         self.states[day]=state
 
 
+def label_span(horizon,entry_lag_sessions):
+    if type(entry_lag_sessions) is not int or entry_lag_sessions not in (0,1):
+        raise ValueError('INVALID_ENTRY_LAG_SESSIONS')
+    return horizon+entry_lag_sessions
+
+
 class WindowLabels:
     """Generate matured labels in one pass over the global session sequence.
 
@@ -101,10 +107,11 @@ class WindowLabels:
     future session exists. Eligibility is frozen at the signal session, before
     any future close is observed. Retain only h+1 raw sessions.
     """
-    def __init__(self,horizon,length):
-        self.horizon=horizon
+    def __init__(self,horizon,length,entry_lag_sessions=0):
+        self.horizon=label_span(horizon,entry_lag_sessions)
+        self.entry_lag_sessions=entry_lag_sessions
         self.length=length
-        self.window=deque(maxlen=horizon+1)
+        self.window=deque(maxlen=self.horizon+1)
         self.streak={}
         self.missing=0
         self.incomplete=0
@@ -129,27 +136,39 @@ class WindowLabels:
                 y=None
                 self.missing+=1
             else:
-                y=finite(marks[sid][0]/price-1,"forward_return")
+                entry_price=self.window[self.entry_lag_sessions][0][sid][0] if self.entry_lag_sessions else price
+                y=finite(marks[sid][0]/entry_price-1,"forward_return")
             yield sid,i,x,y
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None):
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None, next_session=None, entry_lag_sessions=0):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates,observations=[],[]
     keep_observations=not compact or sequence_length>1
-    labels=WindowLabels(horizon,sequence_length)
+    labels=WindowLabels(horizon,sequence_length,entry_lag_sessions)
+    horizon=labels.horizon
     samples,prediction_samples=[],[]
     if compact:
         prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
         valid_indices=array('Q')
-    for k,(day,marks) in enumerate(validated_sessions(payload["sessions"],features)):
+    def observations_with_cutoff():
+        last=None
+        for day,marks in validated_sessions(payload["sessions"],features):
+            last=day
+            yield day,marks
+        if next_session is not None:
+            if horizon!=1 or last is None or not isinstance(next_session,str) or date.fromisoformat(next_session).isoformat()!=next_session or next_session<=last:
+                raise ValueError("INVALID_AS_OF_NEXT_SESSION")
+            yield next_session,{}
+
+    for k,(day,marks) in enumerate(observations_with_cutoff()):
         dates.append(day)
         if keep_observations:
             observations.append(marks)
-        if tracker is not None:
+        if tracker is not None and marks:
             tracker.observe(day,marks)
         for sid,i,x,y in labels.observe(k,marks):
             if compact:
@@ -191,10 +210,12 @@ def sequence_for(panel,row):
     return [panel["observations"][j][sid][1] for j in range(i-length+1,i+1)]
 
 
-def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0):
+def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0, training_window_sessions=None):
     for v,lo in ((minimum_train_sessions,1),(test_sessions,1),(embargo_sessions,0)):
         if type(v) is not int or v<lo:
             raise ValueError("INVALID_FOLD_CONFIG")
+    if training_window_sessions is not None and (type(training_window_sessions) is not int or not minimum_train_sessions<=training_window_sessions<=5000):
+        raise ValueError("INVALID_TRAINING_WINDOW")
     horizon=panel["horizon"]
     samples=panel.get("prediction_samples",panel["samples"])
     end=len(panel["dates"])-horizon
@@ -215,12 +236,15 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
         raise ValueError("INSUFFICIENT_SESSIONS_FOR_FOLDS")
     for start in range(first,end,test_sessions):
         stop=min(start+test_sessions,end)
-        cutoff=offsets[max(0,start-embargo_sessions-horizon)]
+        cutoff_session=max(0,start-embargo_sessions-horizon)
+        cutoff=offsets[cutoff_session]
+        lower=offsets[max(0,cutoff_session-training_window_sessions)] if training_window_sessions is not None else 0
         if isinstance(samples,CompactSamples) and isinstance(panel['samples'],IndexedRows):
             valid=panel['samples'].indices
-            train=IndexPrefix(valid,bisect_left(valid,cutoff))
+            lo=bisect_left(valid,lower)
+            train=IndexPrefix(valid,bisect_left(valid,cutoff)-lo,start=lo)
         else:
-            train=[i for i in range(cutoff) if samples[i]['y'] is not None]
+            train=[i for i in range(lower,cutoff) if samples[i]['y'] is not None]
         test=range(offsets[start],offsets[stop])
         if not train or not test:
             raise ValueError("EMPTY_PURGED_FOLD")

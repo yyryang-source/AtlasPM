@@ -43,15 +43,16 @@ class DiskObservations:
         self.con.close()
 
 
-def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None,regime_config=None):
+def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None,regime_config=None,entry_lag_sessions=0):
     features=validate_panel_metadata(metadata,horizon,sequence_length)
     if feature_column is None or (sequence_length>1 and observation_store is None):
         raise ValueError("STREAMING_REQUIRES_DISK_WORKSPACE")
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates=[]
+    labels=WindowLabels(horizon,sequence_length,entry_lag_sessions)
+    horizon=labels.horizon
     samples=CompactSamples(dates,horizon,len(features),feature_column)
     valid=array("Q")
-    labels=WindowLabels(horizon,sequence_length)
     for k,(day,marks) in enumerate(validated_sessions(sessions,features)):
         dates.append(day)
         if tracker is not None:
