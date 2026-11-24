@@ -13,7 +13,8 @@ def validate_panel_metadata(payload,horizon,sequence_length):
     if type(sequence_length) is not int or not 1<=sequence_length<=252:
         raise ValueError("INVALID_SEQUENCE_LENGTH")
     if payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True:
-        raise ValueError("REAL_TRAINING_DATA_NOT_APPROVED")
+        from atlaspm.research.data_admission import require_real_training_admission
+        require_real_training_admission()
     if type(horizon) is not int or horizon not in HORIZONS:
         raise ValueError("INVALID_LABEL_HORIZON")
     features=payload["feature_names"]

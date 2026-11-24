@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from atlaspm.data import hf_stock5m as hf, unified_pipeline as pipeline
-from atlaspm.data.unified import AdmissionDenied, DataUnavailable
+from atlaspm.data.unified import DataUnavailable
 from atlaspm.research import data_admission
 
 
@@ -62,5 +62,47 @@ class UnifiedPipelineTests(unittest.TestCase):
         self.assertFalse(report["approved_for_backtest"])
         self.assertFalse(report["live_execution_enabled"])
         self.assertIn("MISSING_BAR_FACTOR_OR_LINEAGE_FILE", report["months"][0]["blockers"])
-        with self.assertRaises(AdmissionDenied):
+        with self.assertRaisesRegex(ValueError, "REAL_TRAINING_DATA_NOT_APPROVED"):
             data_admission.require_real_training_admission()
+
+    def test_research_trainer_cannot_accept_self_declared_approval(self):
+        from atlaspm.research.training_dataset import validate_panel_metadata
+        for payload in ({"mode": "historical", "synthetic_fixture": False},
+                        {"mode": "synthetic", "synthetic_fixture": False,
+                         "approved_for_model_training": True}):
+            with self.assertRaisesRegex(ValueError, "REAL_TRAINING_DATA_NOT_APPROVED"):
+                validate_panel_metadata(payload, 1, 1)
+
+    def test_actual_factor_preflight_content_revision(self):
+        from importlib.util import find_spec
+        if not find_spec("duckdb"):
+            self.skipTest("lake dependency")
+        import duckdb
+        from contextlib import closing
+        bars = hf.output_path("2020-01")
+        bars.parent.mkdir(parents=True)
+        quoted = str(bars).replace("\\", "/").replace("'", "''")
+        with closing(duckdb.connect()) as con:
+            con.execute(f"""COPY (SELECT 'A' AS symbol,
+                DATE '2020-01-02' AS trade_date_et,
+                1577975400000::BIGINT AS timestamp_ms,
+                10.0::DOUBLE AS open, 11.0::DOUBLE AS high,
+                9.0::DOUBLE AS low, 10.0::DOUBLE AS close,
+                100::DOUBLE AS volume_shares, 5::BIGINT AS source_minute_bars,
+                5::BIGINT AS unique_source_minutes)
+                TO '{quoted}' (FORMAT PARQUET)""")
+        pipeline.factor_db.build("2020-01", memory="256MB", threads=1)
+        result = data_admission.inspect_real_factors("2020-01", "2020-01")
+        self.assertTrue(result["structural_preflight_passed"], result)
+        self.assertFalse(result["approved_for_model_training"])
+        self.assertEqual(result["months"][0]["factor_rows"], 1)
+        self.assertEqual(result["evidence_id"],
+                         data_admission.inspect_real_factors("2020-01", "2020-01")["evidence_id"])
+        # Change an actual recorded source (even if content is unchanged);
+        # the existing builder's lineage signature must now be stale.
+        old = bars.stat()
+        os.utime(bars, ns=(old.st_atime_ns, old.st_mtime_ns + 2_000_000_000))
+        changed = data_admission.inspect_real_factors("2020-01", "2020-01")
+        self.assertFalse(changed["structural_preflight_passed"])
+        self.assertIn("STALE_DAILY_INPUT", changed["months"][0]["blockers"])
+        self.assertNotEqual(result["evidence_id"], changed["evidence_id"])

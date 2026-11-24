@@ -65,7 +65,7 @@ def maintain(start_month, end_month, *, execute=False, memory="256MB", threads=1
             if unified._version(bars) != signature:
                 raise unified.DataQualityError("Bars changed during factor build; review derivatives")
             record["status"] = "EXPLORATORY_REVIEW_REQUIRED"
-        except (OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             record.update(status="BLOCKED", error=f"{type(exc).__name__}: {exc}")
             break
     return _report(mode="maintenance", months=results, network_downloads=0,
@@ -92,6 +92,17 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
     """
     inventory = _month_list(start_month, end_month)
     records = []
+    hash_cache = {}
+
+    def content(path):
+        signature = unified._version(path)
+        key = (path, signature)
+        if key not in hash_cache:
+            hash_cache[key] = _content(path)
+        if unified._version(path) != signature:
+            raise unified.DataQualityError("File changed during preflight")
+        return hash_cache[key]
+
     for item in inventory:
         month = item["month"]
         record = {"month": month, "blockers": []}
@@ -107,7 +118,7 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
             continue
         try:
             signatures = {p: unified._version(p) for p in paths}
-            record["content"] = {name: _content(p) for name, p in
+            record["content"] = {name: content(p) for name, p in
                                  zip(("bars", "daily", "daily_metadata", "factors", "factor_metadata"), paths)}
             m = factor_db._read_meta(meta)
             d = factor_db._read_meta(daily_meta)
@@ -128,13 +139,20 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
                     record["blockers"].append("STALE_FACTOR_HISTORY")
                 # A stale historical daily projection also invalidates derived
                 # factors even if the derived daily file itself has not changed.
+                record["lookback_content"] = {}
                 for historic in history:
                     hmonth = historic.stem[-7:]
                     source = hf.output_path(hmonth)
-                    hmeta = factor_db._read_meta(historic.with_suffix(".json"))
+                    hmeta_path = historic.with_suffix(".json")
+                    hmeta = factor_db._read_meta(hmeta_path)
                     if (not source.is_file() or not hmeta or
                             hmeta.get("input_fingerprint") != factor_db._fingerprint([source])):
                         record["blockers"].append("STALE_OR_MISSING_LOOKBACK:" + hmonth)
+                        continue
+                    record["lookback_content"][hmonth] = {
+                        "bars": content(source), "daily": content(historic),
+                        "metadata": content(hmeta_path),
+                    }
             report = factor_db.audit(month, source="hf", memory=memory, threads=threads)
             record["factor_rows"] = report["rows"]
             if not report["valid"] or (m and m.get("rows") != report["rows"]):
@@ -145,8 +163,12 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
                     record["blockers"].append("MISSING_FACTOR_CLOSE")
             if any(unified._version(p) != sig for p, sig in signatures.items()):
                 record["blockers"].append("INPUT_CHANGED_DURING_PREFLIGHT")
-        except (OSError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             record["blockers"].append("PREFLIGHT_ERROR:" + type(exc).__name__)
+    # Catch changes to previously hashed lookback files across month boundaries.
+    if any(not p.is_file() or unified._version(p) != sig for p, sig in hash_cache):
+        for record in records:
+            record["blockers"].append("LOOKBACK_CHANGED_DURING_PREFLIGHT")
     stable = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
     return _report(mode="factor_preflight", months=records, evidence_id=sha256(stable).hexdigest(),
                    structural_preflight_passed=all(not r["blockers"] for r in records),
