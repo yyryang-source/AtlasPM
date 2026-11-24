@@ -7,11 +7,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import date
 from html.parser import HTMLParser
 import json
 import os
-from pathlib import Path
 import re
 import time
 
@@ -27,7 +25,12 @@ SCHEMA="atlaspm_historical_cover_observations_v56"
 FIELDS={"dei:security12btitle":"title","dei:tradingsymbol":"symbol",
         "dei:securityexchangename":"exchange"}
 EXCHANGES={"NASDAQ":"XNAS","NYSE":"XNYS","NYSEAMER":"XASE","NYSEARCA":"ARCX",
-           "BATS":"BATS","IEX":"IEXG"}
+           "BATS":"BATS","IEX":"IEXG","THE NASDAQ STOCK MARKET LLC":"XNAS",
+           "THE NASDAQ STOCK MARKET":"XNAS","NASDAQ CAPITAL MARKET":"XNAS",
+           "NASDAQ GLOBAL MARKET":"XNAS","NASDAQ GLOBAL SELECT MARKET":"XNAS",
+           "NEW YORK STOCK EXCHANGE":"XNYS","NEW YORK STOCK EXCHANGE LLC":"XNYS",
+           "NYSE AMERICAN":"XASE","NYSE AMERICAN LLC":"XASE","NYSE ARCA":"ARCX",
+           "NYSE ARCA, INC.":"ARCX"}
 SYMBOL=re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,31}")
 FILED=re.compile(r"(?im)^\s*FILED AS OF DATE:\s*(\d{8})\s*$")
 
@@ -56,7 +59,7 @@ class CoverRows(HTMLParser):
             if self.capture is not None:
                 self.bad=True
             elif name in FIELDS:
-                # Refuse hidden/continued/nil facts instead of guessing their text.
+                # Refuse continued/nil facts instead of guessing their text.
                 if a.get("continuedat") or a.get("xsi:nil","").lower()=="true":
                     self.bad=True
                 self.capture=(FIELDS[name],a.get("contextref",""),[])
@@ -112,7 +115,7 @@ def extract(data,filing):
         if not SYMBOL.fullmatch(symbol) or not mic or not 1<=len(values["title"])<=500:
             rejected+=1
             continue
-        key=(symbol,mic,values["title"])
+        key=(symbol,mic,values["title"],next(iter(contexts)))
         if key in seen:
             continue
         seen.add(key)
@@ -121,7 +124,7 @@ def extract(data,filing):
             "observed_filing_date":filing["filed_date"],"known_date_lower_bound":filing["filed_date"],
             "security_id":None,"valid_from":None,"valid_to":None,
             "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
-    conflicts={o["symbol"] for o in observations if sum(x["symbol"]==o["symbol"] for x in observations)>1}
+    conflicts={s for s,n in Counter(o["symbol"] for o in observations).items() if n>1}
     return {"observations":[o for o in observations if o["symbol"] not in conflicts],
             "conflicting_symbols":sorted(conflicts),"rejected_tagged_rows":rejected,
             "status":"COVER_OBSERVATIONS_REVIEW_REQUIRED" if observations and not conflicts
@@ -148,7 +151,7 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
         partitions=cx.execute("SELECT quarter,digest,parser_version,candidate_rows FROM partitions WHERE starts_with(quarter,?) ORDER BY quarter",[str(year)]).fetchall()
         expected=list(ev.quarters(f"{year}-Q1",f"{year}-Q{1 if year==2026 else 4}"))
         where="filed_date BETWEEN ? AND ? AND form IN ('8-K','6-K') AND cik>?"
-        params=[f"{year}-01-01",f"{year}-12-31",cursor]
+        params=[f"{year}-01-01",f"{year}-03-31" if year==2026 else f"{year}-12-31",cursor]
         if ids is not None:
             where+=" AND cik IN (SELECT unnest(?))"
             params.append(ids)
