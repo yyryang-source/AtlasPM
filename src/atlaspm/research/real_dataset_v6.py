@@ -188,7 +188,7 @@ def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
         return report
     calendar=_calendar(months)
     hashes={m:{"data":_stamp(p),"meta":_stamp(p.with_suffix(".json"))} for m,p in inputs.items()}
-    key=_digest({"config":config,"calendar":calendar,"inputs":hashes})
+    key=_digest({"config":config,"calendar_sha256":_digest(calendar),"inputs":hashes})
     root=private_path(BASE/key[:24])
     root.mkdir(parents=True,exist_ok=True)
     manifest=root/"manifest.json"
@@ -203,7 +203,9 @@ def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
             meta=out.with_suffix(".json")
             prev=factor._read_meta(meta)
             if out.is_file() and prev and prev.get("dataset_id")==key and prev.get("sha256")==_stamp(out)["sha256"]:
-                partitions.append(prev)
+                stats=_counts(cx,out,config["horizons"])
+                partitions.append({"month":month,"dataset_id":key,"path":str(out.relative_to(Path.cwd().resolve())),
+                                   "sha256":prev["sha256"],**stats})
                 continue
             stage=out.with_suffix(".parquet.part")
             try:
@@ -244,8 +246,15 @@ def inspect(dataset_id):
     m=json.loads(path.read_text(encoding="utf-8"))
     if m.get("schema")!=VERSION or m.get("dataset_id")!=dataset_id:
         raise ValueError("Invalid dataset manifest")
-    if any(_stamp(p["path"])["sha256"]!=p["sha256"] for p in m["partitions"]):
-        raise ValueError("Dataset partition integrity failure")
+    if _digest({"config":m["config"],"calendar_sha256":m["calendar_sha256"],"inputs":m["inputs"]})!=dataset_id:
+        raise ValueError("Dataset manifest identity mismatch")
+    if [p["month"] for p in m["partitions"]]!=m["config"]["months"]:
+        raise ValueError("Dataset partition inventory mismatch")
+    for p in m["partitions"]:
+        expected=path.parent/(p["month"]+".parquet")
+        if (p["dataset_id"]!=dataset_id or private_path(Path(p["path"]))!=expected
+                or _stamp(expected)["sha256"]!=p["sha256"]):
+            raise ValueError("Dataset partition integrity failure")
     # Never propagate flags that may have been edited in a local JSON file.
     return {**m,**v4.GUARDS,"mode":"real_unverified_research","synthetic_fixture":False,
             "status":"RESEARCH_DATASET_READY_TRAINING_BLOCKED"}
