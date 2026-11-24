@@ -9,7 +9,7 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any
 
-from atlaspm.ml_dynamic_rebalance import _select_allocation
+from atlaspm.research.ml_dynamic_rebalance import _select_allocation
 
 
 def assess_native_no_trade(

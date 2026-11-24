@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from math import isfinite, log
 
-from atlaspm.ml_dynamic_rebalance import FEATURE_NAMES, SIGMA_CEILING, SIGMA_FLOOR, _features, _rms
+from atlaspm.research.ml_dynamic_rebalance import FEATURE_NAMES, SIGMA_CEILING, SIGMA_FLOOR, _features, _rms
 
 LIGHTGBM_PARAMS = {
     "objective": "regression",

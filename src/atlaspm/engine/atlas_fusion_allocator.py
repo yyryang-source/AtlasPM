@@ -101,7 +101,7 @@ def allocate_fusion_sleeve(
         for v in [*risk_forecasts,*downside_forecasts]
     ):
         raise ValueError("Fusion risk/downside forecasts must be positive finite")
-    from atlaspm.ml_dynamic_rebalance import _real
+    from atlaspm.research.ml_dynamic_rebalance import _real
     max_weight=_real(max_weight,"max_weight",1/n,1)
     correlation=_shrunken_correlation(trailing_returns,n)
     combined=[max(.03,r+.5*d) for r,d in zip(risk_forecasts,downside_forecasts)]

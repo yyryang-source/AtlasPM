@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from atlaspm.models import PortfolioAccount, Position, nonnegative_number
+from atlaspm.engine.models import PortfolioAccount, Position, nonnegative_number
 
 
 def parse_accounts(payload: Mapping[str, object]) -> list[PortfolioAccount]:

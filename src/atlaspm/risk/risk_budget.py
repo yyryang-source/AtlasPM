@@ -4,7 +4,7 @@ from __future__ import annotations
 from math import isfinite, sqrt
 from typing import Any, Mapping, Sequence
 
-from atlaspm.mean_variance import _validate_covariance
+from atlaspm.engine.mean_variance import _validate_covariance
 
 
 def _finite(value: object, label: str, *, lo: float = 0, hi: float | None = None, strict: bool = False) -> float:

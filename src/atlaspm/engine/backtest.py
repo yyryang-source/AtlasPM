@@ -7,8 +7,8 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
-from atlaspm.mean_variance import optimize_mean_variance
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.engine.mean_variance import optimize_mean_variance
 
 
 def _sample_estimates(window: list[list[float]], symbols: list[str]) -> tuple[dict[str, float], list[list[float]]]:

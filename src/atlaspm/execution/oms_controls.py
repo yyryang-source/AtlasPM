@@ -1,4 +1,4 @@
-"""Deterministic post-fill limits and unsiged SHA-256 paper audit-chain helpers.
+"""Deterministic post-fill limits and unsigned SHA-256 paper audit-chain helpers.
 
 These are LOCAL diagnostics only; hashes are not digital signatures and do
 not establish that a simulated event came from a real broker.
@@ -92,13 +92,16 @@ def post_fill_risk_snapshot(
         raise ValueError("Shock fractions must be in [0, 1]")
     if account_type not in {"cash", "margin"}:
         raise ValueError("account_type must be cash or margin")
-    equity_mv = sum(p["market_value"] for p in positions if p["type"] == "equity")
-    treasury_mv = sum(p["market_value"] for p in positions if p["type"] == "treasury")
-    gross_mv = sum(p["gross_notional"] for p in positions)
-    long_put_premium_value = sum(
-        p["market_value"] for p in positions
-        if p["type"] == "option" and p["right"] == "put" and p["contracts"] > 0
-    )
+    equity_mv = treasury_mv = gross_mv = long_put_premium_value = 0
+    for p in positions:
+        kind = p["type"]
+        gross_mv += p["gross_notional"]
+        if kind == "equity":
+            equity_mv += p["market_value"]
+        elif kind == "treasury":
+            treasury_mv += p["market_value"]
+        elif kind == "option" and p["right"] == "put" and p["contracts"] > 0:
+            long_put_premium_value += p["market_value"]
     blockers: list[str] = []
     if marked_net_liquidation <= 0:
         blockers.append("POST_FILL_NONPOSITIVE_EQUITY")

@@ -7,9 +7,9 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.audit import _load, audit_backtests
-from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
-from atlaspm.performance import historical_spy_diagnostics
+from atlaspm.monitoring.audit import _load, audit_backtests
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.monitoring.performance import historical_spy_diagnostics
 
 
 def compare_spy(cash_path: Path, margin_path: Path, spy_path: Path) -> dict[str, Any]:
