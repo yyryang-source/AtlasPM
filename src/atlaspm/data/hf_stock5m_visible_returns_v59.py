@@ -24,7 +24,7 @@ FIELDS={"security_id","start_date","end_date","start_symbol","end_symbol","start
 def _interval(row,identities,actions,as_of):
     if not isinstance(row,dict) or set(row)!=FIELDS:
         raise ValueError("INVALID_RETURN_FIELDS")
-    sid=ledger._token(row["security_id"])
+    ledger._token(row["security_id"])
     start,end=ledger._date(row["start_date"]),ledger._date(row["end_date"])
     if not start<end<as_of:
         raise ValueError("RETURN_END_MUST_PRECEDE_AS_OF")
