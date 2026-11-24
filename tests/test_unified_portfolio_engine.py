@@ -216,6 +216,25 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         self.assertFalse(result["risk"]["historical_named_regimes_available"])
         self.assertLess(result["risk"]["user_supplied_regime_shocks_illustrative"]["2008"], -.3)
 
+    def test_stale_or_unverified_holding_mark_cannot_enter_oms(self) -> None:
+        for update in ({"mark_age_seconds":121},{"mark_source":"unverified_broker"}):
+            with self.subTest(update=update):
+                p=copy.deepcopy(self.payload)
+                p["account"]["positions"][0].update(update)
+                out=self.run_case(p)
+                self.assertEqual(out["decision"],"BLOCK")
+                self.assertIn("STALE_OR_UNVERIFIED_HOLDING_MARK",out["block_reasons"][0])
+
+    def test_existing_unsettled_balances_are_not_silently_ignored(self) -> None:
+        for key in ("unsettled_receivable","unsettled_payable"):
+            with self.subTest(key=key):
+                p=copy.deepcopy(self.payload)
+                p["account"][key]=100
+                out=self.run_case(p)
+                self.assertEqual(out["decision"],"BLOCK")
+                self.assertIn("UNSETTLED_ACCOUNT_BALANCES_REQUIRE_FULL_LEDGER_ADAPTER",
+                              out["block_reasons"][0])
+
     def test_cli_output_stays_json_and_legacy_commands_remain_registered(self) -> None:
         from atlaspm.cli import build_parser
         parser=build_parser()
