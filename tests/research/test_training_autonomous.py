@@ -148,3 +148,40 @@ class AutonomousTests(unittest.TestCase):
             payload["market_data_available_at"]="2030-01-01T00:00:00Z"
             denied=paper_decision(payload,streams,registry_path=path,run_id=result["run_id"])
             self.assertEqual(denied["reason"],"MARKET_OR_HISTORY_LOOKAHEAD")
+
+
+@unittest.skipUnless(find_spec("scipy"),"portfolio extra required")
+class PaperFeedbackTests(unittest.TestCase):
+    def test_actual_oms_marks_mature_once(self):
+        from atlaspm.engine.unified import run_unified_portfolio
+        from atlaspm.engine.contracts import timestamp
+        from atlaspm.research.training_registry import register,FLAGS
+        from atlaspm.research.training_paper_feedback import record_paper_feedback,matured_feedback
+        example=Path(__file__).resolve().parents[2]/"examples/unified_portfolio_synthetic.json"
+        payload=json.loads(example.read_text(encoding="utf-8"))
+        portfolio=run_unified_portfolio(payload)
+        self.assertEqual(portfolio["decision"],"SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE")
+        config=dict(as_of=payload["as_of"],maturity_date="2026-11-23",
+                    research_run_id="synthetic-study",account_id=payload["account"]["account_id"],
+                    annual_margin_rate=.065)
+        report=dict(dataset_sha256="a"*64,status="SYNTHETIC_PAPER_DECISION",
+                    decision=portfolio["decision"],portfolio=portfolio,**FLAGS)
+        with local_workspace() as path:
+            decision=register(path,config,report,kind="experiment")
+            marks=dict(mode="synthetic",synthetic_fixture=True,
+                       observed_at="2026-11-23T21:00:00Z",available_at="2026-11-23T21:00:00Z",
+                       marks={"AAA":101.,"BBB":101.})
+            with self.assertRaisesRegex(ValueError,"FEEDBACK_NOT_MATURED"):
+                record_paper_feedback(registry_path=path,decision_id=decision,observation=marks,
+                                      as_of=payload["as_of"])
+            result=record_paper_feedback(registry_path=path,decision_id=decision,observation=marks,
+                                         as_of=marks["available_at"])
+            self.assertAlmostEqual(result["ending_equity"],30238.)
+            self.assertEqual(matured_feedback(path,"synthetic-study",config["account_id"],
+                timestamp(marks["available_at"],"now")),[])
+            self.assertEqual(matured_feedback(path,"synthetic-study",config["account_id"],
+                timestamp("2026-11-24T21:00:00Z","now")),[result])
+            marks["marks"]["AAA"]=102.
+            with self.assertRaisesRegex(ValueError,"PAPER_FEEDBACK_ALREADY_FINALIZED"):
+                record_paper_feedback(registry_path=path,decision_id=decision,observation=marks,
+                                      as_of=marks["available_at"])
