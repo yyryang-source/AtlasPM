@@ -153,3 +153,14 @@ class InstitutionalTests(unittest.TestCase):
                     _prepare("analyst",[{"evidence_id":"fixture","source":firm,
                               "available_at":"2020-01-01T00:00:00Z","text":"fixture",
                               "external_use_reviewed":True}],"2020-01-02T00:00:00Z")
+
+    def test_withdrawal_removes_rating_not_a_sell(self):
+        self.report()
+        self.report("withdraw",received="2020-01-04",published="2020-01-03",
+                    text="Rating Action: Withdrawal")
+        result=ir.factors(subject="conid:123",as_of="2020-01-05T00:00:00Z",
+                          previous_as_of="2020-01-03T00:00:00Z",unit="USD",period="2020-03-31",basis="GAAP")
+        self.assertEqual(result["sample_counts"]["ratings"],0)
+        self.assertEqual(result["values"]["analyst_coverage_change"],-1)
+        self.assertIsNone(result["values"]["analyst_consensus"])
+        self.assertIsNone(result["values"]["analyst_rating_momentum"])

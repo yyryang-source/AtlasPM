@@ -280,11 +280,14 @@ def _eligible(row, cutoff, age_days):
 def _snapshot(rows, cutoff, age_days, selectors):
     """Latest explicit claim per reviewed firm/analyst identity and exact basis."""
     chosen={}
+    withdrawals={}
     for row in rows:
         if not _eligible(row,cutoff,age_days):
             continue
         actor=(row["firm"],row["analyst_id"])
         rank=(_time(row["published_at"]),_time(row["received_at"]))
+        if any(c["metric"]=="rating_action" and c["value"]=="withdrawal" for c in row["claims"]):
+            withdrawals[actor]=max(withdrawals.get(actor,rank),rank)
         for claim in row["claims"]:
             metric=claim["metric"]
             if metric not in selectors:
@@ -297,6 +300,12 @@ def _snapshot(rows, cutoff, age_days, selectors):
                 raise ValueError("Conflicting same-time analyst estimates")
             if not prior or prior[0]<rank:
                 chosen[key]=(rank,claim,row["receipt_sha256"])
+    # A withdrawn recommendation is not a Sell recommendation. A later
+    # explicit rating can re-establish coverage, but same-time ambiguity fails closed.
+    for actor,rank in withdrawals.items():
+        key=(actor,"rating")
+        if key in chosen and chosen[key][0]<=rank:
+            del chosen[key]
     return chosen
 
 

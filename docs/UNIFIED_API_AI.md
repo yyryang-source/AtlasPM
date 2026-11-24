@@ -380,3 +380,48 @@ Only sanitized aggregate evidence printed; no live API test run here.
 FINRA OAuth and all paid feed smoke require separate operator action.
 Official documented schemas are candidates until tested against entitled
 responses. Formal training, formal backtest, automated live remain disabled.
+
+
+## Institutional Research Engine — licensed documents and exploratory factors
+
+Primary delivery: [Bloomberg enterprise investment research data](https://professional.bloomberg.com/products/data/enterprise-catalog/investment-research-data/) and [Bloomberg research](https://professional.bloomberg.com/products/bloomberg-terminal/research/). Confirm full-text third-party broker reports, machine-readable entitlement, contributor-specific permissions, historical availability, document retrieval schema and local processing/retention. The terminal or a news license alone is insufficient.
+Conditional alternatives only (no purchase or enabled network adapter): [FactSet Investment Research API](https://developer.factset.com/) exposes research search/retrieval; [LSEG investment research](https://www.lseg.com/en/data-analytics/asset-management-solutions/investment-research-analytics) / [Data Platform APIs](https://developers.lseg.com/en/api-catalog/refinitiv-data-platform/refinitiv-data-platform-apis) offer broker research and document retrieval products. Obtain exact licensed specifications and compare contributor coverage, archival point-in-time quality and cost before choosing any fallback. No guessed endpoints or automatic paid document purchase.
+IBKR/Yahoo and bank sites are supporting evidence only; no scraping, no paywall circumvention. Registry includes the 18 named firms, not a claim that every report or analyst is covered.
+
+### Local ingestion and evidence
+
+Use the existing gitignored local_data/runs area, private_path and atomic write helper. No new database or document copy. Report originals must remain immutable under local_data, including prior revisions. The bounded JSONL index (16 MiB / 5000 revisions) uses exclusive writer lock and atomic replacement; a stale lock requires operator review. Hashes bind original bytes, metadata, extracted claims and receipt, checked against originals at read. Hashes are integrity checks, not signatures or independent proof of historical availability; an operator able to rewrite all local records can fabricate them. This is not a certified historical training archive.
+Separate document rights from news/market licenses: ATLASPM_BLOOMBERG_RESEARCH_RIGHTS (local nonsecret reference) and ATLASPM_BLOOMBERG_RESEARCH_RIGHTS_RETENTION=1, or the corresponding INVESTMENT_BANKS / IBKR / YAHOO_FINANCE variables. No external model egress or training license inferred. Management inventory shows configuration status only. The shared external public excerpt guard rejects the 18 firms plus FactSet/LSEG; source-name mislabeling remains an application-layer limitation.
+
+Metadata JSON example (synthetic, replace with legitimately reviewed real metadata only):
+```json
+{
+  "provider": "bloomberg",
+  "firm": "Goldman Sachs",
+  "analyst_id": "fixture-analyst",
+  "report_id": "fixture-report",
+  "subject": "conid:123",
+  "evidence_type": "original_report",
+  "published_at": "2020-01-01T12:00:00Z",
+  "first_available_at": "2020-01-01T13:00:00Z",
+  "source_url": null,
+  "document": "local_data/research/example.txt"
+}
+```
+Only approved typed subject IDs (conid, CIK, ISIN, index, macro); mapping and analyst alias equivalence must be independently reviewed. Evidence types original_report, news_relay, rating_summary, ai_inference are distinct; only original reports with known availability enter numeric factors. Receipt assigned on local import, not backdated from source dates. Unknown first availability remains null. No raw report content or proprietary data in Git.
+UTF-8 text and optional PDF using pypdf (install institutional-pdf extra separately; no new core dependency). PDF signature, encrypted/page limit, 8 MiB input, 500k extracted characters and 128 claims limit; pypdf decompression not a hard RSS limit or sandbox. Use a separately isolated process for untrusted documents in production; scanned/OCR/layout and arbitrary table extraction remain unimplemented. Actual PDF parse and resource measurements require local acceptance.
+Conservative explicit tagged lines, e.g. `Rating: Buy`, `Rating Action: Upgrade`, `EPS (USD, 2027-12-31, GAAP): 5.20`, `Target Price (USD, 2027-12-31, split_adjusted): 120`, `Risks: ...`. Preserve per-page exact line/quote hash. Revenue/EBITDA, index/rate/macro forecasts and tagged valuation, industry, thesis, risks, bull/bear and allocation text supported. No interpretation of unlabeled prose or extraction of full valuation models. Units/scales must be explicitly normalized by the licensed source; no silent conversion of millions/billions, adjusted/GAAP or target horizons. Do not retype a forecast into a text file and call it the original report.
+
+### Factors / evaluation / event integration
+
+Compare separate as-of snapshots on the same subject, exact currency/period/basis and reviewed firm/analyst IDs. Only local receipt and stated availability before cutoff, no future revision overwrite. Rating Buy/Hold/Sell explicit only, withdrawals remove coverage instead of treating as Sell. No inferred scale from overweight/outperform. 180-day age default, 30-day illustrative decay. Paired rating momentum, target/EPS/revenue relative revision (absolute prior denominator, skip zero), target dispersion (population std/mean), consensus and disagreement, coverage count change, age-decayed rating. Sentiment is a rating proxy; event surprise is relative to other analysts' prior EPS estimates, not market surprise. Each forecast metric may require a separate call with its actual common basis/horizon. Missing values null, sample counts and receipt evidence preserved. Not independently calibrated or formally PIT certified.
+Descriptive forecast error uses locally supplied exact-basis outcomes observed after horizon, one first forecast per analyst/target/horizon bucket, includes historical report revisions. Absolute and relative errors and sample counts, no formal return backtest; outcomes/digests are operator-provided and not independently certified. Historical analyst accuracy factor and dynamic weights remain null until independent out-of-sample evaluation, coverage/selection bias, benchmark/sector and trading-cost controls are implemented. No reputation weighting. Rating-return study, risk-adjusted performance, market pricing and analyst stability remain pending.
+event_review reuses financial_events for analyst ratings and earnings estimates plus caller-supplied normalized SEC/news/options/macro/market events. Explicit shared IDs only, no causal inference or trading authority. Event conversion additionally needs ATLASPM_INVESTMENT_BANKS_RIGHTS for the existing normalized event source. No automatic model call; local report outputs retain deny flags and cannot be promoted into formal training/backtesting or orders. Unified model fusion/decision/portfolio binding pending separate validation.
+
+### Acceptance
+
+Previous d96cd9a CI: 3/5 workflows success, full Windows 1067/1068 (1 error, no skips). API management field mismatch last_latency_seconds corrected in 6ae58a5. New offline institutional tests cover document integrity, history, provenance, factor calculations, withdrawal, forecast errors, event bridge and egress. Expected full count 1078 (1068 + 10), not measured. Run the same previous Windows review checkout validation, minimum-passed 1078; keep external AI and Paper opt-in unset. No subscription credentials needed. Use review src via PYTHONPATH from main local_data root only for authorized report import.
+```powershell
+& $py -m atlaspm.research.institutional_research --import-metadata local_data/research/report.json
+```
+CLI prints sanitized import summary; factors and evaluation callable via explicit arguments (see --help). Real documents, licensed feed access, PDF dependency, actual identity/basis/PIT, performance and AI-processing rights not validated. No real API calls made. Keep #94 frozen and all formal training/backtest/live disabled.
