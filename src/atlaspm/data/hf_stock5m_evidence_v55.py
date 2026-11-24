@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import date
 from fractions import Fraction
+from pathlib import Path
+from urllib.parse import urlsplit
 import json
 import math
 import re
@@ -123,7 +125,52 @@ def match_split(event,filing,data):
     return result
 
 
-def review(queue,investigation):
+def load_reference(filename):
+    """Optional reviewed external split assertions; provenance, not certification."""
+    result={}
+    if filename is None:
+        return result
+    source=private_path(Path(filename),exists=True)
+    checked={}
+    fields={"symbol","effective_date","new_over_old_shares","security_id",
+            "source_family","source_url","evidence_path","evidence_sha256","known_date"}
+    for number,line in enumerate(source.read_text(encoding="utf-8-sig").splitlines(),1):
+        if not line.strip():
+            continue
+        try:
+            r=json.loads(line)
+            if set(r)!=fields or not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,31}",r["symbol"]):
+                raise ValueError("Invalid reference fields or ticker")
+            for field in ("effective_date","known_date"):
+                if date.fromisoformat(r[field]).isoformat()!=r[field]:
+                    raise ValueError("Noncanonical reference date")
+            for field in ("security_id","source_family"):
+                if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}",r[field]):
+                    raise ValueError("Invalid reference identifier")
+            if not re.fullmatch(r"[0-9]{1,7}/[0-9]{1,7}",r["new_over_old_shares"]):
+                raise ValueError("Use positive integer numerator/denominator")
+            ratio=Fraction(r["new_over_old_shares"])
+            if ratio<=0 or ratio==1:
+                raise ValueError("Invalid reference split ratio")
+            url=urlsplit(r["source_url"])
+            if url.scheme!="https" or not url.hostname or url.hostname=="sec.gov" or url.hostname.endswith(".sec.gov"):
+                raise ValueError("External HTTPS evidence source required")
+            p=private_path(Path(r["evidence_path"]),exists=True)
+            if p.is_relative_to(private_path(ROOT)):
+                raise ValueError("Use original external evidence, not pipeline artifacts")
+            if p not in checked:
+                from atlaspm.data.hf_stock5m_certification_v5 import fingerprint
+                checked[p]=fingerprint(p)["sha256"]
+            if checked[p]!=r["evidence_sha256"]:
+                raise ValueError("External evidence hash mismatch")
+            r["new_over_old_shares"]=str(ratio)
+            result.setdefault((r["symbol"],r["effective_date"]),[]).append(r)
+        except Exception as exc:
+            raise ValueError(f"External reference line {number}: {exc}") from exc
+    return result
+
+
+def review(queue,investigation,reference=None):
     indexed={e["event_id"]:e for e in queue["candidates"]}
     outcomes=[]
     for row in investigation["results"]:
@@ -158,6 +205,18 @@ def review(queue,investigation):
                 out["status"]="NO_PARSED_FILING_EVIDENCE"
             else:
                 out["status"]="FILING_TERMS_REVIEW_REQUIRED"
+        refs=(reference or {}).get((event["symbol"],event["date"]),[])
+        out["external_reference_claims"]=refs
+        if refs and event["kind"]=="OVERNIGHT_PRICE_GAP":
+            ext_terms={r["new_over_old_shares"] for r in refs}
+            ids={r["security_id"] for r in refs}
+            sec_terms={t for x in out["filings"] for t in x.get("ratio_terms",[])}
+            sec_hashes={x.get("sha256") for x in out["filings"]}
+            if len(ext_terms)>1 or len(ids)>1 or (sec_terms and ext_terms!=sec_terms):
+                out["status"]="EXTERNAL_REFERENCE_CONFLICT"
+            elif out["status"]=="MARKET_AND_TEXT_AGREE_REVIEW_REQUIRED" and all(
+                    r["evidence_sha256"] not in sec_hashes for r in refs):
+                out["status"]="EXTERNAL_REFERENCE_AGREES_REVIEW_REQUIRED"
         out["independent_source_verified"]=False
         out["historical_security_id"]=None
         out["approved_for_ingest"]=False
@@ -166,14 +225,15 @@ def review(queue,investigation):
 
 
 def run(start="2026-03",end="2026-03",*,threshold=1.5,limit=200,max_events=10,
-        per_event=5,fetch=False,max_requests=20,memory="2GB",threads=2):
+        per_event=5,fetch=False,max_requests=20,memory="2GB",threads=2,reference_jsonl=None):
     chosen=hf.months(start,end,0)
     if not chosen or not 1<=max_requests<=100 or not 1<=max_events<=100 or not 1<=per_event<=20:
         raise ValueError("Invalid archive range or investigation budget")
+    reference=load_reference(reference_jsonl)
     report={"schema":"atlaspm_event_matching_v55",**v4.GUARDS,
             "local_only":not fetch,"months_selected":len(chosen),"months":[],
             "requests_attempted":0,"network_stopped":False,
-            "status":"EVIDENCE_REVIEW_REQUIRED"}
+            "status":"EVIDENCE_REVIEW_REQUIRED","external_reference_rows":sum(map(len,reference.values()))}
     # No queue is assumed complete: each run rechecks local data/cache. Persist
     # every completed month's evidence before moving on; re-running reuses
     # daily Parquet and SEC bodies, including after an interrupted run.
@@ -187,7 +247,7 @@ def run(start="2026-03",end="2026-03",*,threshold=1.5,limit=200,max_events=10,
             report["requests_attempted"]+=inv["requests_attempted"]
             report["network_downloads"]+=inv["network_downloads"]
             report["network_stopped"]|=inv["network_stopped"]
-            outcomes=review(q,inv)
+            outcomes=review(q,inv,reference)
             counts=dict(Counter(x["status"] for x in outcomes))
             detail={"month":month,"status":"REVIEW_REQUIRED","total_detected":q["total_detected"],
                     "queued":q["candidate_count"],"queue_truncated":q["truncated"],
