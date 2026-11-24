@@ -21,6 +21,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from atlaspm.data.provider_policy import local_rights, request_budget, inventory
+
 
 class GatewayError(ValueError):
     """Sanitized provider failure; never include raw URLs or response bodies."""
@@ -40,6 +42,7 @@ PROVIDERS = MappingProxyType({
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
     "fred": Provider("api.stlouisfed.org", 1.0, "FRED_API_KEY", "series_specific_rights_review_required"),
+    "unusual_whales": Provider("api.unusualwhales.com", 2.0, "UW_TOKEN", "operator_attested_not_independently_verified"),
 })
 
 
@@ -132,6 +135,15 @@ class Gateway:
                    {"apikey", "key", "token", "accesstoken", "authorization", "password", "secret"}
                    for k, _ in query)):
             raise GatewayError("Blocked external provider URL or URL credential")
+        if provider == "massive" and not (p.path == "/v3/reference/options/contracts" or
+                re.fullmatch(r"/v2/aggs/ticker/O:[A-Z0-9.]+/range/[0-9]+/(minute|day)/[0-9-]+/[0-9-]+", p.path)):
+            raise GatewayError("Massive restricted to optional historical options endpoints")
+        if provider == "unusual_whales":
+            local_rights(provider)
+            if not (p.path in {"/api/option-trades/flow-alerts", "/api/market/market-tide"} or
+                    re.fullmatch(r"/api/stock/[A-Z0-9.]+/(greek-exposure|net-prem-ticks|option-contracts|iv-rank|volatility/term-structure)", p.path) or
+                    re.fullmatch(r"/api/darkpool/[A-Z0-9.]+", p.path)):
+                raise GatewayError("Endpoint outside designated options feed scope")
         headers = {"User-Agent": "AtlasPM research gateway", "Accept": "application/json",
                    "Accept-Encoding": "identity"}
         if spec.key_env:
@@ -213,6 +225,8 @@ class Gateway:
             if self._clock() < state.blocked_until:
                 raise GatewayError(f"{provider}: circuit open; retry after cooldown")
             for attempt in range(self._attempts):
+                if provider == "unusual_whales" and state.calls >= request_budget(provider):
+                    raise GatewayError("Unusual Whales local request budget exhausted")
                 wait = state.next_request - self._clock()
                 if wait > 0:
                     self._sleep(wait)
@@ -290,7 +304,7 @@ class Gateway:
         else:
             headers["Authorization"] = "Bearer " + token
             if provider == "anthropic":
-                version = os.environ.get("ATLASPM_ANTHROPIC_API_VERSION", "2026-10-21")
+                version = os.environ.get("ATLASPM_ANTHROPIC_API_VERSION", "2023-06-01")
                 if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", version):
                     raise GatewayError("Invalid Anthropic API version")
                 headers["anthropic-version"] = version
@@ -407,6 +421,7 @@ def main():
             raise GatewayError("Treasury smoke response missing requested row")
         report["treasury_smoke"] = response.evidence()
     report["providers"] = DEFAULT_GATEWAY.health()
+    report["designated_sources"] = inventory()
     print(json.dumps(report, indent=2))
 
 
