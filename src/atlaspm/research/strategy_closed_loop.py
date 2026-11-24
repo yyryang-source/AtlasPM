@@ -23,7 +23,7 @@ from atlaspm.research.training_engine import train
 from atlaspm.research.training_registry import FLAGS
 
 STRATEGY_FIELDS={"top_k","rebalance_sessions","cash_reserve","optimizer"}
-EXECUTION_FIELDS={"initial_cash","fee_bps","slippage_bps","settlement_sessions","execution_policy"}
+EXECUTION_FIELDS={"initial_cash","fee_bps","slippage_bps","settlement_sessions","execution_policy","risk_policy"}
 
 
 def _validate_market(payload,market):
@@ -125,10 +125,13 @@ def _evaluate(sessions,strategy,execution,*,include_path=False):
              "first_date":curve[0]["date"],"last_date":curve[-1]["date"],
              "equal_weight_price_benchmark":benchmark_stats,
              "forecast_sessions":sum(bool(r["signals"]) for r in sessions),
-             "execution_model":result["execution_model"]}
+             "execution_model":result["execution_model"],"risk_halt_latched":result["risk_halt_latched"],
+             "remaining_positions_after_halt":result["remaining_positions_after_halt"],
+             "risk_audit_root":result["risk_audit_root"]}
     if include_path:
         summary.update(curve=curve,trades=trades,allocations=result["allocations"],
-                       orders=result["orders"],unexecuted_final_signal=result["unexecuted_final_signal"])
+                       orders=result["orders"],unexecuted_final_signal=result["unexecuted_final_signal"],
+                       risk_audit=result["risk_audit"])
     return summary
 
 
@@ -186,7 +189,7 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
             stats=result["statistics"]
             score=stats["sharpe_zero_rf"]
             eligible=(score is not None and isfinite(score) and result["trade_count"]>0
-                      and abs(stats["max_drawdown"])<=cap)
+                      and abs(stats["max_drawdown"])<=cap and not result.get("risk_halt_latched",False))
             trials.append({"index":index,"strategy":s,"validation":result,"eligible":eligible,
                            "status":"ELIGIBLE" if eligible else "VALIDATION_RISK_OR_ACTIVITY_REJECTED"})
         except ValueError as exc:
