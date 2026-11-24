@@ -69,6 +69,10 @@ permissions are implied. Start with `market-db factor-catalog` and
 `market-db factor-build --month 2026-03 --dry-run`. See the
 [Windows factor database guide](docs/FACTOR_DATABASE.md).
 
+## Factor Evaluation V2 (exploratory)
+
+`market-db factor-evaluate --start 2000-02-01 --end 2000-03-31 --factors mom_5d --horizons 1 5 --exploratory` computes strictly dated, non-overlapping Rank IC and quintile diagnostics on **already materialized** local factor files. Unverified source rights, ticker identities and corporate actions mean scores are **not** approved for model training, selection handoff, or live trading. See [V2 factor evaluation guide](docs/FACTOR_EVALUATION_V2.md).
+
 ## Primary workflows
 
 | Goal | Entry point | Scope |
