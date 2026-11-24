@@ -123,6 +123,48 @@ def run_fixture(payload):
         return {**FLAGS,"decision":"EXIT_BLOCKED","reason":str(exc),"entry":entry}
 
 
+def multiasset_fixture(*, checkpoint, event_count=None):
+    """Persist validated synthetic OMS journal and actual account/order state.
+
+    Fixed packaged basket only. Reuses exact-leg independent preflight and
+    OMS; not a real account recovery API or a second order system.
+    """
+    import json
+    from pathlib import Path
+    from atlaspm.research.event_queue import _transaction
+    root=Path(__file__).resolve().parents[3]/"examples"
+    ledger,plan,journal=[json.loads((root/name).read_text(encoding="utf-8"))
+        for name in ("institutional_batch_ledger.json","institutional_batch_plan.json","paper_oms_events.json")]
+    all_events=journal["events"]
+    size=len(all_events) if event_count is None else event_count
+    if type(size) is not int or not 1<=size<=len(all_events):
+        raise ValueError("INVALID_OMS_FIXTURE_PREFIX")
+    if not str(checkpoint).endswith(".oms-fixture.json"):
+        raise ValueError("OMS_FIXTURE_CHECKPOINT_SUFFIX_REQUIRED")
+    journal["events"]=all_events[:size]
+    input_hash=digest([ledger,plan])
+    def commit(items):
+        if set(items)-{"oms_fixture"}:
+            raise ValueError("OMS_FIXTURE_CHECKPOINT_KIND_MISMATCH")
+        old=items.get("oms_fixture")
+        if old:
+            if old["input_sha256"]!=input_hash or journal["events"][:len(old["events"])]!=old["events"]:
+                raise ValueError("OMS_FIXTURE_PREFIX_CONFLICT")
+            prior=replay_paper_orders(ledger,plan,{**journal,"events":old["events"]})
+            if (digest(prior)!=old["result_sha256"] or prior["account_replay"]!=old["account"]
+                or prior["orders"]!=old["orders"]):
+                raise ValueError("OMS_FIXTURE_STATE_RECONCILIATION_FAILED")
+        report=replay_paper_orders(ledger,plan,journal)
+        result_hash=digest(report)
+        items["oms_fixture"]={"input_sha256":input_hash,"events":journal["events"],
+            "result_sha256":result_hash,"account":report["account_replay"],"orders":report["orders"],
+            "audit_root_sha256":report["audit_root_sha256"]}
+        return {**FLAGS,"mode":"synthetic_multiasset_fixture","events":size,
+                "checkpoint_reused":bool(old and old["events"]==journal["events"]),
+                "result_sha256":result_hash,"report":report,"broker_side_effects":False}
+    return _transaction(checkpoint,commit)
+
+
 def main():
     import argparse,json
     from pathlib import Path

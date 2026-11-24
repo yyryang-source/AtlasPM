@@ -107,7 +107,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
     from time import perf_counter,process_time
     from atlaspm.data.market_db import private_path
     from atlaspm.framework.continuous_simulation import continuous,synthetic_fixture
-    from atlaspm.framework.autonomous_cycle import run_fixture
+    from atlaspm.framework.autonomous_cycle import run_fixture,multiasset_fixture
     from atlaspm.monitoring.api_management import inventory
     from atlaspm.research.intelligence import model_inventory,offline_model_responses
     from atlaspm.execution.oms_controls import verify_audit_chain
@@ -169,6 +169,20 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
     single=run_fixture(json.loads(fixture.read_text(encoding="utf-8")))
     checks["existing_oms_flat"]=single["decision"]=="SYNTHETIC_EVENT_TO_FLAT_COMPLETE"
     checks["existing_oms_attribution"]=single.get("attribution",{}).get("reconciled") is True
+    with tempfile.TemporaryDirectory(prefix="offline-oms-",dir=root) as temp:
+        journal_path=Path(temp)/"mixed.oms-fixture.json"
+        partial=multiasset_fixture(checkpoint=journal_path,event_count=3)
+        mixed=multiasset_fixture(checkpoint=journal_path)
+        again=multiasset_fixture(checkpoint=journal_path)
+        checks["multiasset_partial_recovery"]=any(
+            0<order["filled_quantity"]<order["requested_quantity"] for order in partial["report"]["orders"])
+        checks["multiasset_checkpoint_identical"]=again["checkpoint_reused"] and again["result_sha256"]==mixed["result_sha256"]
+        mixed_report=mixed["report"]
+        checks["multiasset_reconciled"]=mixed_report["decision"]=="PAPER_REPLAY_COMPLETED" and abs(
+            mixed_report["account_replay"]["net_liquidation_reconciliation_gap"])<.01 and all(
+            order["status"]=="FILLED" for order in mixed_report["orders"])
+        checks["multiasset_risk_audit"]=verify_audit_chain(mixed_report["audit_events"],mixed_report["audit_root_sha256"])
+
     if paused():
         return result("PAUSED")
     # Link fixed prediction observations to actual synthetic next-close
@@ -199,6 +213,8 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
                       "flat_and_settled":sim["flat_and_settled"],"ending_equity":replay["curve"][-1]["equity"],
                       "total_cost":replay["total_cost"],"result_sha256":sim["result_sha256"]},
                   single_cycle_decision=single["decision"],learning=learning,
+                  mixed_asset_fixture={"decision":mixed_report["decision"],"orders":len(mixed_report["orders"]),
+                                       "result_sha256":mixed["result_sha256"],"broker_verified":False},
                   historical_data_certified=False,real_api_connected=False,
                   release_candidate_approved=False)
 

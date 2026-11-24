@@ -223,3 +223,19 @@ class ContinuousTests(unittest.TestCase):
         self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
         self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],1)
         self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)
+
+
+    def test_multiasset_oms_persisted_partial_fill_resume_and_rollback_refusal(self):
+        from atlaspm.framework.autonomous_cycle import multiasset_fixture
+        checkpoint="local_data/mixed.oms-fixture.json"
+        partial=multiasset_fixture(checkpoint=checkpoint,event_count=3)
+        self.assertEqual(partial["report"]["orders"][0]["filled_quantity"],4)
+        saved=event_queue._read_state(checkpoint)["oms_fixture"]
+        self.assertEqual(saved["orders"][0]["filled_quantity"],4)
+        final=multiasset_fixture(checkpoint=checkpoint)
+        self.assertEqual(final["report"]["decision"],"PAPER_REPLAY_COMPLETED")
+        self.assertTrue(all(o["status"]=="FILLED" for o in final["report"]["orders"]))
+        self.assertEqual(final["result_sha256"],multiasset_fixture(checkpoint=checkpoint)["result_sha256"])
+        with self.assertRaisesRegex(ValueError,"PREFIX_CONFLICT"):
+            multiasset_fixture(checkpoint=checkpoint,event_count=3)
+        self.assertFalse(final["broker_side_effects"])

@@ -191,6 +191,8 @@ jobs:
         run: python -m pip check
       - name: Run complete test suite with all optional dependencies
         run: python -m unittest discover -s tests -v
+      - name: Unified offline system acceptance and resource measurement
+        run: python scripts/maintenance/benchmark_unified_data.py --offline
       - name: Audit repository source structure
         run: python scripts/maintenance/audit_source.py
 

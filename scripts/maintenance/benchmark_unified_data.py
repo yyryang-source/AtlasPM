@@ -79,7 +79,25 @@ def io_delta(before, after):
                                         if k != "kind" and k in after}}
 
 
+def offline_benchmark():
+    from atlaspm.framework.orchestrator import offline_release
+    before=process_io_counters()
+    wall,cpu=perf_counter(),process_time()
+    report=offline_release()
+    metrics={"scope":"synthetic_offline_fixture_only","wall_seconds":perf_counter()-wall,
+             "cpu_seconds":process_time()-cpu,"process_lifetime_peak_rss_bytes":process_peak_rss_bytes(),
+             "process_io_delta":io_delta(before,process_io_counters()),
+             "production_performance_verified":False}
+    print(json.dumps({"status":report["status"],"checks":report["checks"],"metrics":metrics,
+                      "synthetic_simulation":report.get("synthetic_simulation"),
+                      "mixed_asset_fixture":report.get("mixed_asset_fixture"),
+                      "network_calls":0,"broker_side_effects":False},indent=2,allow_nan=False))
+    return 0 if report["status"]=="OFFLINE_FIXTURE_PASS" else 1
+
+
 def main():
+    if sys.argv[1:]==["--offline"]:
+        return offline_benchmark()
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=tuple(CATALOG), required=True)
     parser.add_argument("--start", required=True)
@@ -137,4 +155,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
