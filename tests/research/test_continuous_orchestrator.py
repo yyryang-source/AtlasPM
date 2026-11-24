@@ -171,3 +171,22 @@ class ContinuousTests(unittest.TestCase):
         row=research("AAA",stamp,(.1,.11))[0]
         row["evidence"][0]["available_at"]="2019-12-01T00:00:00Z"
         self.assertFalse(contract(row,as_of=stamp)["numeric_eligible"])
+
+
+    def test_option_multiplier_and_bond_duration_not_equity_weights(self):
+        from atlaspm.engine.autonomous_decision import multiasset_position_review
+        stamp="2020-01-02T21:00:00Z"
+        option={"type":"option","identifier":"SYN:OPT","mark_age_seconds":0,"mark_source":"synthetic",
+                "contracts":2,"multiplier":100,"mark_premium":3,"right":"call","underlying":"SYN:AAA",
+                "strike":100,"expiration_date":"2020-03-20"}
+        result=multiasset_position_review(option,as_of=stamp,risk_inputs={"observed_at":stamp,
+                "underlying_price":100,"delta":.5,"gamma":.02,"vega_per_vol_point":.1})
+        self.assertEqual(result["metrics"]["market_value"],600)
+        self.assertEqual(result["metrics"]["delta_dollar_exposure"],10000)
+        self.assertEqual(result["decision"],"NO_TRADE")
+        bond={"type":"treasury","identifier":"SYN:BOND","mark_age_seconds":0,"mark_source":"synthetic",
+              "face_value":10000,"clean_price_per_100":98,"accrued_interest_per_100":2,
+              "maturity_date":"2030-01-01","coupon_rate":.04,"modified_duration":7}
+        result=multiasset_position_review(bond,as_of=stamp,risk_inputs={"observed_at":stamp})
+        self.assertAlmostEqual(result["metrics"]["dv01_usd_per_bp"],7)
+        self.assertFalse(result["trade_authorized"])

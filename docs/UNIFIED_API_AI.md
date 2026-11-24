@@ -541,8 +541,8 @@ pending. No real connection tested, no resource benchmark measured.
 New tests cover continuous buy/stop/exit/settlement, partial/rejected orders,
 research conflict/missing, risk budget, restart prefix, exclusive writer,
 control/tick idempotency, decay/correlation, joint local context and stale
-availability. Expected count 1099 (1090 + 9), not measured. Run existing
-Windows release gate with --minimum-passed 1099, then:
+availability. Expected count 1100 (1090 + 10), not measured. Run existing
+Windows release gate with --minimum-passed 1100, then:
 ```powershell
 & $py -m atlaspm.framework.orchestrator status
 & $py -m atlaspm.framework.continuous_simulation --help
@@ -550,3 +550,5 @@ Windows release gate with --minimum-passed 1099, then:
 ```
 No paid credentials required. Keep #94 frozen, formal training/backtest and
 automatic live disabled. Do not treat earlier CI as current acceptance.
+
+Multiasset position review reuses institutional ledger valuation with synthetic option multipliers, signed delta-dollar exposure, gamma/vega illustrations and Treasury DV01, financing-cost assumptions and explicit NO_TRADE. No option/bond sizing or verified margin/credit approval; no real execution.

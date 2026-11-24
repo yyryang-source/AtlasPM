@@ -120,3 +120,65 @@ def portfolio_cycle(payload, rows, *, weights, cost_fraction, liquidity, horizon
                 "portfolio":portfolio,"trade_authorized":False,"input_sha256":digest(adapted)}
     except (ValueError,TypeError,KeyError,OverflowError) as exc:
         return blocked(str(exc))
+
+
+def multiasset_position_review(position, *, as_of, risk_inputs):
+    """Synthetic-only asset-specific exposure diagnostics; never an order.
+
+    Reuses the institutional ledger's position valuation rather than treating
+    contract count or face value as stock shares. No modelled margin credit.
+    """
+    from atlaspm.execution.institutional_ledger import _position
+    from datetime import date
+    if not isinstance(position,dict) or position.get("mark_source")!="synthetic" or not str(position.get("identifier","")).startswith("SYN:"):
+        raise ValueError("SYNTHETIC_POSITION_REQUIRED")
+    if not isinstance(risk_inputs,dict):
+        raise ValueError("ASSET_SPECIFIC_RISK_INPUTS_REQUIRED")
+    now=timestamp(as_of,"as_of")
+    observed=timestamp(risk_inputs["observed_at"],"risk_observed_at")
+    if not 0<=(now-observed).total_seconds()<=120:
+        raise ValueError("STALE_ASSET_RISK_INPUTS")
+    p=_position(position,"SYN-REVIEW")
+    if p["mark_age_seconds"]>120:
+        raise ValueError("STALE_POSITION_MARK")
+    blockers=["NO_INDEPENDENT_ASSET_RISK_APPROVAL"]
+    metrics={"market_value":p["market_value"],"gross_marked_notional":p["gross_notional"]}
+    kind=p["type"]
+    if kind=="equity":
+        adv=finite(risk_inputs["daily_dollar_volume"],"adv",minimum=1)
+        metrics["position_to_daily_dollar_volume"]=p["market_value"]/adv
+    elif kind=="option":
+        if date.fromisoformat(p["expiration_date"])<=now.date():
+            raise ValueError("OPTION_EXPIRED_OR_EXPIRING_TODAY")
+        underlying=finite(risk_inputs["underlying_price"],"underlying_price",minimum=.000001)
+        delta=finite(risk_inputs["delta"],"delta")
+        gamma=finite(risk_inputs["gamma"],"gamma",minimum=0)
+        vega=finite(risk_inputs["vega_per_vol_point"],"vega",minimum=0)
+        if abs(delta)>1 or (p["right"]=="call" and delta<0) or (p["right"]=="put" and delta>0):
+            raise ValueError("INVALID_OPTION_DELTA")
+        units=p["contracts"]*p["multiplier"]
+        metrics.update(delta_dollar_exposure=units*delta*underlying,
+                       gamma_pnl_for_one_percent_move=units*.5*gamma*(underlying*.01)**2,
+                       vega_pnl_per_vol_point=units*vega,
+                       long_premium_at_risk=p["market_value"] if units>0 else None)
+        if units<0:
+            blockers.append("SHORT_OPTION_MARGIN_UNVERIFIED")
+        blockers.append("OPTION_EXECUTION_UNSUPPORTED_BY_RESEARCH_BRIDGE")
+    elif kind=="treasury":
+        if date.fromisoformat(p["maturity_date"])<=now.date():
+            raise ValueError("BOND_MATURED")
+        if p["dv01_usd_per_bp"] is None:
+            raise ValueError("BOND_DURATION_REQUIRED")
+        metrics.update(dv01_usd_per_bp=p["dv01_usd_per_bp"],
+                       illustrative_100bp_rate_loss=p["dv01_usd_per_bp"]*100,
+                       credit_rating=risk_inputs.get("credit_rating"),
+                       recognized_collateral=0.)
+        blockers.extend(["CREDIT_AND_COLLATERAL_UNVERIFIED","BOND_EXECUTION_UNSUPPORTED_BY_RESEARCH_BRIDGE"])
+    debt=finite(risk_inputs.get("financing_debt",0),"financing_debt",minimum=0)
+    rate=finite(risk_inputs.get("annual_financing_rate",0),"financing_rate",minimum=0)
+    metrics["annual_financing_cost_assumption"]=debt*rate
+    if debt:
+        blockers.append("BROKER_MARGIN_UNVERIFIED")
+    # No automatic plan because these marks, Greeks and credit are assumed.
+    return {**FLAGS,"asset_type":kind,"metrics":metrics,"decision":"NO_TRADE",
+            "block_reasons":blockers,"trade_authorized":False,"broker_margin_verified":False}
