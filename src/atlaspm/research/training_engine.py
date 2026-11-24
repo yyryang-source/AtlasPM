@@ -8,6 +8,7 @@ from pathlib import Path
 from statistics import fmean
 from atlaspm.research.training_dataset import build_panel, purged_folds
 from atlaspm.engine.contracts import finite
+from atlaspm.research.training_models import MODELS, versions, fit_predict
 
 
 def _correlation(a,b):
@@ -54,7 +55,12 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1.):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42):
+    models = ['ridge','historical_mean'] if models is None else models
+    if not isinstance(models,list) or not models or any(m not in MODELS for m in models) or len(set(models))!=len(models):
+        raise ValueError('INVALID_MODEL_SELECTION')
+    if type(seed) is not int or not 0 <= seed < 2**31:
+        raise ValueError('INVALID_MODEL_SEED')
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     panel=build_panel(payload,horizon)
     folds=purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
@@ -64,7 +70,9 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     except ImportError as exc:
         raise ValueError("TRAINING_REQUIRES_PORTFOLIO_EXTRA") from exc
     samples=panel["samples"]
-    predictions={"ridge":[],"historical_mean":[]}
+    dependency_versions=versions(models)
+    predictions={m:[] for m in models}
+    model_settings={}
     audit=[]
     for fold in folds:
         train_rows=[samples[i] for i in fold["train"]]
@@ -79,11 +87,20 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
         test=np.asarray([r["x"] for r in test_rows],dtype=float)
         ridge=((test-mean)/scale)@coef+intercept
-        for row,value in zip(test_rows,ridge):
-            base={k:row[k] for k in ("security_id","date","label_end_date")}
-            base["actual"]=row["y"]
-            predictions["ridge"].append(dict(base,prediction=finite(float(value),"prediction")))
-            predictions["historical_mean"].append(dict(base,prediction=intercept))
+        for name in models:
+            if name=="ridge":
+                values=ridge
+                settings={"alpha":alpha}
+            elif name=="historical_mean":
+                values=np.full(len(test_rows),intercept)
+                settings={}
+            else:
+                values,settings=fit_predict(name,z,y,(test-mean)/scale,seed)
+            model_settings[name]=settings
+            for row,value in zip(test_rows,values):
+                base={k:row[k] for k in ("security_id","date","label_end_date")}
+                base["actual"]=row["y"]
+                predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
         audit.append(dict(test_start=panel["dates"][fold["test_start_index"]],
                           test_end=panel["dates"][fold["test_end_index"]],
                           latest_train_label=panel["dates"][fold["latest_training_label_end"]],
@@ -91,7 +108,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                           feature_mean=mean.tolist(),feature_scale=scale.tolist(),
                           coefficients=coef.tolist(),intercept=intercept))
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
-    return dict(version="synthetic_return_research_v1",dataset_sha256=fingerprint,
+    return dict(version="synthetic_return_research_v2",dataset_sha256=fingerprint,
+                model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
                 metrics={k:_metrics(v) for k,v in predictions.items()},predictions=predictions,
