@@ -69,6 +69,10 @@ permissions are implied. Start with `market-db factor-catalog` and
 `market-db factor-build --month 2026-03 --dry-run`. See the
 [Windows factor database guide](docs/FACTOR_DATABASE.md).
 
+## Factor V3 (experimental, local-only)
+
+`market-db factor-v3-analyze --start 2000-02-01 --end 2000-03-31 --factors mom_5d mom_21d --exploratory` performs per-date winsorized z-scoring, dated-industry neutralization (only with a complete local effective-dated CSV), cross-sectional factor correlations, redundancy filtering, dated IC stability and research-only composite scoring. `--weighting ic_train` requires a chronological holdout and purges immature training labels. **Historical ticker identities, corporate actions and vendor rights remain unverified; no training or live-trading approval.** Read [Factor V3 guide](docs/FACTOR_V3.md).
+
 ## Factor Evaluation V2 (exploratory)
 
 `market-db factor-evaluate --start 2000-02-01 --end 2000-03-31 --factors mom_5d --horizons 1 5 --exploratory` computes strictly dated, non-overlapping Rank IC and quintile diagnostics on **already materialized** local factor files. Unverified source rights, ticker identities and corporate actions mean scores are **not** approved for model training, selection handoff, or live trading. See [V2 factor evaluation guide](docs/FACTOR_EVALUATION_V2.md).
