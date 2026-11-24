@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from math import isfinite
+from statistics import fmean
 import json
 from pathlib import Path
 
@@ -114,10 +115,15 @@ def _evaluate(sessions,strategy,execution,*,include_path=False):
     returns=[p["daily_return"] for p in curve]
     # Use cash (zero return) as explicit baseline; no invented market index.
     stats=metrics(returns,[0.]*len(returns))
+    initial_marks=sessions[0]["close"]
+    levels=[fmean(row["close"][s]/p for s,p in initial_marks.items()) for row in sessions]
+    benchmark=[0.]+[b/a-1 for a,b in zip(levels,levels[1:])]
+    benchmark_stats=metrics(returns,benchmark)
     trades=result["trades"]
     summary={"statistics":stats,"trade_count":len(trades),"total_cost":result["total_cost"],
              "gross_notional_over_initial_cash":sum(t["shares"]*t["reference_price"] for t in trades)/request["initial_cash"],
              "first_date":curve[0]["date"],"last_date":curve[-1]["date"],
+             "equal_weight_price_benchmark":benchmark_stats,
              "forecast_sessions":sum(bool(r["signals"]) for r in sessions),
              "execution_model":result["execution_model"]}
     if include_path:
@@ -129,6 +135,8 @@ def _evaluate(sessions,strategy,execution,*,include_path=False):
 def run(payload,market,*,model_config,model_candidates,model_selection_end,
         strategy_holdout_start,strategies,execution,selection_metric="mae",
         signal_model="selected",ensemble=None,max_validation_drawdown=.25):
+    if not isinstance(model_config,dict):
+        raise ValueError("INVALID_MODEL_CONFIG")
     validate_panel_metadata(payload,model_config.get("horizon",5),model_config.get("sequence_length",1))
     _validate_market(payload,market)
     n=len(payload["sessions"])
@@ -200,6 +208,7 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
             "dataset_sha256":full["dataset_sha256"],"holdout_evaluated":True,
             "selected_strategy":best["strategy"],"selected_strategy_index":best["index"],
             "holdout":final,"fresh_cash_per_evaluation":True,
+            "holdout_drawdown_within_validation_cap":abs(final["statistics"]["max_drawdown"])<=cap,
             "missing_forecast_policy":"hold_existing_positions_no_new_orders",
             "limitations":["synthetic fixed universe at most 20 assets","cash only; no borrowing",
                 "no real identity, corporate actions, liquidity or broker verification",
