@@ -380,6 +380,17 @@ def register_parser(sub):
     h.add_argument('--per-event',type=int,default=5)
     h.add_argument('--max-requests',type=int,default=20)
     h.add_argument('--fetch',action='store_true')
+    h=actions.add_parser('hf-5m-match-v55',help='Resumable local market-to-filing evidence matching')
+    h.add_argument('--start-month',default='2026-03')
+    h.add_argument('--end-month',default='2026-03')
+    h.add_argument('--threshold',type=float,default=1.5)
+    h.add_argument('--limit',type=int,default=200)
+    h.add_argument('--max-events',type=int,default=10)
+    h.add_argument('--per-event',type=int,default=5)
+    h.add_argument('--max-requests',type=int,default=20)
+    h.add_argument('--memory',default='2GB')
+    h.add_argument('--threads',type=int,default=2)
+    h.add_argument('--fetch',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -557,6 +568,12 @@ def run(args):
         return discovery.investigate(args.month,max_events=args.max_events,
                                      per_event=args.per_event,fetch=args.fetch,
                                      max_requests=args.max_requests)
+    if args.db_action == 'hf-5m-match-v55':
+        from atlaspm.data import hf_stock5m_evidence_v55 as matching
+        return matching.run(args.start_month,args.end_month,threshold=args.threshold,
+                            limit=args.limit,max_events=args.max_events,per_event=args.per_event,
+                            fetch=args.fetch,max_requests=args.max_requests,
+                            memory=args.memory,threads=args.threads)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
