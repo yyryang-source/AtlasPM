@@ -556,6 +556,7 @@ def validate_local_bindings(bindings):
     if not isinstance(bindings,list) or len(bindings)>16:
         raise ValueError("LOCAL_BINDING_CAPACITY")
     keys=set()
+    kinds={}
     for b in bindings:
         if (not isinstance(b,dict) or set(b)!={"kind","subject","task"} or b["kind"] not in KINDS
             or not isinstance(b["subject"],str) or not 1<=len(b["subject"])<=160
@@ -567,6 +568,9 @@ def validate_local_bindings(bindings):
         if key in keys:
             raise ValueError("DUPLICATE_LOCAL_RESEARCH_BINDING")
         keys.add(key)
+        kinds[b["kind"]]=kinds.get(b["kind"],0)+1
+        if kinds[b["kind"]]>4:
+            raise ValueError("LOCAL_BINDING_KIND_BUDGET")
     return bindings
 
 

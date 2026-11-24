@@ -49,7 +49,11 @@ def _transaction(path, operation):
                         ensure_ascii=False,allow_nan=False).encode()
         if len(items)>MAX_ITEMS or len(body)>MAX_BYTES:
             raise ValueError("EVENT_QUEUE_CAPACITY")
-        _atomic_write(p,lambda f:f.write(body))
+        def durable_write(handle):
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _atomic_write(p,durable_write)
         return result
     finally:
         lock.unlink(missing_ok=True)

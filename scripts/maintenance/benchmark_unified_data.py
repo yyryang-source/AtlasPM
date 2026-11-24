@@ -95,6 +95,7 @@ def offline_benchmark():
                       "synthetic_simulation":report.get("synthetic_simulation"),
                       "mixed_asset_fixture":report.get("mixed_asset_fixture"),
                       "joint_fixture":report.get("joint_fixture"),
+                      "settlement_fixture":report.get("settlement_fixture"),
                       "network_calls":0,"broker_side_effects":False},indent=2,allow_nan=False))
     return 0 if report["status"]=="OFFLINE_FIXTURE_PASS" else 1
 

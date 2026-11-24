@@ -172,6 +172,71 @@ def multiasset_fixture(*, checkpoint, event_count=None, scenario="normal"):
     return _transaction(checkpoint,commit)
 
 
+def settlement_fixture():
+    """Canonical long-option and nominal Treasury lifecycle integration.
+
+    In-memory generated synthetic CSVs, separate accounts and explicit
+    settlement observations. No inference of corporate-bond credit events,
+    early exercise, uncovered short assignment or real broker cashflows.
+    """
+    from datetime import date
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+    from atlaspm.data.market_db import private_path
+    from atlaspm.data.option_history import OptionHistory
+    from atlaspm.data.treasury_history import TreasuryHistory
+    from atlaspm.strategies.options.option_replay import replay_long_options
+    from atlaspm.strategies.bonds.treasury_replay import replay_treasury_holding
+    root=private_path(Path("local_data/runs"))
+    root.mkdir(parents=True,exist_ok=True)
+    with TemporaryDirectory(prefix="settlement-fixture-",dir=root) as folder:
+        def write(name,body):
+            path=Path(folder)/name
+            path.write_text(body,encoding="utf-8")
+            return path
+        contracts=write("option_contracts.csv",
+            "contract_id,underlying,right,strike,last_trade_at,expiration_at,multiplier,exercise_style,settlement_type,exercise_threshold_usd\n"
+            "SYN-P,SYN-STOCK,put,100,2024-01-12T20:59Z,2024-01-12T21:00Z,100,american,physical,1\n"
+            "SYN-C,SYN-INDEX,call,90,2024-01-12T20:59Z,2024-01-12T21:00Z,100,european,cash,1\n")
+        quotes=write("option_quotes.csv","contract_id,quote_at,bid,ask,bid_size,ask_size\n"
+            "SYN-P,2024-01-08T20:58Z,2,2.2,5,5\nSYN-C,2024-01-08T20:58Z,4,4.4,5,5\n")
+        settlement=write("option_settlement.csv","contract_id,reference_at,available_at,cash_at,settlement_value\n"
+            "SYN-P,2024-01-12T21:00Z,2024-01-12T21:02Z,2024-01-16T14:30Z,95\n"
+            "SYN-C,2024-01-12T21:00Z,2024-01-12T21:02Z,2024-01-16T14:30Z,95\n")
+        option=replay_long_options(OptionHistory(contracts,quotes,settlement),{
+            "initial_cash_usd":2000,"initial_shares":{"SYN-STOCK":100},"fee_per_contract_usd":1,
+            "orders":[{"at":"2024-01-08T21:00Z","contract_id":key,"side":"buy","contracts":1}
+                      for key in ("SYN-P","SYN-C")],
+            "valuation_times":["2024-01-12T21:01Z","2024-01-12T21:02Z","2024-01-16T14:30Z"]})
+        terms=write("treasury_terms.csv","cusip,kind,dated_on,issued_on,maturity,annual_coupon_rate,face_increment_usd\n"
+            "999999990,note,2023-12-31,2024-01-02,2024-12-31,0.04,100\n")
+        payments=write("treasury_payments.csv","cusip,scheduled_on,paid_on\n"
+            "999999990,2024-06-30,2024-07-01\n999999990,2024-12-31,2024-12-31\n")
+        marks=write("treasury_quotes.csv","cusip,observed_on,clean_close_per_100\n"
+            "999999990,2024-06-28,99.5\n999999990,2024-07-01,99.6\n999999990,2024-12-30,99.98\n")
+        bond=replay_treasury_holding(TreasuryHistory(terms,payments,marks),"999999990",10000,
+            [date.fromisoformat(x) for x in ("2024-06-28","2024-06-30","2024-07-01","2024-12-30","2024-12-31")],
+            initial_cash_usd=100)
+    waiting,due,paid=option["valuations"]
+    first,coupon,receipt,_,maturity=bond["valuations"]
+    checks={
+        "option_no_future_settlement":waiting["option_bid_value_usd"] is None and waiting["cash_receivable_usd"]==0,
+        "option_exercise_receivable":due["cash_receivable_usd"]==10500 and due["shares_available"]["SYN-STOCK"]==0,
+        "option_cash_reconciliation":abs(paid["cash_available_usd"]-(2000-option["premium_paid_usd"]-
+            option["execution_fees_usd"]+10500))<.01 and paid["cash_receivable_usd"]==0 and not paid["option_positions"],
+        "bond_accrued_and_coupon":first["accrued_interest_usd"]>0 and coupon["payment_receivable_usd"]==200
+            and receipt["payment_receivable_usd"]==0 and receipt["cash_available_usd"]==300,
+        "bond_principal_reconciliation":maturity["held_face_usd"]==0 and maturity["cash_available_usd"]==10500
+            and maturity["coupon_paid_to_date_usd"]==400 and maturity["principal_paid_to_date_usd"]==10000,
+        "bond_nav_reconciliation":all(abs(v["nav_usd"]-v["cash_available_usd"]-v["payment_receivable_usd"]-
+            v["dirty_market_value_usd"])<.01 for v in bond["valuations"]),
+    }
+    return {**FLAGS,"mode":"synthetic_settlement_fixture","checks":checks,
+            "option_final_cash":paid["cash_available_usd"],"bond_final_cash":maturity["cash_available_usd"],
+            "option_report_sha256":digest(option),"bond_report_sha256":digest(bond),
+            "short_assignment_supported":False,"broker_side_effects":False}
+
+
 def main():
     import argparse,json
     from pathlib import Path

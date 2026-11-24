@@ -342,3 +342,24 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(event_queue.drain(as_of=now,local_bindings=bindings)["local_research_calls"],0)
         task["params"]["end"]="2020-01-10"
         self.assertTrue(local_specialist_tasks([task],as_of=now)["tasks"][0]["status"].startswith("BLOCKED"))
+
+
+    def test_settlement_fixture_reuses_option_and_treasury_cashflow_engines(self):
+        from atlaspm.framework.autonomous_cycle import settlement_fixture
+        out=settlement_fixture()
+        self.assertTrue(all(out["checks"].values()),out["checks"])
+        self.assertAlmostEqual(out["option_final_cash"],11838)
+        self.assertAlmostEqual(out["bond_final_cash"],10500)
+        self.assertFalse(out["short_assignment_supported"])
+        self.assertFalse(out["broker_side_effects"])
+
+    def test_fsync_failure_preserves_previous_committed_queue(self):
+        row=fixture()["sessions"][0]["events"][0]
+        event_queue.enqueue([row])
+        before=event_queue.PATH.read_bytes()
+        with patch.object(event_queue.os,"fsync",side_effect=OSError("sync failure")):
+            with self.assertRaises(OSError):
+                event_queue.drain(as_of=row["received_at"])
+        self.assertEqual(before,event_queue.PATH.read_bytes())
+        self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
+        self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],1)

@@ -117,7 +117,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
     from time import perf_counter,process_time
     from atlaspm.data.market_db import private_path
     from atlaspm.framework.continuous_simulation import continuous,synthetic_fixture
-    from atlaspm.framework.autonomous_cycle import run_fixture,multiasset_fixture
+    from atlaspm.framework.autonomous_cycle import run_fixture,multiasset_fixture,settlement_fixture
     from atlaspm.monitoring.api_management import inventory
     from atlaspm.research.intelligence import model_inventory,offline_model_responses,offline_joint_research
     from atlaspm.execution.oms_controls import verify_audit_chain
@@ -218,6 +218,10 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 
     if paused():
         return result("PAUSED")
+    settlement=settlement_fixture()
+    checks.update(settlement["checks"])
+    if paused():
+        return result("PAUSED")
     # Link fixed prediction observations to actual synthetic next-close
     # outcomes only after their label dates. Baseline uses past returns.
     streams={m:[] for m in ("historical_mean","m1","m2")}
@@ -245,7 +249,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
                   synthetic_simulation={"sessions":sim["sessions"],"orders":len(replay["orders"]),
                       "flat_and_settled":sim["flat_and_settled"],"ending_equity":replay["curve"][-1]["equity"],
                       "total_cost":replay["total_cost"],"result_sha256":sim["result_sha256"]},
-                  single_cycle_decision=single["decision"],learning=learning,
+                  single_cycle_decision=single["decision"],learning=learning,settlement_fixture=settlement,
                   joint_fixture={"coverage":joint["coverage"],"model_reports":joint["model_reports"],"model_outputs_are_fixtures":True},
                   work_counts={"queued_event_revisions":count,"joint_event_revisions":len(events),
                                "replay_sessions":sim["sessions"],"mixed_journal_events":mixed["events"]},
