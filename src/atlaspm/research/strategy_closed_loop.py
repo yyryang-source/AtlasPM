@@ -218,7 +218,8 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
     full=train(project_features(payload,selection["selected_features"]),**opts)
     final_rows=_signals(full["predictions"][selected_name],market,selected_name,version)
     final=_evaluate(final_rows[strategy_holdout_start:],best["strategy"],execution,include_path=True)
-    return {**base,"status":"SYNTHETIC_CASH_CLOSED_LOOP_COMPLETE",
+    return {**base,"status":"SYNTHETIC_MARGIN_CLOSED_LOOP_COMPLETE" if "margin_policy" in execution else "SYNTHETIC_CASH_CLOSED_LOOP_COMPLETE",
+            "broker_margin_verified":False,
             "dataset_sha256":full["dataset_sha256"],"holdout_evaluated":True,
             "selected_strategy":best["strategy"],"selected_strategy_index":best["index"],
             "holdout":final,"fresh_cash_per_evaluation":True,
