@@ -63,6 +63,9 @@ jobs:
       - name: Verify V5.4 anomaly discovery and evidence budget
         run: python -m unittest discover -s tests -p "test_hf_stock5m_discovery_v54.py" -v
 
+      - name: Verify V6 real research dataset and strict training boundary
+        run: python -m unittest discover -s tests -p "test_real_dataset_v6.py" -v
+
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
 
@@ -95,3 +98,6 @@ jobs:
 
       - name: Verify V5.4 anomaly discovery on Windows
         run: python -m unittest discover -s tests -p "test_hf_stock5m_discovery_v54.py" -v
+
+      - name: Verify V6 real dataset on Windows
+        run: python -m unittest discover -s tests -p "test_real_dataset_v6.py" -v
