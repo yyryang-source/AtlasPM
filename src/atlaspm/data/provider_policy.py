@@ -54,6 +54,29 @@ def local_rights(provider, *, retention=False):
             "external_ai_allowed": False, "retention_attested": retention}
 
 
+RESEARCH_FIRMS = (
+    "Goldman Sachs", "Morgan Stanley", "JPMorgan", "Bank of America", "Citigroup",
+    "UBS", "Barclays", "Deutsche Bank", "Wells Fargo", "Jefferies", "Evercore ISI",
+    "Bernstein", "TD Cowen", "Mizuho", "RBC Capital Markets", "HSBC", "Nomura",
+    "BMO Capital Markets",
+)
+RESEARCH_DELIVERY = frozenset({"bloomberg","investment_banks","ibkr","yahoo_finance"})
+
+
+def research_rights(provider):
+    """Separate document retention from news/market-data contracts."""
+    if provider not in RESEARCH_DELIVERY:
+        raise ValueError("Institutional research delivery not approved")
+    require_enabled(provider)
+    env = "ATLASPM_" + provider.upper() + "_RESEARCH_RIGHTS"
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", os.environ.get(env,"")):
+        raise ValueError(f"Set {env} after reviewing document research rights")
+    if os.environ.get(env+"_RETENTION")!="1":
+        raise ValueError(f"Local research retention requires {env}_RETENTION=1")
+    return {"rights_status":"operator_attested_not_independently_verified",
+            "external_ai_allowed":False,"retention_attested":True}
+
+
 def request_budget(provider):
     env = {"unusual_whales":"ATLASPM_UW_MAX_REQUESTS", "xpressapi":"ATLASPM_XPRESSAPI_MAX_REQUESTS", "finra":"ATLASPM_FINRA_MAX_REQUESTS"}.get(provider)
     if env is None:

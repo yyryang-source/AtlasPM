@@ -16,7 +16,7 @@ import re
 
 from atlaspm.data.api_gateway import DEFAULT_GATEWAY, MODEL_ENDPOINTS, GatewayError, _strict_json
 from atlaspm.data.market_db import private_path
-from atlaspm.data.provider_policy import RESTRICTED
+from atlaspm.data.provider_policy import RESTRICTED, RESEARCH_FIRMS
 from atlaspm.research.training_models import MODELS, PACKAGES
 from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
@@ -77,6 +77,8 @@ def _prepare(topic, evidence, as_of):
                                  "spdowjones", "goldmansachs", "morganstanley", "jpmorgan",
                                  "bankofamerica", "citigroup", "ubsresearch", "deutschebank",
                                  "barclaysresearch", "trace", "emma"})
+        restricted_names.update(re.sub(r"[^a-z0-9]", "", firm.casefold()) for firm in RESEARCH_FIRMS)
+        restricted_names.update({"factset","lseg","institutionalresearch"})
         if any(name in normalized_source for name in restricted_names):
             raise ValueError("Restricted feed source cannot enter external AI through public excerpts")
         if _timestamp(item["available_at"]) > cutoff:
