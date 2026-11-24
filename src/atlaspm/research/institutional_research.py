@@ -7,7 +7,9 @@ and evidence quotes are indexed in the existing research runs area.
 from __future__ import annotations
 
 from datetime import UTC, datetime, date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
+from math import exp, log
+from statistics import mean, pstdev
 from hashlib import sha256
 import json
 import os
@@ -175,10 +177,13 @@ def _records(path):
     with path.open(encoding="utf-8") as f:
         for line in f:
             row=json.loads(line)
-            payload={k:v for k,v in row.items() if k not in {"revision","received_at"}}
+            payload={k:v for k,v in row.items() if k not in {"revision","received_at","receipt_sha256"}}
             if _digest(payload)!=row.get("revision"):
                 raise ValueError("Research revision integrity failure")
-            _time(row["received_at"])
+            received=_time(row["received_at"])
+            if (row.get("receipt_sha256")!=_digest([row["revision"],row["received_at"]]) or
+                    received>datetime.now(UTC)):
+                raise ValueError("Research receipt integrity failure")
             rows.append(row)
             if len(rows)>MAX_RECORDS:
                 raise ValueError("Research record budget exceeded")
@@ -195,7 +200,7 @@ def ingest(metadata_file, *, archive=ARCHIVE):
     meta=_metadata(json.loads(raw),received)
     digest,pages=_read_document(private_path(Path(meta["document"]),exists=True))
     claims=extract(pages)
-    # Path aliases must not create a new version of identical content.
+    # Duplicate content at the same report identity is handled below.
     payload={**meta,"document_sha256":digest,"claims":claims}
     revision=_digest(payload)
     path=private_path(Path(archive))
@@ -214,7 +219,8 @@ def ingest(metadata_file, *, archive=ARCHIVE):
                 if any(row[k]!=meta[k] for k in ("published_at","first_available_at","evidence_type")):
                     raise ValueError("Same document with conflicting provenance")
                 return {**FLAGS,"status":"DUPLICATE_CONTENT","revision":row["revision"],"claim_count":len(row["claims"])}
-        rows.append({**payload,"revision":revision,"received_at":received.isoformat()})
+        rows.append({**payload,"revision":revision,"received_at":received.isoformat(),
+                     "receipt_sha256":_digest([revision,received.isoformat()])})
         if len(rows)>MAX_RECORDS:
             raise ValueError("Research record budget exceeded")
         body=("\n".join(json.dumps(row,ensure_ascii=False,sort_keys=True,allow_nan=False) for row in rows)+"\n").encode()
@@ -254,3 +260,268 @@ def visible(*, as_of, subject, archive=ARCHIVE):
             raise ValueError("Source report content or parser evidence changed")
         rows.append(row)
     return sorted(rows,key=lambda r:(r["published_at"],r["received_at"],r["revision"]))
+
+
+_RATING={"Buy":1,"Hold":0,"Sell":-1}
+
+
+def _eligible(row, cutoff, age_days):
+    return (row["evidence_type"]=="original_report" and row["first_available_at"] is not None
+            and max(_time(row["first_available_at"]),_time(row["received_at"]))<=cutoff
+            and 0<=(cutoff-_time(row["published_at"])).total_seconds()<=age_days*86400)
+
+
+def _snapshot(rows, cutoff, age_days, selectors):
+    """Latest explicit claim per reviewed firm/analyst identity and exact basis."""
+    chosen={}
+    for row in rows:
+        if not _eligible(row,cutoff,age_days):
+            continue
+        actor=(row["firm"],row["analyst_id"])
+        rank=(_time(row["published_at"]),_time(row["received_at"]))
+        for claim in row["claims"]:
+            metric=claim["metric"]
+            if metric not in selectors:
+                continue
+            if tuple(claim[k] for k in ("unit","period","basis"))!=selectors[metric]:
+                continue
+            key=(actor,metric)
+            prior=chosen.get(key)
+            if prior and prior[0]==rank and prior[1]["value"]!=claim["value"]:
+                raise ValueError("Conflicting same-time analyst estimates")
+            if not prior or prior[0]<rank:
+                chosen[key]=(rank,claim,row["receipt_sha256"])
+    return chosen
+
+
+def _paired(current, previous, metric, *, relative=False, positive=False):
+    result=[]
+    for key,(_,claim,_) in current.items():
+        if key[1]!=metric or key not in previous:
+            continue
+        old=previous[key][1]["value"]
+        if metric=="rating":
+            result.append(_RATING[claim["value"]]-_RATING[old])
+        else:
+            value,base=Decimal(claim["value"]),Decimal(old)
+            if relative and (base==0 or (positive and base<=0)):
+                continue
+            result.append(float((value-base)/abs(base) if relative else value-base))
+    return result
+
+
+def _metric_values(snapshot, metric):
+    return [float(c["value"]) for (_,m),(_,c,_) in snapshot.items() if m==metric]
+
+
+def _avg(values):
+    return mean(values) if values else None
+
+
+def factors(*, subject, as_of, previous_as_of, unit, period, basis,
+            max_age_days=180, half_life_days=30, archive=ARCHIVE):
+    """Exploratory point-in-time-shaped analyst factors, not certified PIT.
+
+    Identical metric scope/period/basis at both cutoffs. Current/previous
+    report versions are independently loaded so later corrections never
+    erase the earlier visible snapshot. No pricing or training admission.
+    """
+    now,prior=_time(as_of),_time(previous_as_of)
+    if not prior<now or not 1<=max_age_days<=730 or not 1<=half_life_days<=365:
+        raise ValueError("Invalid factor cutoffs/age policy")
+    if not isinstance(unit,str) or not re.fullmatch(r"[A-Z]{3}",unit) or unit in {"PCT","INDEX"}:
+        raise ValueError("Expected common currency")
+    if date.fromisoformat(period)<now.date():
+        raise ValueError("Forecast horizon already expired")
+    if not isinstance(basis,str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,32}",basis):
+        raise ValueError("Expected comparable forecast basis")
+    selectors={m:(unit,period,basis) for m in ("target_price","eps","revenue","ebitda")}
+    selectors["rating"]=(None,None,"explicit_buy_hold_sell")
+    current=_snapshot(visible(as_of=as_of,subject=subject,archive=archive),now,max_age_days,selectors)
+    previous=_snapshot(visible(as_of=previous_as_of,subject=subject,archive=archive),prior,max_age_days,selectors)
+    ratings=[_RATING[c["value"]] for (_,m),(_,c,_) in current.items() if m=="rating"]
+    targets=_metric_values(current,"target_price")
+    eps=_metric_values(current,"eps")
+    revenue=_metric_values(current,"revenue")
+    rating_changes=_paired(current,previous,"rating")
+    target_changes=_paired(current,previous,"target_price",relative=True,positive=True)
+    eps_changes=_paired(current,previous,"eps",relative=True)
+    revenue_changes=_paired(current,previous,"revenue",relative=True)
+    actors={a for (a,m) in current if m=="rating"}
+    prior_actors={a for (a,m) in previous if m=="rating"}
+    # Compare new matched revisions to prior matched-peer consensus; no market
+    # surprise claim, since price expectations are not independently observed.
+    surprise=[]
+    for key,(_,c,_) in current.items():
+        if key[1]!="eps" or key not in previous or c["value"]==previous[key][1]["value"]:
+            continue
+        peers=[Decimal(pc["value"]) for pk,(_,pc,_) in previous.items()
+               if pk[1]=="eps" and pk[0]!=key[0]]
+        if peers:
+            baseline=sum(peers)/len(peers)
+            if baseline:
+                surprise.append(float((Decimal(c["value"])-baseline)/abs(baseline)))
+    weighted=[]
+    for (_,m),(rank,c,_) in current.items():
+        if m=="rating":
+            weight=exp(-log(2)*(now-rank[0]).total_seconds()/86400/half_life_days)
+            weighted.append(weight*_RATING[c["value"]])
+    values={"analyst_rating_momentum":_avg(rating_changes),
+            "target_price_revision":_avg(target_changes),
+            "target_price_dispersion":pstdev(targets)/mean(targets) if len(targets)>=2 else None,
+            "eps_revision_momentum":_avg(eps_changes),
+            "revenue_revision_momentum":_avg(revenue_changes),
+            "analyst_consensus":_avg(ratings),
+            "analyst_disagreement":pstdev(ratings) if len(ratings)>=2 else None,
+            "analyst_coverage_change":len(actors)-len(prior_actors),
+            "institutional_sentiment":_avg(ratings),
+            "research_event_surprise":_avg(surprise),
+            "analyst_historical_accuracy":None,
+            "recommendation_decay":_avg(weighted)}
+    return {**FLAGS,"subject":subject,"as_of":now.isoformat(),"previous_as_of":prior.isoformat(),
+            "model":"institutional_factors_v1","values":values,"unit":unit,"period":period,"basis":basis,
+            "sample_counts":{"ratings":len(ratings),"target_prices":len(targets),"eps":len(eps),"revenue":len(revenue),
+                             "paired_ratings":len(rating_changes),"paired_targets":len(target_changes),
+                             "paired_eps":len(eps_changes),"paired_revenue":len(revenue_changes),
+                             "eps_peer_surprise":len(surprise),"previous_ratings":len(prior_actors)},
+            "consensus_values":{"target_price":_avg(targets),"eps":_avg(eps),"revenue":_avg(revenue)},
+            "evidence_receipts":sorted({v[2] for snapshot in (current,previous) for v in snapshot.values()}),
+            "half_life_days":half_life_days,"sentiment_is_rating_proxy":True,
+            "surprise_is_prior_peer_eps_proxy":True,"identity_and_basis_independently_verified":False,
+            "statistically_validated":False,"directional_signal":None}
+
+
+def evaluate_forecasts(*, subject, as_of, outcomes_file, archive=ARCHIVE):
+    """Descriptive forecast errors only, no return backtest or promotion.
+
+    Outcomes are locally reviewed normalized observations with exact
+    metric/currency/period/basis, and are available only after horizon ends.
+    Select one first forecast per actor/target/horizon bucket to limit repeated
+    revisions. No historical weights until independent sample validation.
+    """
+    cutoff=_time(as_of)
+    rows=visible(as_of=as_of,subject=subject,archive=archive)
+    with private_path(Path(outcomes_file),exists=True).open("rb") as handle:
+        raw=handle.read(1024*1024+1)
+    if len(raw)>1024*1024:
+        raise ValueError("Outcome file too large")
+    outcomes=json.loads(raw)
+    if not isinstance(outcomes,list) or len(outcomes)>2000:
+        raise ValueError("Invalid outcome list")
+    actual={}
+    for item in outcomes:
+        if not isinstance(item,dict) or set(item)!={"subject","metric","unit","period","basis","value","observed_at","evidence_sha256"}:
+            raise ValueError("Invalid outcome schema")
+        if item["subject"]!=subject:
+            raise ValueError("Outcome subject mismatch")
+        period=date.fromisoformat(item["period"])
+        observed=_time(item["observed_at"])
+        if not re.fullmatch(r"[0-9a-f]{64}",item["evidence_sha256"]):
+            raise ValueError("Outcome evidence digest required")
+        if observed.date()<=period:
+            raise ValueError("Outcome predates completed forecast horizon")
+        if observed>cutoff:
+            continue
+        value=item["value"]
+        if not isinstance(value,str) or not re.fullmatch(r"-?[0-9]{1,18}(?:\.[0-9]{1,8})?",value):
+            raise ValueError("Invalid outcome value")
+        key=tuple(item[k] for k in ("metric","unit","period","basis"))
+        if key in actual:
+            raise ValueError("Ambiguous outcome revision; provide one reviewed vintage")
+        actual[key]=(Decimal(value),item["evidence_sha256"])
+    selected={}
+    eligible_count=0
+    for row in rows:
+        if row["evidence_type"]!="original_report" or row["first_available_at"] is None:
+            continue
+        known=max(_time(row["received_at"]),_time(row["first_available_at"]))
+        for claim in row["claims"]:
+            if claim["metric"] not in METRICS.values():
+                continue
+            key=tuple(claim[k] for k in ("metric","unit","period","basis"))
+            horizon=(date.fromisoformat(claim["period"])-known.date()).days
+            if not 1<=horizon<=730:
+                continue
+            bucket="1-30d" if horizon<=30 else "31-90d" if horizon<=90 else "91-365d" if horizon<=365 else "366-730d"
+            group=(row["firm"],row["analyst_id"],key,bucket)
+            if group not in selected or known<selected[group][0]:
+                selected[group]=(known,Decimal(claim["value"]),row["receipt_sha256"])
+    scores={}
+    for (firm,analyst,key,bucket),(_,forecast,receipt) in selected.items():
+        eligible_count+=1
+        if key not in actual:
+            continue
+        realized,evidence=actual[key]
+        if key[0]=="target_price" and realized<=0:
+            raise ValueError("Invalid realized target price")
+        group=(firm,analyst,key[0],key[1],key[3],bucket)
+        scores.setdefault(group,[]).append((float(abs(forecast-realized)),
+            float(abs(forecast-realized)/abs(realized)) if realized else None,receipt,evidence))
+    result=[]
+    for (firm,analyst,metric,unit,basis,bucket),obs in sorted(scores.items()):
+        result.append({"firm":firm,"analyst_id":analyst,"metric":metric,"unit":unit,"basis":basis,
+                       "horizon_bucket":bucket,"n":len(obs),"mean_absolute_error":mean(x[0] for x in obs),
+                       "mean_absolute_percentage_error":_avg([x[1] for x in obs if x[1] is not None]),
+                       "evidence_receipts":sorted({x[2] for x in obs}),
+                       "outcome_digests":sorted({x[3] for x in obs}),"research_weight":None})
+    return {**FLAGS,"model":"forecast_error_review_v1","subject":subject,"as_of":cutoff.isoformat(),
+            "evaluated":sum(x["n"] for x in result),"eligible":eligible_count,"scores":result,
+            "outcome_file_sha256":sha256(raw).hexdigest(),"outcomes_independently_verified":False,
+            "benchmark_adjusted_returns":None,"historical_accuracy_calibrated":False,
+            "weights_enabled":False}
+
+
+def event_review(*, subject, as_of, context=(), archive=ARCHIVE, holdings=()):
+    """Link research with existing normalized news/options/disclosure events.
+
+    Shared subject only; never equate conflicting forecasts with verified
+    market repricing. No external calls and no automatic decision authority.
+    """
+    from atlaspm.research.financial_events import normalize, review
+    events=list(context)
+    if len(events)>1000:
+        raise ValueError("Context exceeds 1000 events")
+    for row in visible(as_of=as_of,subject=subject,archive=archive):
+        if row["evidence_type"]!="original_report":
+            continue
+        for kind,metrics in (("analyst_rating",{"rating","rating_action"}),
+                             ("earnings_forecast",{"eps","revenue","ebitda"})):
+            if any(c["metric"] in metrics for c in row["claims"]):
+                events.append(normalize({"provider":"investment_banks",
+                    "source_id":_digest([row["firm"],row["analyst_id"],row["report_id"],subject,kind]),
+                    "kind":kind,"subjects":[subject],"published_at":row["published_at"],
+                    "first_available_at":row["first_available_at"],"effective_at":None,
+                    "evidence_sha256":row["receipt_sha256"],"delivery":"file","expiry_seconds":86400},
+                    received_at=row["received_at"]))
+    return review(events,as_of=as_of,holdings=holdings)
+
+
+def main():
+    from argparse import ArgumentParser
+    parser=ArgumentParser(description=__doc__)
+    parser.add_argument("--import-metadata")
+    parser.add_argument("--subject")
+    parser.add_argument("--as-of")
+    parser.add_argument("--previous-as-of")
+    parser.add_argument("--unit",default="USD")
+    parser.add_argument("--period")
+    parser.add_argument("--basis")
+    parser.add_argument("--outcomes")
+    args=parser.parse_args()
+    if args.import_metadata:
+        result=ingest(args.import_metadata)
+    elif args.subject and args.as_of and args.outcomes:
+        result=evaluate_forecasts(subject=args.subject,as_of=args.as_of,outcomes_file=args.outcomes)
+        result.pop("scores")
+    elif all((args.subject,args.as_of,args.previous_as_of,args.period,args.basis)):
+        result=factors(subject=args.subject,as_of=args.as_of,previous_as_of=args.previous_as_of,
+                       unit=args.unit,period=args.period,basis=args.basis)
+        # Console summary only, no proprietary values, identifiers or evidence.
+        result={k:v for k,v in result.items() if k not in {"values","consensus_values","evidence_receipts","subject"}}
+    else:
+        parser.error("Provide --import-metadata or explicit factor/evaluation arguments")
+    print(json.dumps(result,indent=2))
+
+
+if __name__=="__main__":
+    main()
