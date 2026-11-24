@@ -271,6 +271,21 @@ def overview(pages: dict) -> None:
             for job in jobs[:5]
         ], hide_index=True)
     st.page_link(pages["jobs"])
+    st.subheader("自主系统控制（仅本地研究）")
+    from atlaspm.framework.orchestrator import status,set_control
+    try:
+        state=status()
+        st.json(state)
+        left,middle,right=st.columns(3)
+        action=("stop" if left.button("停止本地事件处理") else
+                "takeover" if middle.button("人工接管") else
+                "resume" if right.button("恢复本地事件处理") else None)
+        if action:
+            set_control(action)
+            st.rerun()
+    except (OSError,ValueError):
+        st.error("系统状态读取或控制失败；请检查本地锁及状态文件。")
+    st.caption("此控制不连接券商，不会撤销真实订单，也不会启动正式训练。")
 
 
 def all_jobs() -> None:

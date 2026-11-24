@@ -7,6 +7,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from atlaspm.engine.autonomous_decision import decide
+from atlaspm.engine.contracts import finite
 from atlaspm.engine.replay import replay
 from atlaspm.research.research_contract import contract
 from atlaspm.research.financial_events import FLAGS
@@ -27,6 +28,11 @@ def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoin
         raise ValueError("CONTINUOUS_RISK_AND_EXECUTION_REQUIRED")
     if not isinstance(payload["execution_policy"],dict):
         raise ValueError("CONTINUOUS_EXECUTION_POLICY_REQUIRED")
+    fee=finite(payload.get("fee_bps",5),"fee",minimum=0)
+    slip=finite(payload.get("slippage_bps",5),"slippage",minimum=0)
+    impact=finite(payload["execution_policy"].get("impact_bps_at_full_participation",50),"impact",minimum=0)
+    if finite(cost_fraction,"cost_fraction",minimum=0)<2*(fee+slip+impact)/10000:
+        raise ValueError("CONTINUOUS_COST_BUDGET_UNDERSTATED")
     config={k:v for k,v in payload.items() if k!="sessions"}
     policy_id=digest([config,weights,horizon_days,cost_fraction])
     fingerprints=[digest(s) for s in sessions]
@@ -88,7 +94,11 @@ def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoin
         return compute()
     # Existing atomic state writer, not a second scheduler. Bounded full
     # prefix recomputation on restart; no external execution or double fills.
+    if not str(checkpoint).endswith(".continuous.json"):
+        raise ValueError("CONTINUOUS_CHECKPOINT_SUFFIX_REQUIRED")
     def commit(items):
+        if set(items)-{"continuous"}:
+            raise ValueError("CONTINUOUS_CHECKPOINT_KIND_MISMATCH")
         old=items.get("continuous")
         if old and (old["policy_sha256"]!=policy_id or fingerprints[:len(old["session_hashes"])]!=old["session_hashes"]):
             raise ValueError("CONTINUOUS_CHECKPOINT_PREFIX_CONFLICT")
