@@ -488,6 +488,11 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
                 "ic_stability": _periods(dated, c),
                 "daily_ic_preview": dated[:10],
             })
+        matrix = {name: {other: (1.0 if name==other else None)
+                         for other in c["factors"]} for name in c["factors"]}
+        for pair in correlations:
+            matrix[pair["a"]][pair["b"]] = pair["mean_signed_spearman"]
+            matrix[pair["b"]][pair["a"]] = pair["mean_signed_spearman"]
         selection = _select(c, diagnostics, correlations, coverage)
         weights, weighting_state = _weights(c, selection["selected_factors"], diagnostics)
         composite, composite_dated = (
@@ -505,6 +510,7 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
             "quality_funnel": funnel,
             "factor_coverage": coverage,
             "factor_pair_correlations": correlations,
+            "correlation_matrix_signed_spearman": matrix,
             "redundancy_selection": selection,
             "factor_diagnostics": diagnostics,
             "multi_factor": {
