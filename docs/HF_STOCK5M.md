@@ -788,3 +788,39 @@ knowledge. Primary-form regex matching misses many legitimate events;
 dividend, merger, exit and ticker-change terms need separate validation.
 No full-history completeness, source independence, price adjustment
 semantics, rights, training or trading authorization is inferred.
+
+
+## V5.6 historical SEC cover observations
+
+Use the completed V5.2 index without rebuilding or downloading index files.
+This reader samples one latest original 8-K or 6-K per historical CIK per
+quarter in a requested year. It does not consult a current ticker directory.
+Start with a bounded explicit issuer sample:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_identity_v56 --year 2020 --ciks 320193 789019 1045810 --max-requests 12 --fetch
+~~~
+
+Omit --fetch to inspect only cached bodies without network requests. Use
+the same existing SEC contact User-Agent and shared V5.2 body cache.
+Request budgets count network attempts only; a failed network request
+stops further downloads. For a broad sample omit --ciks, use
+--max-issuers (1..100), and continue with --after-cik only once
+page_complete is true and more_issuers is true. Repeat the same page
+to finish missing cached bodies. A cache error requires review rather
+than silent replacement. The cursor is lexical over padded historical
+CIKs, not a guarantee of historical listed-security coverage.
+
+The parser verifies accession, issuer CIK and filed date headers, selects
+one primary form, and accepts explicit DEI security title, trading symbol
+and exchange facts only in the same table row and XBRL context. Unknown
+exchange names, cross-context joins and conflicting ticker observations
+are rejected or marked for review. A filing-date observation is not an
+effective interval or a stable share-class identity. Older filings
+without inline DEI cover facts remain unresolved. The current module
+does not extract untagged legacy cover tables, resolve historical ticker
+reuse, certify corporate actions or import V5.3 claims.
+
+Reports: local_data/stock_5m/huggingface/quality/certification_v5/identity_v56/latest.json
+and bounded page reports. Body references retain raw SHA-256. No
+historical identity, data rights or training permission is granted.
