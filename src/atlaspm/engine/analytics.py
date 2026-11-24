@@ -46,7 +46,7 @@ def _stats(returns: list[float], benchmark: list[float]) -> dict[str, Any]:
 
 
 def build_analytics(history: object, *, gross_notional: float, equity: float,
-                    order_fees: float, slippage_cost: float,
+                    order_fees: float, slippage_cost: float, market_impact_cost: float,
                     annual_interest_assumption: float, margin_debt: float,
                     factor_scores: Mapping[str, float],
                     variance_contributions: Mapping[str, float]) -> dict[str, Any]:
@@ -88,6 +88,7 @@ def build_analytics(history: object, *, gross_notional: float, equity: float,
         "gross_trade_notional": gross_notional,
         "one_way_turnover_fraction": gross_notional / equity,
         "paper_fees_usd": order_fees, "paper_slippage_usd": slippage_cost,
+        "paper_market_impact_assumption_usd": market_impact_cost,
         "annual_margin_interest_estimate_usd": annual_interest,
         "annual_interest_drag_fraction_of_equity": annual_interest/equity,
         "factor_score_exposure_illustrative": dict(factor_scores),
