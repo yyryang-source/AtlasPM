@@ -40,7 +40,7 @@ atlaspm = "atlaspm.cli:main"
 where = ["src"]
 
 # Stage 3: internal code must import canonical modules, not module-object shims.
-# Stage 5 will add the permanent Ruff CI job; until then run:
+# The permanent CI Ruff job enforces these rules; run locally with:
 #   python -m ruff check src/atlaspm --select F401,F841,TID251
 [tool.ruff.lint]
 select = ["F401", "F841", "TID251"]
