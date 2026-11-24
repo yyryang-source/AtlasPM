@@ -84,6 +84,22 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertFalse(r["holdout_evaluated"])
         self.assertEqual(fit.call_count,1)
 
+    @unittest.skipUnless(find_spec("scipy"),"portfolio extra required")
+    def test_existing_optimizer_path(self):
+        p,m=fixture()
+        config=options()
+        config["strategies"]=[
+            {"top_k":2,"rebalance_sessions":2,"optimizer":{"method":"equal_weight","lookback_sessions":3}},
+            {"top_k":2,"rebalance_sessions":3,"optimizer":{"method":"minimum_variance","lookback_sessions":3}}]
+        r=loop.run(p,m,**config)
+        self.assertEqual(r["status"],"SYNTHETIC_CASH_CLOSED_LOOP_COMPLETE",r)
+        self.assertTrue(r["holdout"]["allocations"])
+        self.assertIn("equal_weight_price_benchmark",r["holdout"])
+        for allocation in r["holdout"]["allocations"]:
+            self.assertLessEqual(sum(allocation["weights"].values()),1+1e-8)
+            self.assertLessEqual(max(allocation["weights"].values()),.6+1e-8)
+            self.assertLessEqual(allocation["estimation_last_date"],allocation["signal_date"])
+
     def test_adaptive_signal_uses_existing_ensemble(self):
         p,m=fixture()
         r=loop.run(p,m,**options(),signal_model="adaptive_ensemble",
