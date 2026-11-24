@@ -1,110 +1,158 @@
 # Unified Data Engine — integration candidate
 
-## Scope and release status
+One local exploratory data access layer. Reuses the existing SQLite, DuckDB,
+Parquet, SEC evidence ledger, factor mart and IBKR diagnostics. No new
+warehouse, no raw duplication, no provider fabrication, no order submission.
+Historical revisions and provider symbols are not independently certified.
+All real training, formal backtest and live execution approvals remain false.
 
-This is an exploratory read facade over existing SQLite and monthly Parquet
-stores, not a new warehouse, downloader, security master, or training API.
-No source is certified PIT; all batches have training, official backtest and
-live execution approval set to false. Consumers must not interpret an
-exploratory batch as a permission token. Existing CLI and raw data are unchanged.
+## Interfaces and data sources
 
-| Dataset | Existing backend |
+| API | Existing source / behavior |
 | --- | --- |
-| equity_daily | market_db SQLite adjusted daily closes |
-| equity_1m | HF raw monthly minute Parquet, nominal RTH, strict raw QC |
-| equity_5m | existing HF RTH converted monthly Parquet |
-| option_1m / option_5m / option_daily | market_db option_bars, separate timeframe |
-| option_quotes / option_greeks | market_db timestamped tables |
-| treasury_auctions / bond_quotes | market_db SQLite |
-| factors_hf / factors_sqlite | factor_db source-isolated monthly Parquet |
+| iter_batches: equity_daily | SQLite adjusted daily close |
+| iter_batches: equity_1m | HF raw monthly minute Parquet; strict raw QC |
+| iter_batches: equity_5m | HF converted RTH monthly Parquet |
+| iter_batches: option_1m / option_5m / option_daily | SQLite option_bars; distinct timeframe |
+| iter_batches: option_quotes / option_greeks | SQLite timestamped tables |
+| iter_batches: treasury_auctions / bond_quotes | SQLite |
+| iter_batches: factors_hf / factors_sqlite | Existing source-separated factor mart |
+| iter_batches: sec_filings | Read-only V5.2 candidate filing index; explicit CIK and prior filing date |
+| iter_fundamentals | Existing annual snapshot CSV outputs with provenance |
+| review_security | Existing V5.3 reviewed identity and corporate action snapshot |
+| review_broker_capture | Existing IBKR private read-only capture/mapping diagnostic |
+| parquet_manifest | Streaming SHA-256 of existing monthly files |
+| archive_plan / audit_archive | No-write inventory / existing resumable QC |
+| unified_pipeline.maintain | Offline conversion when missing, QC, factor build |
+| research.data_admission.inspect_real_factors | Actual stored factor preflight; no fitting |
 
-Unconnected catalog entries deliberately raise DataUnavailable:
-equity_realtime, macro, option_contracts, bond_terms.
-Several have existing domain modules or raw storage, but adapters are not
-implemented here. This is not a claim of provider availability. Never fill
-these gaps with synthetic data or conflate two sources.
+Explicitly unconnected: equity_realtime, macro, option_contracts, bond_terms.
+No false empty tables. Live feeds, broader fixed-income terms and other
+unconnected providers require separate source validation.
 
-## Python API
+## Read contracts
 
 ```python
 from contextlib import closing
 from atlaspm.data.unified import iter_batches
 
-with closing(iter_batches("equity_daily", start="2020-01-01", end="2020-01-31",
-                          columns=("adjusted_close",), symbols=("AAPL",),
+with closing(iter_batches("equity_5m", start="2020-01-02", end="2020-01-02",
+                          as_of="2020-01-02T15:00:00-05:00",
+                          symbols=("AAPL",), columns=("close",),
                           purpose="exploratory", batch_size=2048)) as stream:
     for batch in stream:
-        print(batch.columns, len(batch.rows), batch.origin)
+        print(batch.columns, len(batch.rows))
 ```
 
-The range is inclusive, at most 367 calendar days per scan. Timestamp-only
-quote/Greek date filters use UTC; trading-day columns use the existing source
-calendar. Millisecond timestamps retain their original semantics (bar start,
-not availability). Provider symbols and CUSIPs are source keys, not certified
-historical permanent security IDs. Keys are always returned; SQLite rows also
-return their recorded source. Parquet paths and size/mtime hints are provided;
-these are not cryptographic content hashes, and SQLite WAL content is not
-represented by the hint. Do not treat them as reproducible snapshot receipts.
+Ranges are inclusive and capped at 367 calendar days. Intraday as_of requires
+an offset-aware decision timestamp and uses existing NYSE calendar session
+logic: nominal bar end must be <= decision time; incomplete boundary buckets,
+weekends/holidays and after-early-close bars are excluded. The extra bar_end_ms
+field is a nominal observation boundary, NOT verified vendor availability.
+Without as_of, the existing exploratory RTH file interface is preserved.
+Raw 1m uses existing raw QC, rejects invalid source OHLCV, misalignment and
+RTH dates outside the declared month; selected duplicate keys fail. No invented
+data or automatic adjustment. Raw QC requires additional scans.
 
-SQLite opens in read-only URI mode with query_only and a read transaction.
-DuckDB uses existing configured memory and spill paths and reads one monthly
-partition at a time; projection and date/ID predicates are pushed into SQL.
-Batch size is bounded (1–16384); this is not a process-wide RSS guarantee.
-All monthly paths are checked before yielding. Empty results do not prove
-coverage, and absent sessions are not synthesized. Selected rows are checked
-for invalid keys, duplicate keys within a partition, nonfinite numeric values,
-and basic price/volume constraints. This is partial structural validation,
-not a complete audit. Discard all results if iteration raises, including a
-partition-change error. Consumers must exhaust or explicitly close iterators.
+SEC index uses explicit CIKs, all requested quarter inventory, and filed_date
+strictly before the date-only cutoff. It contains candidate forms, not the
+full EDGAR universe. Stored index digest and parser version are provenance,
+not independent proof of completeness or actual acceptance time.
+`iter_fundamentals` streams the two existing annual CSV output schemas,
+requires prior snapshot date and provenance chronology, uses the screener's
+ratio validator, and checks ordering and uniqueness. No forward fill.
+`review_security` uses the existing latest-visible-revision ledger with
+strict prior known_date, conflict resolution, evidence hash checks, listing
+intervals and corporate actions. It materializes the visible ledger and is
+not a bounded bar stream. Historical identity/source completeness remains
+unverified; do not infer listing/exit events from absent bars.
 
-## Remaining admission and integration work
+All paths must be below gitignored local_data. SQLite query_only and read
+transactions; SEC opens its existing DuckDB in read-only mode. Parquet
+projection, date/ID predicates and bounded fetchmany batches use existing
+DuckDB memory/spill configuration (default 256MB, one query thread).
+Default batch 2048, cap 16384. File size/mtime hints are not content hashes
+or immutable database snapshots. Discard results on any scan exception.
+Always exhaust or explicitly close generators. Private broker review is
+local-only (12 MiB per input), requires explicit fixture opt-in, and never
+grants broker margin or order permissions. Do not share its full report.
 
-1. Integrate #89/#90 and #74 after current-base CI and review; reconcile #66
-   single-pass labels and #67 conflicts without duplicate training pipelines.
-2. Connect the existing 1m, historical SEC, fundamental, treasury terms,
-   identity, corporate action and broker read-only adapters. Real-time and
-   macro feeds require separately verified providers and rights.
-3. Reuse certification/evidence modules for immutable source revisions,
-   actual availability timestamps, stable historical IDs, delisting coverage,
-   corporate actions and dataset rights. Reject unknown availability.
-4. Reuse existing resumable download and factor build jobs, and their quality
-   quarantine; add unified orchestration and coverage reporting only after
-   dependency review. Do not delete raw inputs or bypass quarantine.
-5. Integrate Research Engine through an independently verified admission gate;
-   do not relax the synthetic trainer or grant execution permissions.
-6. Run full Windows/Linux CI on the final combined head and benchmark real
-   local partitions. No production admission or performance gain claimed.
-
-## Local verification (PowerShell, repository root)
+## Incremental maintenance and research boundary
 
 ```powershell
-$py = ".\.venv\Scripts\python.exe"
-& $py -m pip install -e ".[lake,calendar,research-io]"
-if ($LASTEXITCODE -ne 0) { throw "Install failed" }
-& $py -m unittest discover -s tests -p "test_unified_data.py" -v
-if ($LASTEXITCODE -ne 0) { throw "Unified tests failed" }
-& $py scripts/maintenance/audit_source.py
-if ($LASTEXITCODE -ne 0) { throw "Audit failed" }
-& $py -m unittest discover -s tests -v
-if ($LASTEXITCODE -ne 0) { throw "Regression failed" }
-& $py scripts/maintenance/benchmark_unified_data.py --dataset equity_daily --start 2020-01-01 --end 2020-01-31 --column adjusted_close
+python -m atlaspm.data.unified_pipeline plan --start-month 2000-02 --end-month 2000-03
+python -m atlaspm.data.unified_pipeline maintain --start-month 2000-02 --end-month 2000-03 --execute
+python -m atlaspm.data.unified_pipeline factor-preflight --start-month 2000-02 --end-month 2000-03
 ```
 
-Benchmark only ranges actually present in local_data. Report wall time, CPU
-time, row throughput and Python allocation peak; native DuckDB memory and
-process RSS are not measured by tracemalloc. Repeat with the same source and
-projection before comparing results.
+Plan is read-only. Execute is explicitly opt-in and requires a quiescent
+single-writer workspace. No download and no raw deletion. Oldest first:
+convert only missing 5m output from an existing raw file, reuse existing QC
+checkpoints, stop on missing input or structural failure, then reuse factor
+builder caches. Existing converted files are not silently replaced. Explicit
+operator review/rebuild is required if raw data changed. The existing conversion
+and QC helpers still use their own resource defaults; the memory flag here
+controls factor building and reader scans, not all process allocations.
+No independent downloader, no second checkpoint database.
 
-Raw minute scans reuse the existing raw QC, reject any invalid source rows, misaligned timestamps, and RTH rows outside the declared month. Duplicate selected normalized symbol/minute keys fail during iteration. No raw repair or new data file. RTH clock filtering is not exchange-calendar certification. The full raw QC requires additional scans; benchmark before repeated research use.
+Factor preflight scans existing factor structure, verifies metadata scope and
+recorded row counts, checks current and historical daily lineage signatures,
+streams SHA-256 of bar/daily/factor files and metadata including lookback
+dependencies, and reports a deterministic evidence ID. In-process hash cache
+avoids rehashing unchanged dependencies within a run. Hashes are evidence, not
+signed certification; original builder lineage uses stat fingerprints, so
+same-stat historic tampering is not independently excluded without a trusted
+earlier digest. Missing or stale inputs block structural preflight. Source
+files must remain quiescent. Warm-up null factors are permitted; null closes
+are now rejected by the canonical factor audit without a second scan.
 
-### SEC and security evidence
+The existing training_dataset real-data rejection now calls the Research
+admission boundary with the same ValueError contract. No user-provided flag,
+local report or receipt grants real training. Research inspect_real_factors
+is a diagnostic interface, not a model panel builder. Existing synthetic
+training behavior remains unchanged.
 
-`iter_batches("sec_filings", start="2020-01-01", end="2020-01-02", symbols=("123",), as_of="2020-01-03", purpose="exploratory")` reads the existing V5.2 candidate filing index without creating or rebuilding it. Explicit CIKs, complete requested index-quarter inventory and strictly prior filing dates are required. Index digest and parser version are included by default, but are recorded provenance, not proof of current source authenticity, complete filings or acceptance timestamps. Same-day filings are blocked. The separate `review_security(as_of=..., trade_date=...)` facade reuses the existing read-only evidence snapshot for historical memberships, listing intervals, corporate actions, conflicts and unresolved records. Its existing algorithm materializes the visible ledger; it is not a bounded market-bar stream. It is still a research-only projection, not production PIT certification.
+## Release blockers
 
-### Fundamental snapshots and file fingerprints
+- Independent data rights and source authenticity, exact historical release
+  availability, venue calendars, survivorship/IPO/delisting/identity coverage,
+  complete corporate actions, price adjustment semantics and independent
+  price reconciliation are not yet certified.
+- PR #89 real dataset bridge, #90 evidence additions, #91 safety/relocation,
+  #92 lifecycle, #74 cumulative research and #66/#67 algorithm integration
+  require current-base review and CI before main merge.
+- True end-to-end real-data panel integration, controlled automatic downloads,
+  trusted immutable version baselines, global resource limits and full
+  dependency-safe legacy cleanup are pending. No raw data or compatibility
+  modules removed by this PR.
+- Full Linux/Windows CI and local real-data performance validation required.
 
-`iter_fundamentals(path, start=..., end=..., as_of=..., purpose="exploratory")` streams both existing annual fundamental CSV formats with their provenance fields, validates their selected ratios using the existing screener validator, rejects same-day close-derived values, and requires unique chronological records. It never assigns a permanent security ID or forward-fills a missing release. CSV rows are scanned rather than indexed. `parquet_manifest(dataset, start=..., end=...)` reuses the existing SHA-256 fingerprint function to hash monthly partitions in chunks. It records content changes without copying data, is not a signed admission receipt, and does not validate the Parquet schema or source authenticity. SQLite and DuckDB databases may have WAL state and are deliberately excluded from this file manifest. The existing data builder and audit checkpoint workflows remain unchanged.
+## Windows acceptance and performance
 
-### Maintenance and private broker review
+Use the original existing virtual environment and review worktree. Do not
+interrupt current raw downloads or run maintenance concurrently.
 
-`archive_plan(start_month, end_month)` is a no-write inventory of raw, converted, quarantine and factor files, including months outside the advertised archive. File presence is not coverage or integrity. `audit_archive(..., resume=True, dry_run=True)` delegates to the existing resumable monthly QC workflow. Only an explicit `dry_run=False` writes existing QC metadata; it never downloads or alters raw data. Existing download and factor build commands remain the canonical paths. No automatic download or conversion is enabled. `review_broker_capture(capture_path, mapping_path)` consumes private local JSON files and reuses the existing IBKR mapping diagnostic, including freshness, currency and mapping blockers. Synthetic captures require explicit opt-in and remain labeled; no network, credentials, order submission or margin approval. Returned financial data must remain local. Do not share the full report or commit it.
+```powershell
+cd C:\Users\Kevin\Desktop\AtlasPM-data-review
+git fetch origin
+git switch --detach origin/integration/unified-data-engine
+$py = "C:\Users\Kevin\Desktop\AtlasPM\.venv\Scripts\python.exe"
+$env:PYTHONPATH = (Join-Path (Get-Location) "src")
+& $py -c "import duckdb,pandas_market_calendars"
+if ($LASTEXITCODE -ne 0) { throw "Missing lake/calendar dependencies" }
+& $py -m unittest discover -s tests -p "test_unified*.py" -v
+if ($LASTEXITCODE -ne 0) { throw "Unified tests failed" }
+& $py scripts/maintenance/audit_source.py
+if ($LASTEXITCODE -ne 0) { throw "Source audit failed" }
+& $py -m unittest discover -s tests -v
+if ($LASTEXITCODE -ne 0) { throw "Regression failed" }
+```
+
+For real-data read-only measurement, run the review code from the original
+data directory only on stable completed partitions. Use identical month,
+columns, symbol selection, thread count, batch size and cache conditions
+for comparisons. Benchmark reports rows, wall time, CPU time, throughput,
+Python allocation peak and OS process lifetime peak RSS (Windows working
+set / Linux or macOS resource usage). Peak RSS includes interpreter/native
+allocations and is not the query's isolated memory usage. No measured
+performance improvement is claimed until actual reports are available.
