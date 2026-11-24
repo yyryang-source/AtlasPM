@@ -8,6 +8,7 @@ from math import floor, isclose
 from pathlib import Path
 
 from atlaspm.engine.contracts import finite, timestamp, validate_candidates
+from atlaspm.execution.oms_controls import chain_audit_events, post_fill_risk_snapshot
 
 
 def replay(payload):
@@ -28,6 +29,18 @@ def replay(payload):
     missing_policy=payload.get("missing_signal_policy","reject")
     if missing_policy not in ("reject","hold"):
         raise ValueError("INVALID_MISSING_SIGNAL_POLICY")
+    risk_policy=payload.get("risk_policy")
+    risk_events=[]
+    halted=False
+    if risk_policy is not None:
+        if not isinstance(risk_policy,dict) or set(risk_policy)-{"max_drawdown","max_gross_leverage","equity_shock","max_stress_loss_fraction"}:
+            raise ValueError("INVALID_REPLAY_RISK_POLICY")
+        drawdown_limit=finite(risk_policy.get("max_drawdown",.25),"max_drawdown",minimum=0)
+        gross_limit=finite(risk_policy.get("max_gross_leverage",1.),"max_gross_leverage",minimum=0)
+        shock=finite(risk_policy.get("equity_shock",.2),"equity_shock",minimum=0)
+        stress_limit=finite(risk_policy.get("max_stress_loss_fraction",.25),"max_stress_loss_fraction",minimum=0)
+        if not 0<drawdown_limit<=1 or not 0<gross_limit<=1 or shock>1 or stress_limit>1:
+            raise ValueError("INVALID_REPLAY_RISK_LIMIT")
     sessions = payload["sessions"]
     if not isinstance(sessions, list) or len(sessions) < 2:
         raise ValueError("REQUIRES_TWO_SESSIONS")
@@ -137,7 +150,28 @@ def replay(payload):
                 raise ValueError("MISSING_COMPLETED_SESSION_VOLUME")
             prior_volume = {s:finite(v,"volume",minimum=0) for s,v in raw_volume.items()}
         history.append((str(day), cl))
-        if i % cadence == 0 and not (missing_policy=="hold" and row.get("signals")==[]):
+        if risk_policy is not None:
+            positions=[{"type":"equity","market_value":q*cl[s],"gross_notional":q*cl[s]}
+                       for s,q in sorted(holdings.items())]
+            snapshot=post_fill_risk_snapshot(positions,marked_net_liquidation=equity,
+                settled_cash=cash,unsettled_payable=0.,margin_debt=0.,account_type="cash",
+                max_gross_leverage=gross_limit,max_stress_loss_fraction=stress_limit,
+                equity_decline_fraction=shock,treasury_decline_fraction=0.)
+            breaches=list(snapshot["breaches"])
+            if 1-equity/peak>drawdown_limit:
+                breaches.append("REPLAY_DRAWDOWN_LIMIT")
+            halted=halted or bool(breaches)
+            risk_events.append({"date":str(day),"timestamp":row["close_at"],
+                "kind":"SYNTHETIC_CLOSE_RISK_CHECK","breaches":breaches,
+                "halt_latched":halted,"gross_to_equity":snapshot["gross_to_net_liquidation"],
+                "stress_loss_fraction":snapshot["conservative_stress_loss_fraction"],
+                "drawdown":equity/peak-1,"remaining_positions":dict(holdings),
+                "next_open_action":"SELL_ONLY" if halted and holdings else "NO_NEW_RISK" if halted else "NORMAL"})
+            if halted and holdings:
+                # No new buys after a breach. Retry any residual shares next
+                # open under the existing execution/participation constraints.
+                targets=(str(day),closing,{})
+        if not halted and i % cadence == 0 and not (missing_policy=="hold" and row.get("signals")==[]):
             candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
             if not all(c.symbol in cl for c in candidates):
                 raise ValueError("SIGNAL_MARK_MISSING")
@@ -154,12 +188,15 @@ def replay(payload):
                     targets = (str(day), closing, result["weights"])
         prior_day, prior_close, prior_prices, prior_equity = day, closing, cl, equity
         prior_holdings = dict(holdings)
+    risk_chain,risk_root=chain_audit_events(risk_events) if risk_policy is not None else ([],None)
     return dict(research_only=True, live_execution_enabled=False,
                 approved_for_model_training=False, historical_security_identity_verified=False,
                 broker_order_submission_enabled=False, execution_model="synthetic_next_open_cash_only",
                 curve=curve, trades=trades, allocations=allocations, orders=orders, total_cost=total_cost,
                 total_return=prior_equity/initial-1, max_drawdown=min(p["drawdown"] for p in curve),
-                unexecuted_final_signal=targets is not None)
+                unexecuted_final_signal=targets is not None,
+                risk_halt_latched=halted,risk_audit=risk_chain,risk_audit_root=risk_root,
+                remaining_positions_after_halt=dict(holdings) if halted else {})
 
 
 def main():
