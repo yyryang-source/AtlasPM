@@ -198,7 +198,11 @@ def _parse(key, data, retrieved):
     return parse_listing(data)
 
 
-def _collect(task, agent, key, refresh):
+class RequestBudgetReached(Exception):
+    pass
+
+
+def _collect(task, agent, key, refresh, before_request):
     name, url, scope = task
     # Current snapshots have daily cache keys; old quarters remain reusable.
     day = now()[:10]
@@ -223,6 +227,7 @@ def _collect(task, agent, key, refresh):
             if not key:
                 raise ValueError("ALPHAVANTAGE_API_KEY not configured")
             request_url += "&" + urlencode({"apikey":key})
+        before_request()
         data = download(request_url, agent)
         retrieved = now()
         digest = _sha(data)
@@ -249,7 +254,7 @@ def run(start="2000-Q1", end="2026-Q1", *, listing_dates=None, current=True,
     report = {"schema":"atlaspm_hf_evidence_collector_v51", **v4.GUARDS,
               "local_only": not fetch, "mode":"fetch" if fetch else "plan",
               "tasks_planned":len(tasks), "tasks":[{"task":n,"source_url":u,"scope":s} for n,u,s in tasks],
-              "results":[], "requests_attempted_upper_bound":0,
+              "results":[], "requests_attempted":0,
               "warning":"Candidates only; no stable security IDs, corporate actions, historical completeness or rights inferred."}
     if not fetch:
         return report
@@ -257,22 +262,32 @@ def run(start="2000-Q1", end="2026-Q1", *, listing_dates=None, current=True,
     if not re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+", agent) or "\n" in agent or "\r" in agent:
         raise ValueError("Set ATLASPM_SEC_USER_AGENT to your organization/name and contact email")
     key = os.environ.get("ALPHAVANTAGE_API_KEY")
-    # Serial requests; conservative SEC pacing. Stop on provider/validation error
-    # rather than bypass rate limits. Count every attempted task against budget.
+    # A request budget counts network attempts only, allowing resumable batches.
+    # Stop a provider on errors, but allow independent providers to continue.
+    blocked = set()
+
+    def before_request():
+        if max_requests and report["requests_attempted"] >= max_requests:
+            raise RequestBudgetReached
+        report["requests_attempted"] += 1
+
     for task in tasks:
-        if max_requests and report["requests_attempted_upper_bound"] >= max_requests:
-            break
-        report["requests_attempted_upper_bound"] += 1
+        provider = urlsplit(task[1]).netloc
+        if provider in blocked:
+            continue
         try:
-            item = _collect(task, agent, key, refresh)
+            item = _collect(task, agent, key, refresh, before_request)
             report["results"].append(item)
             if not item["cached"]:
                 report["network_downloads"] += 1
-            time.sleep(0.25 if not task[0].startswith("av-") else 1.0)
+                time.sleep(0.25 if not task[0].startswith("av-") else 1.0)
+        except RequestBudgetReached:
+            break
         except Exception as exc:
+            blocked.add(provider)
             report["results"].append({"task":task[0], "error":type(exc).__name__,
                                       "detail":str(exc) if isinstance(exc, ValueError) else "Collection failed"})
-            break
+    report["blocked_providers"] = sorted(blocked)
     report["tasks_completed"] = sum("sha256" in x for x in report["results"])
     report["status"] = ("CANDIDATES_COLLECTED" if report["tasks_completed"] == len(tasks)
                         else "PARTIAL_OR_BLOCKED")
