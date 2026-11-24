@@ -92,10 +92,17 @@ class MarketRegimes:
         self.states[day]=state
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None, next_session=None):
+def label_span(horizon,entry_lag_sessions):
+    if type(entry_lag_sessions) is not int or entry_lag_sessions not in (0,1):
+        raise ValueError('INVALID_ENTRY_LAG_SESSIONS')
+    return horizon+entry_lag_sessions
+
+
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None, next_session=None, entry_lag_sessions=0):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
+    span=label_span(horizon,entry_lag_sessions)
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates,observations=[],[]
     for day,marks in validated_sessions(payload["sessions"],features):
@@ -106,15 +113,15 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
     # A known next-session calendar date is not a future market observation.
     # Include the latest observed cross-section with explicitly unknown labels.
     if next_session is not None:
-        if horizon!=1 or not dates or not isinstance(next_session,str) or date.fromisoformat(next_session).isoformat()!=next_session or next_session<=dates[-1]:
+        if span!=1 or not dates or not isinstance(next_session,str) or date.fromisoformat(next_session).isoformat()!=next_session or next_session<=dates[-1]:
             raise ValueError("INVALID_AS_OF_NEXT_SESSION")
         dates.append(next_session)
         observations.append({})
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
     if compact:
-        prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
+        prediction_samples=CompactSamples(dates,span,len(features),feature_column)
         valid_indices=array('Q')
-    for i in range(max(0,len(observations)-horizon)):
+    for i in range(max(0,len(observations)-span)):
         marks=observations[i]
         for sid,(price,x) in sorted(marks.items()):
             # Eligibility for prediction depends only on the trailing feature window.
@@ -123,8 +130,8 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
                 incomplete_sequences += 1
                 continue
             sequence = None if compact else [observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
-            missing_path = any(sid not in observations[j] for j in range(i+1,i+horizon+1))
-            y = None if missing_path else observations[i+horizon][sid][0]/price-1
+            missing_path = any(sid not in observations[j] for j in range(i+1,i+span+1))
+            y = None if missing_path else observations[i+span][sid][0]/observations[i+entry_lag_sessions][sid][0]-1
             if compact:
                 prediction_samples.append(sid,i,x,y)
                 if missing_path:
@@ -132,8 +139,8 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
                 else:
                     valid_indices.append(len(prediction_samples)-1)
                 continue
-            sample = dict(security_id=sid,signal_index=i,label_end_index=i+horizon,
-                          date=dates[i],label_end_date=dates[i+horizon],x=x,sequence=sequence,y=y)
+            sample = dict(security_id=sid,signal_index=i,label_end_index=i+span,
+                          date=dates[i],label_end_date=dates[i+span],x=x,sequence=sequence,y=y)
             prediction_samples.append(sample)
             if missing_path:
                 missing += 1
@@ -143,12 +150,12 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
         if feature_column is not None:
             feature_column.seal()
         samples=IndexedRows(prediction_samples,valid_indices)
-    return dict(feature_names=features,dates=dates,samples=samples,horizon=horizon,
+    return dict(feature_names=features,dates=dates,samples=samples,horizon=span,
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
                 **({'observations':observations} if compact and sequence_length>1 else {}),
                 market_regimes=tracker.states if tracker is not None else None,
                 incomplete_sequences=incomplete_sequences,
-                missing_label_paths=missing,unmatured_final_sessions=min(horizon,len(dates)),
+                missing_label_paths=missing,unmatured_final_sessions=min(span,len(dates)),
                 research_only=True,approved_for_model_training=False,
                 historical_security_identity_verified=False,live_execution_enabled=False)
 

@@ -34,3 +34,17 @@ jobs:
       - run: python -m pip install -e ".[research-deep]"
       - run: python -m unittest discover -s tests -p "test_training_sequence_ensemble.py" -v
       - run: python -m unittest discover -s tests -p "test_training_artifacts.py" -v
+
+  full-release:
+    name: Full dependency release gate (Windows Python 3.14)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: python -m pip install "torch>=2.6,<3.0" --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pip install -e ".[ml,native,calendar,lake,research-io,portfolio,research-ml,research-deep]"
+      - run: python -m pip check
+      - run: python scripts/maintenance/verify_release.py --minimum-passed 742

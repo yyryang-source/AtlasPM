@@ -8,7 +8,7 @@ from array import array
 from collections import deque
 import sqlite3
 from atlaspm.research.training_compact import CompactSamples,IndexedRows
-from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions,MarketRegimes
+from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions,MarketRegimes,label_span
 
 
 class DiskObservations:
@@ -44,8 +44,9 @@ class DiskObservations:
         self.con.close()
 
 
-def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None,regime_config=None):
+def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None,regime_config=None,entry_lag_sessions=0):
     features=validate_panel_metadata(metadata,horizon,sequence_length)
+    horizon=label_span(horizon,entry_lag_sessions)
     if feature_column is None or (sequence_length>1 and observation_store is None):
         raise ValueError("STREAMING_REQUIRES_DISK_WORKSPACE")
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
@@ -77,7 +78,7 @@ def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,
                 incomplete+=1
                 continue
             missing_path=any(sid not in day_marks for day_marks in forward)
-            y=None if missing_path else marks[sid][0]/price-1
+            y=None if missing_path else marks[sid][0]/snapshot[position+entry_lag_sessions][sid][0]-1
             samples.append(sid,i,x,y)
             if missing_path:
                 missing+=1

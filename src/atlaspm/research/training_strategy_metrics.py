@@ -14,7 +14,9 @@ from atlaspm.research.training_engine import _metrics, _correlation, _ranks
 from atlaspm.engine.contracts import finite
 
 
-def evaluate(rows, sessions, *, top_fraction=.25, cost_bps=10.):
+def evaluate(rows, sessions, *, top_fraction=.25, cost_bps=10., execution_aligned_labels=False):
+    if type(execution_aligned_labels) is not bool:
+        raise ValueError("INVALID_STRATEGY_LABEL_MODE")
     if not isinstance(rows,(list,tuple)):
         raise ValueError("STRATEGY_REQUIRES_REUSABLE_FORECAST_ROWS")
     fraction=finite(top_fraction,"top_fraction",minimum=.000001)
@@ -45,8 +47,8 @@ def evaluate(rows, sessions, *, top_fraction=.25, cost_bps=10.):
         if not names or len(set(names))!=len(names):
             raise ValueError("INVALID_STRATEGY_UNIVERSE")
         for r in bundle:
-            if r["label_end_date"]!=dates[i+1]:
-                raise ValueError("STRATEGY_REQUIRES_ONE_SESSION_LABELS")
+            if r["label_end_date"]!=dates[i+2 if execution_aligned_labels else i+1]:
+                raise ValueError("STRATEGY_LABEL_MATURITY_MISMATCH" if execution_aligned_labels else "STRATEGY_REQUIRES_ONE_SESSION_LABELS")
             finite(r["prediction"],"prediction")
         n=max(1,int(len(bundle)*fraction))
         # Include all ties at the cutoff; no arbitrary ticker advantage.
@@ -58,6 +60,12 @@ def evaluate(rows, sessions, *, top_fraction=.25, cost_bps=10.):
         # Require complete outcomes for the entire eligible universe, not just picks.
         if set(names)-entry.keys() or set(names)-exit_.keys():
             raise ValueError("MISSING_EXECUTABLE_PATH")
+        if execution_aligned_labels:
+            for row in bundle:
+                sid=row["security_id"]
+                expected=finite(exit_[sid],"exit",minimum=.000001)/finite(entry[sid],"entry",minimum=.000001)-1
+                if row["actual"] is None or abs(finite(row["actual"],"actual")-expected)>1e-10:
+                    raise ValueError("EXECUTION_LABEL_RETURN_MISMATCH")
         turnover=sum(abs(target.get(s,0.)-previous.get(s,0.)) for s in target.keys()|previous.keys())
         returns={s:finite(exit_[s],"exit",minimum=.000001)/
                    finite(entry[s],"entry",minimum=.000001)-1 for s in target}

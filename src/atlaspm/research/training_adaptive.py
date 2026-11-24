@@ -85,7 +85,9 @@ def adaptive_research(payload, *, registry_path, holdout_start, momentum_feature
                       drift_ratio=1.5, minimum_improvement=.02,
                       device="auto", batch_size=64, batch_input_budget_mib=16,
                       gpu_calibrated=False, cost_bps=10.,top_fraction=.25,
-                      bootstrap_draws=1000, bootstrap_block=5):
+                      bootstrap_draws=1000, bootstrap_block=5, execution_aligned_labels=False):
+    if type(execution_aligned_labels) is not bool:
+        raise ValueError('INVALID_EXECUTION_ALIGNED_MODE')
     if any(k in payload and payload[k] is not v for k,v in FLAGS.items()):
         raise ValueError("RESEARCH_PERMISSION_OVERRIDE_DENIED")
     features=validate_panel_metadata(payload,1,sequence_length)
@@ -106,7 +108,7 @@ def adaptive_research(payload, *, registry_path, holdout_start, momentum_feature
         sequence_length=sequence_length,feature_count=len(features),
         batch_input_budget_mib=batch_input_budget_mib,gpu_calibrated=gpu_calibrated)
     sessions=payload["sessions"]
-    first=minimum_train_sessions+1+embargo_sessions+sequence_length-1
+    first=minimum_train_sessions+1+int(execution_aligned_labels)+embargo_sessions+sequence_length-1
     if type(holdout_start) is not int or holdout_start-first<22 or len(sessions)-holdout_start<22:
         raise ValueError("INSUFFICIENT_ADAPTIVE_HOLDOUT")
     tracker=MarketRegimes()
@@ -120,6 +122,7 @@ def adaptive_research(payload, *, registry_path, holdout_start, momentum_feature
                 minimum_improvement=minimum_improvement,resources=resources,
                 momentum_feature=momentum_feature,cost_bps=cost_bps,top_fraction=top_fraction,
                 bootstrap_draws=bootstrap_draws,bootstrap_block=bootstrap_block,
+                execution_aligned_labels=execution_aligned_labels,
                 holdout_start=sessions[holdout_start]["date"],holdout_end=sessions[-1]["date"],
                 code_sha256=_code_version())
     path=local_path(registry_path)
@@ -127,7 +130,7 @@ def adaptive_research(payload, *, registry_path, holdout_start, momentum_feature
                      digest({"config":config,"prefix":_fingerprint(prefix)}))
     streams={}
     audits={}
-    settings=dict(horizon=1,minimum_train_sessions=minimum_train_sessions,
+    settings=dict(horizon=1,entry_lag_sessions=int(execution_aligned_labels),minimum_train_sessions=minimum_train_sessions,
                   sequence_length=sequence_length,sequence_epochs=sequence_epochs,
                   embargo_sessions=embargo_sessions,seed=seed)
     for p in candidates:
@@ -161,9 +164,9 @@ def adaptive_research(payload, *, registry_path, holdout_start, momentum_feature
     streams.update(_baselines(reference,sessions,momentum_feature))
     boundary=config["holdout_start"]
     validation={m:evaluate([r for r in rows if r["label_end_date"]<boundary],prefix["sessions"],
-                    top_fraction=top_fraction,cost_bps=cost_bps)["metrics"] for m,rows in streams.items()}
+                    top_fraction=top_fraction,cost_bps=cost_bps,execution_aligned_labels=execution_aligned_labels)["metrics"] for m,rows in streams.items()}
     holdout={m:evaluate([r for r in rows if r["date"]>=boundary],sessions,
-                    top_fraction=top_fraction,cost_bps=cost_bps) for m,rows in streams.items()}
+                    top_fraction=top_fraction,cost_bps=cost_bps,execution_aligned_labels=execution_aligned_labels) for m,rows in streams.items()}
     comparisons={m:paired_lower(holdout["adaptive"],holdout[m],seed=seed,
                   draws=bootstrap_draws,block=bootstrap_block,tail=.05/3)
                  for m in ("ridge_reference","equal_weight","momentum")}
