@@ -6,6 +6,7 @@ import json
 from math import sqrt
 from pathlib import Path
 from statistics import fmean
+from itertools import groupby
 from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
@@ -42,26 +43,42 @@ def _ranks(values):
 
 
 def _metrics(rows):
-    total=len(rows)
-    rows=[r for r in rows if r['actual'] is not None]
-    if not rows:
-        return dict(samples=0,prediction_count=total,missing_actual_count=total,dates=0,mae=None,rmse=None,mean_daily_ic=None,mean_daily_rank_ic=None,valid_ic_dates=0,valid_rank_ic_dates=0)
-    dates={}
-    for row in rows:
-        dates.setdefault(row["date"],[]).append(row)
-    ics,rank_ics=[],[]
-    for group in dates.values():
-        p=[r["prediction"] for r in group]
-        y=[r["actual"] for r in group]
+    """Evaluate chronologically ordered predictions one session at a time."""
+    from math import fsum
+    total=0
+    count=0
+    dates=0
+    absolute=[]
+    squared=[]
+    ics=[]
+    rank_ics=[]
+    previous=None
+    for day, group in groupby(rows,key=lambda r:r["date"]):
+        if previous is not None and day<=previous:
+            raise ValueError("METRICS_PREDICTIONS_NOT_CHRONOLOGICAL")
+        previous=day
+        p=[]
+        y=[]
+        for row in group:
+            total+=1
+            if row["actual"] is not None:
+                p.append(row["prediction"])
+                y.append(row["actual"])
+        if not y:
+            continue
+        count+=len(y)
+        dates+=1
+        absolute.append(fsum(abs(a-b) for a,b in zip(p,y)))
+        squared.append(fsum((a-b)**2 for a,b in zip(p,y)))
         ic=_correlation(p,y)
         ric=_correlation(_ranks(p),_ranks(y))
         if ic is not None:
             ics.append(ic)
         if ric is not None:
             rank_ics.append(ric)
-    return dict(samples=len(rows),prediction_count=total,missing_actual_count=total-len(rows),dates=len(dates),
-                mae=fmean(abs(r["prediction"]-r["actual"]) for r in rows),
-                rmse=sqrt(fmean((r["prediction"]-r["actual"])**2 for r in rows)),
+    return dict(samples=count,prediction_count=total,missing_actual_count=total-count,
+                dates=dates,mae=fsum(absolute)/count if count else None,
+                rmse=sqrt(fsum(squared)/count) if count else None,
                 mean_daily_ic=fmean(ics) if ics else None,
                 mean_daily_rank_ic=fmean(rank_ics) if rank_ics else None,
                 valid_ic_dates=len(ics),valid_rank_ic_dates=len(rank_ics))
