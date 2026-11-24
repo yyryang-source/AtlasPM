@@ -12,7 +12,7 @@ from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 from atlaspm.research.training_memory import FoldArrays
-from atlaspm.research.training_compact import IndexedRows
+from atlaspm.research.training_compact import IndexedRows, feature_workspace
 
 
 def _fingerprint(payload):
@@ -85,8 +85,14 @@ def _metrics(rows):
                 valid_ic_dates=len(ics),valid_rank_ic_dates=len(rank_ics))
 
 
-def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None):
+def train(payload, *, feature_cache_dir=None, **kwargs):
+    """Run a synthetic experiment; optional feature cache is scoped to this call."""
+    with feature_workspace(feature_cache_dir) as column:
+        return _train(payload,feature_column=column,**kwargs)
+
+
+def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -95,7 +101,7 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
-    panel=build_panel(payload,horizon,sequence_length,compact=True)
+    panel=build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
@@ -230,6 +236,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         archive.finalize()
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
                 prediction_storage="sqlite" if archive is not None else "memory",
+                feature_storage="memmap" if feature_column is not None else "memory",
+                compact_sample_numeric_bytes=samples.numeric_bytes,
                 prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 ensemble_weight_history=ensemble_audit,training_config=config,
