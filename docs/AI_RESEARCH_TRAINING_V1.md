@@ -22,3 +22,6 @@ Install optional dependencies with pip install -e ".[portfolio]".
 No hyperparameter selection, final sealed holdout, realistic transaction returns, actual
 exchange calendar, data lake adapter, boosting/deep learning, persistent model registry or
 training admission in this version. All real-data and live-execution flags remain false.
+
+## V2 tabular model adapters
+Install `pip install -e ".[portfolio,research-ml]"`. Optional models argument is a list from historical_mean, ridge, elastic_net, random_forest, lightgbm, xgboost, catboost, mlp. Default remains the original two baselines. All models share identical purged folds and fold-local preprocessing; optional estimators standardize targets using training labels only. Fixed hyperparameters and seeds, CPU single-thread settings where supported, dependency versions and model settings recorded. No automatic model selection, final holdout, sequence networks, persisted weights or deployment approval. Dedicated CI installs all eight adapters and tests aligned predictions and future perturbation invariance.
