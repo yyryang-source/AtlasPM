@@ -86,12 +86,16 @@ against positive ones. Require `--min-dates` (8 by default) and
 `--min-symbols` paired observations per date. If insufficient, the
 pair is marked UNKNOWN and **is not** claimed to be independent.
 
+Output includes a signed symmetric correlation matrix (unknown pairs as NULL)
+and per-pair mean absolute correlations used by the redundancy rule.
 Greedy deduplication drops the next factor when mean absolute Spearman
 meets/exceeds `--redundancy-threshold 0.85` with an already-kept
 factor. Without a holdout, selection uses **user factor order and
 unsupervised** correlations over the requested period. With holdout, both
 correlation discovery and ranking priority use **pre-holdout dates only**.
 Ranking priority may use absolute *training-matured* IC, never holdout IC.
+Feature availability for selection is likewise checked only on pre-holdout dates
+when a holdout is configured.
 
 ## 4. IC stability and train/test safety
 
