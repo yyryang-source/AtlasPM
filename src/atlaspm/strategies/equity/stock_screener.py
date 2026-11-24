@@ -10,11 +10,12 @@ from __future__ import annotations
 import csv
 from datetime import date
 from math import isfinite, sqrt
+from heapq import nlargest
 from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.historical import load_adjusted_prices
+from atlaspm.data.historical import load_adjusted_prices
 
 _FUND_COLUMNS = (
     "as_of_date", "symbol", "sector", "market_cap_usd", "roe",
@@ -127,7 +128,6 @@ def screen_stocks(
     No prices on later dates enter a score. Fundamentals as_of_date represents
     the *first publicly available* date, not a fiscal period-end date.
     """
-    """Screen a CSV price source through an explicit date cutoff."""
     return screen_stocks_from_prices(
         load_adjusted_prices(prices_path), as_of,
         fundamentals_path=fundamentals_path, top=top,
@@ -180,7 +180,10 @@ def screen_stocks_from_prices(
     eligible: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for symbol, time_series in sorted(prices.items()):
-        observations = sorted((day, price) for day, price in time_series.items() if day <= cutoff)
+        # Only the last 253 observations enter any eligibility check or factor.
+        observations = nlargest(253, ((day, price) for day, price in time_series.items()
+                                      if day <= cutoff), key=lambda item: item[0])
+        observations.reverse()
         reason = ""
         if len(observations) < 253:
             reason = "INSUFFICIENT_HISTORY_253_SESSIONS"

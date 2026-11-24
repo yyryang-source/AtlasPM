@@ -10,10 +10,13 @@ AtlasPM now classifies existing **source files** into specialized domains. The o
 | `atlaspm.risk` | RiskNet/FusionNet, financing, stress, risk budget | Research code moved |
 | `atlaspm.execution` | Offline ledger, preflight, synthetic OMS, read-only IBKR | No live orders |
 | `atlaspm.monitoring` | Historical performance, audits, HTML risk snapshot | Offline only |
-| `atlaspm.quant` | Portfolio/backtest/optimizer plus legacy import aliases | Existing |
+| `atlaspm.engine` | Unified portfolio, allocation, historical replay and analytics | Synthetic research |
+| `atlaspm.commands` | Stable CLI adapters and domain dispatch | Existing |
+| `atlaspm.framework` | Standard research workflow orchestration | Existing |
+| `atlaspm.quant` | Compatibility aliases only; algorithms live in their canonical domains | Compatibility |
 | `atlaspm.selection` | Legacy import aliases | Existing |
 | `strategies.options`, `strategies.bonds` | Planned research | No implementation |
-| `portfolio/`, `hedging/` | Reserved; portfolio.py root alias remains | No unified multi-asset engine |
+| `portfolio/`, `hedging/` | Reserved; portfolio.py root alias remains | Reserved namespace; unified equity engine lives in `engine` |
 
 ## Migrated source files
 
@@ -62,3 +65,25 @@ AtlasPM now classifies existing **source files** into specialized domains. The o
 - `atlaspm.quant.audit` → `atlaspm.monitoring.audit`
 
 New code should import canonical paths. Existing CLI flags, JSON schemas, model formulas and risk protections have not changed. The Python source files are identical at their new locations; only import compatibility wrappers have been added. `atlaspm/portfolio.py` remains a module that would shadow a same-named Python package; the `portfolio/` folder is not activated as a package. Hedging/options/bonds strategies are not implemented. **Do not infer improved strategy performance or broker authorization from file movement.**
+
+## Maintenance rules
+
+- Use canonical domain modules for new implementations. Legacy import shims preserve module identity and are not independent models.
+- Preserve historical baseline algorithms and benchmark fixtures when tests or comparisons use them. Version numbers alone are not evidence of dead code.
+- Do not add a new source copy to a compatibility namespace. Remove empty placeholders from populated packages.
+- Keep private data, prediction archives, model checkpoints and temporary feature workspaces outside Git under local_data.
+- Run the entire test suite and the focused AI/Parquet/replay CI before merging. Peak RSS must be measured; file counts are not a memory benchmark.
+
+### Original quant implementation relocation
+
+- `atlaspm.quant.atlas_execution_policy` → `atlaspm.execution.atlas_execution_policy`
+- `atlaspm.quant.atlas_fusion_allocator` → `atlaspm.engine.atlas_fusion_allocator`
+- `atlaspm.quant.backtest` → `atlaspm.engine.backtest`
+- `atlaspm.quant.benchmark` → `atlaspm.monitoring.benchmark`
+- `atlaspm.quant.mean_variance` → `atlaspm.engine.mean_variance`
+- `atlaspm.quant.ml_lightgbm` → `atlaspm.research.ml_lightgbm`
+- `atlaspm.quant.models` → `atlaspm.engine.models`
+- `atlaspm.quant.optimizer` → `atlaspm.engine.optimizer`
+- `atlaspm.quant.portfolio` → `atlaspm.engine.portfolio`
+
+These implementations are moved byte-for-byte; old root and quant import paths resolve to the same canonical module object. Baseline algorithms remain available for reproducible comparisons.

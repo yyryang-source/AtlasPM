@@ -7,11 +7,12 @@ performance. All risk-free-rate assumptions are explicitly zero.
 from __future__ import annotations
 
 from datetime import date
+from itertools import groupby
 from math import isfinite, sqrt
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.historical import TRADING_DAYS_PER_YEAR
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR
 
 
 def _daily_returns(values: list[float]) -> list[float]:
@@ -56,16 +57,17 @@ def _active_stats(
         (1 + _compound(strategy)) ** (TRADING_DAYS_PER_YEAR / n)
         - (1 + _compound(spy)) ** (TRADING_DAYS_PER_YEAR / n)
     )
+    active_mean = fmean(diffs)
     return {
         "daily_observations": n,
         "beta_to_spy": beta,
         "daily_correlation_to_spy": correlation,
         "annual_tracking_error": tracking_error,
         "information_ratio_zero_risk_free_assumption": (
-            fmean(diffs) * TRADING_DAYS_PER_YEAR / tracking_error
+            active_mean * TRADING_DAYS_PER_YEAR / tracking_error
             if tracking_error > 0 else None
         ),
-        "annualized_arithmetic_active_return": fmean(diffs) * TRADING_DAYS_PER_YEAR,
+        "annualized_arithmetic_active_return": active_mean * TRADING_DAYS_PER_YEAR,
         "cagr_difference_vs_spy": active_cagr,
     }
 
@@ -83,7 +85,7 @@ def historical_spy_diagnostics(
     if n < 2 or len(cash_index) != n or len(margin_index) != n or len(spy_index) != n:
         raise ValueError("Expected equally sized daily equity series of length >= 2")
     parsed = [date.fromisoformat(day) for day in dates]
-    if parsed != sorted(set(parsed)):
+    if any(parsed[i] <= parsed[i-1] for i in range(1, n)):
         raise ValueError("Dates must be strictly increasing")
     returns = {
         "cash": _daily_returns(cash_index),
@@ -95,8 +97,8 @@ def historical_spy_diagnostics(
         "margin": _active_stats(returns["margin"], returns["spy"]),
     }
     yearly: list[dict[str, Any]] = []
-    for year in sorted(set(day.year for day in parsed)):
-        indices = [i for i, day in enumerate(parsed) if day.year == year]
+    for year, group in groupby(enumerate(parsed), key=lambda item: item[1].year):
+        indices = [i for i, _ in group]
         values = {
             name: _compound([rows[i] for i in indices])
             for name, rows in returns.items()

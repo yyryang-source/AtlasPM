@@ -17,7 +17,7 @@ from atlaspm.engine.contracts import Account, Candidate, finite, object_map, tim
 from atlaspm.execution.institutional_batch import propose_multi_asset_batch
 from atlaspm.execution.institutional_ledger import build_institutional_ledger
 from atlaspm.execution.paper_oms import replay_paper_orders
-from atlaspm.quant.mean_variance import _validate_covariance
+from atlaspm.engine.mean_variance import _validate_covariance
 from atlaspm.risk.risk_budget import check_risk_budget
 
 LOGGER = logging.getLogger(__name__)

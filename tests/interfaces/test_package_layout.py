@@ -41,6 +41,16 @@ class PackageLayoutTest(unittest.TestCase):
                 canonical = importlib.import_module("atlaspm." + domain + "." + module)
                 self.assertIs(compatibility, canonical)
 
+    def test_optimizer_import_order_in_fresh_process(self):
+        import subprocess
+        import sys
+        for name in ("atlaspm.quant.optimizer", "atlaspm.optimizer",
+                     "atlaspm.engine.optimizer", "atlaspm.cli"):
+            with self.subTest(name=name):
+                subprocess.run([sys.executable, "-c",
+                    f"import {name}; from atlaspm.engine import run_unified_portfolio; "
+                    "assert callable(run_unified_portfolio)"], check=True)
+
     def test_legacy_cli_remains_accessible(self):
         module = importlib.import_module("atlaspm.cli")
         self.assertTrue(callable(module.main))

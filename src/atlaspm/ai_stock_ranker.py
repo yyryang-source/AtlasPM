@@ -1,6 +1,6 @@
-"""Backward-compatible module path; canonical implementation: atlaspm.selection.ai_stock_ranker."""
+"""Backward-compatible module path; canonical implementation: atlaspm.research.ai_stock_ranker."""
 
 from importlib import import_module as _import_module
 from sys import modules as _modules
 
-_modules[__name__] = _import_module("atlaspm.selection.ai_stock_ranker")
+_modules[__name__] = _import_module("atlaspm.research.ai_stock_ranker")

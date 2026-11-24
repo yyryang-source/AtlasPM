@@ -7,9 +7,9 @@ on:
       - "src/atlaspm/data/factor_eval.py"
       - "src/atlaspm/data/factor_v3.py"
       - "src/atlaspm/data/market_db.py"
-      - "tests/test_factor_db.py"
-      - "tests/test_factor_eval.py"
-      - "tests/test_factor_v3.py"
+      - "tests/data/test_factor_db.py"
+      - "tests/data/test_factor_eval.py"
+      - "tests/data/test_factor_v3.py"
       - ".github/workflows/factor-db.yml"
   pull_request:
     paths:
@@ -17,9 +17,9 @@ on:
       - "src/atlaspm/data/factor_eval.py"
       - "src/atlaspm/data/factor_v3.py"
       - "src/atlaspm/data/market_db.py"
-      - "tests/test_factor_db.py"
-      - "tests/test_factor_eval.py"
-      - "tests/test_factor_v3.py"
+      - "tests/data/test_factor_db.py"
+      - "tests/data/test_factor_eval.py"
+      - "tests/data/test_factor_v3.py"
       - ".github/workflows/factor-db.yml"
 
 jobs:

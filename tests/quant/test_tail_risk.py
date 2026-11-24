@@ -24,6 +24,20 @@ class TailRiskTests(unittest.TestCase):
         self.assertAlmostEqual(result["daily_expected_shortfall_fraction"], .09)
         self.assertAlmostEqual(result["worst_observed_daily_loss"], .10)
 
+    def test_heap_matches_full_sort(self):
+        from math import ceil
+        from random import Random
+        rng=Random(32)
+        rows=[[rng.uniform(-.25,.25),rng.uniform(-.25,.25)] for _ in range(301)]
+        weights=[.7,.3]
+        for alpha in (.01,.05,.25):
+            losses=sorted((-sum(w*r for w,r in zip(weights,row)) for row in rows),reverse=True)
+            k=ceil(len(rows)*alpha)
+            actual=historical_daily_expected_shortfall(rows,weights,tail_fraction=alpha)
+            self.assertEqual(actual["tail_days"],k)
+            self.assertEqual(actual["daily_expected_shortfall_fraction"],max(0.,sum(losses[:k])/k))
+            self.assertEqual(actual["worst_observed_daily_loss"],max(0.,losses[0]))
+
     def test_exposure_cap_can_introduce_cash(self):
         settings = dict(
             maximum_requested_leverage=2,

@@ -6,6 +6,7 @@ This is a past-only empirical tail estimator, not a forecast or an optimizer.
 from __future__ import annotations
 
 from math import ceil, isfinite
+from heapq import heappush, heapreplace
 from typing import Sequence
 
 
@@ -36,6 +37,8 @@ def historical_daily_expected_shortfall(
     if len(daily_returns) < 20:
         raise ValueError("At least 20 historical daily observations are required")
 
+    count = len(daily_returns)
+    k = max(1, ceil(count * alpha))
     losses: list[float] = []
     for row in daily_returns:
         if len(row) != len(w):
@@ -43,13 +46,16 @@ def historical_daily_expected_shortfall(
         if any(isinstance(value, bool) or not isinstance(value, (int, float))
                or not isfinite(value) or value < -1.0 for value in row):
             raise ValueError("Historical daily returns must be finite and >= -1")
-        losses.append(-sum(weight * asset_return for weight, asset_return in zip(w, row)))
-    k = max(1, ceil(len(losses) * alpha))
-    worst = sorted(losses, reverse=True)[:k]
+        loss = -sum(weight * asset_return for weight, asset_return in zip(w, row))
+        if len(losses) < k:
+            heappush(losses, loss)
+        elif loss > losses[0]:
+            heapreplace(losses, loss)
+    worst = sorted(losses, reverse=True)
     es = max(0.0, sum(worst) / k)
     return {
         "tail_fraction": alpha,
-        "historical_days": len(losses),
+        "historical_days": count,
         "tail_days": k,
         "daily_expected_shortfall_fraction": es,
         "worst_observed_daily_loss": max(0.0, worst[0]),
