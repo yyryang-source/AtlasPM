@@ -381,3 +381,47 @@ institutional OMS, enable leverage or independently verify broker margin.
 It demonstrates an offline research loop, not live autonomous trading
 or real-data profitability. Real model training, verified identity,
 corporate actions, data rights and deployment approval remain blocked.
+
+
+## Closed-loop risk circuit breaker and hypothetical financing
+
+Optional execution.risk_policy applies one fixed cash-only policy to
+every strategy trial and the final holdout:
+
+~~~json
+{"max_drawdown": 0.20, "max_gross_leverage": 1.0,
+ "equity_shock": 0.20, "max_stress_loss_fraction": 0.15}
+~~~
+
+Each synthetic close reuses the existing OMS marked-exposure risk
+calculation. A breach permanently latches a halt for the run: no new
+risk, sell-only targets at subsequent opens, with normal participation,
+cost and settlement rules. Residual shares are retried; no same-close
+or guaranteed liquidation is assumed. The halt and remaining positions
+are explicit. Candidate strategies that halt during validation are
+ineligible; a holdout halt is reported, not used to select another
+strategy. The local close-risk journal reuses the OMS hash-chain helper;
+this is not a signed broker audit or an integration with its actual
+order journal. With no risk policy, previous replay behavior remains.
+
+Optional top-level leverage_scenarios requests a separate static
+financing envelope. Example scenario:
+
+~~~json
+{"shock": 0.20, "maintenance_fraction": 0.25,
+ "initial_fraction": 0.50, "apr": 0.06, "days": 30,
+ "min_excess_fraction": 0.10, "max_equity_loss": 0.50}
+~~~
+
+Starting equity is the assumed initial cash, not verified broker
+net liquidation. The envelope solves simultaneous assumed initial
+margin, stressed maintenance buffer, equity loss, financing APR
+budget and gross ceiling constraints for a fully invested uniform
+long-equity shock. If even 1x fails, no feasible fully-invested
+ceiling is returned. It reports hypothetical principal, interest,
+stressed equity and static zero-excess boundary per scenario.
+The existing reverse-stress boundary helper is reused. These are
+not IBKR margin requirements or liquidation prices. The report
+does not modify simulated cash trades, permit borrowing, choose
+leverage or transmit orders. Actual broker margin, order-bound
+What-If, position identity and collateral need independent review.
