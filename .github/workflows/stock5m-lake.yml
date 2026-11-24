@@ -65,6 +65,8 @@ jobs:
 
       - name: Verify V5.5 raw evidence matching and batch budget
         run: python -m unittest discover -s tests -p "test_hf_stock5m_evidence_v55.py" -v
+      - name: Verify historical SEC cover observations
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_identity_v56.py" -v
 
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
@@ -101,3 +103,6 @@ jobs:
 
       - name: Verify V5.5 evidence matching on Windows
         run: python -m unittest discover -s tests -p "test_hf_stock5m_evidence_v55.py" -v
+
+      - name: Verify historical SEC cover observations on Windows
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_identity_v56.py" -v
