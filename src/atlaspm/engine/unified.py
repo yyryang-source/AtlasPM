@@ -7,6 +7,7 @@ never verified IBKR or production data. No market database is read or written.
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 from math import ceil, floor, sqrt
 from typing import Any, Mapping
 
@@ -18,6 +19,8 @@ from atlaspm.execution.institutional_ledger import build_institutional_ledger
 from atlaspm.execution.paper_oms import replay_paper_orders
 from atlaspm.quant.mean_variance import _validate_covariance
 from atlaspm.risk.risk_budget import check_risk_budget
+
+LOGGER = logging.getLogger(__name__)
 
 SAFETY = {
     "research_only": True,
@@ -37,6 +40,7 @@ def reduction_research(account: Account) -> list[dict[str, Any]]:
 
 
 def _blocked(reason: str, account: Account | None = None, **extra: Any) -> dict[str, Any]:
+    LOGGER.info("Synthetic portfolio decision BLOCK: %s", reason)
     return {
         **SAFETY, "method": "unified_portfolio_engine_v1",
         "decision": "BLOCK", "block_reasons": [reason],
@@ -487,6 +491,8 @@ def run_unified_portfolio(payload: Mapping[str, Any]) -> dict[str, Any]:
             margin_debt=account.debt,factor_scores=factor_exposure,
             variance_contributions=variance_contributions,
         )
+        LOGGER.info("Synthetic portfolio loop completed; account=%s fills=%d",
+                    account.account_id, len(fills))
         return {
             **SAFETY,"method":"unified_portfolio_engine_v1",
             "decision":"SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE",
