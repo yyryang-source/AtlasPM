@@ -1,6 +1,5 @@
-"""Backward-compatible module path; canonical implementation: atlaspm.quant.backtest."""
-
+"""Compatibility import; canonical implementation: atlaspm.engine.backtest."""
 from importlib import import_module as _import_module
 from sys import modules as _modules
 
-_modules[__name__] = _import_module("atlaspm.quant.backtest")
+_modules[__name__] = _import_module("atlaspm.engine.backtest")

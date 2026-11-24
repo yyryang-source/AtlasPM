@@ -13,7 +13,7 @@ AtlasPM now classifies existing **source files** into specialized domains. The o
 | `atlaspm.engine` | Unified portfolio, allocation, historical replay and analytics | Synthetic research |
 | `atlaspm.commands` | Stable CLI adapters and domain dispatch | Existing |
 | `atlaspm.framework` | Standard research workflow orchestration | Existing |
-| `atlaspm.quant` | Original portfolio/backtest/optimizer baselines plus compatibility aliases | Existing |
+| `atlaspm.quant` | Compatibility aliases only; algorithms live in their canonical domains | Compatibility |
 | `atlaspm.selection` | Legacy import aliases | Existing |
 | `strategies.options`, `strategies.bonds` | Planned research | No implementation |
 | `portfolio/`, `hedging/` | Reserved; portfolio.py root alias remains | Reserved namespace; unified equity engine lives in `engine` |
@@ -73,3 +73,17 @@ New code should import canonical paths. Existing CLI flags, JSON schemas, model 
 - Do not add a new source copy to a compatibility namespace. Remove empty placeholders from populated packages.
 - Keep private data, prediction archives, model checkpoints and temporary feature workspaces outside Git under local_data.
 - Run the entire test suite and the focused AI/Parquet/replay CI before merging. Peak RSS must be measured; file counts are not a memory benchmark.
+
+### Original quant implementation relocation
+
+- `atlaspm.quant.atlas_execution_policy` → `atlaspm.execution.atlas_execution_policy`
+- `atlaspm.quant.atlas_fusion_allocator` → `atlaspm.engine.atlas_fusion_allocator`
+- `atlaspm.quant.backtest` → `atlaspm.engine.backtest`
+- `atlaspm.quant.benchmark` → `atlaspm.monitoring.benchmark`
+- `atlaspm.quant.mean_variance` → `atlaspm.engine.mean_variance`
+- `atlaspm.quant.ml_lightgbm` → `atlaspm.research.ml_lightgbm`
+- `atlaspm.quant.models` → `atlaspm.engine.models`
+- `atlaspm.quant.optimizer` → `atlaspm.engine.optimizer`
+- `atlaspm.quant.portfolio` → `atlaspm.engine.portfolio`
+
+These implementations are moved byte-for-byte; old root and quant import paths resolve to the same canonical module object. Baseline algorithms remain available for reproducible comparisons.

@@ -1,6 +1,5 @@
-"""Backward-compatible module path; canonical implementation: atlaspm.quant.optimizer."""
-
+"""Compatibility import; canonical implementation: atlaspm.engine.optimizer."""
 from importlib import import_module as _import_module
 from sys import modules as _modules
 
-_modules[__name__] = _import_module("atlaspm.quant.optimizer")
+_modules[__name__] = _import_module("atlaspm.engine.optimizer")
