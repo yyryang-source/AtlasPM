@@ -25,6 +25,9 @@ def replay(payload):
     for value in (top, cadence, lag):
         if type(value) is not int or value < 1:
             raise ValueError("INVALID_INTEGER_CONFIGURATION")
+    missing_policy=payload.get("missing_signal_policy","reject")
+    if missing_policy not in ("reject","hold"):
+        raise ValueError("INVALID_MISSING_SIGNAL_POLICY")
     sessions = payload["sessions"]
     if not isinstance(sessions, list) or len(sessions) < 2:
         raise ValueError("REQUIRES_TWO_SESSIONS")
@@ -134,7 +137,7 @@ def replay(payload):
                 raise ValueError("MISSING_COMPLETED_SESSION_VOLUME")
             prior_volume = {s:finite(v,"volume",minimum=0) for s,v in raw_volume.items()}
         history.append((str(day), cl))
-        if i % cadence == 0:
+        if i % cadence == 0 and not (missing_policy=="hold" and row.get("signals")==[]):
             candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
             if not all(c.symbol in cl for c in candidates):
                 raise ValueError("SIGNAL_MARK_MISSING")
