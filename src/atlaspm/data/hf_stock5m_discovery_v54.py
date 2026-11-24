@@ -119,8 +119,8 @@ def _candidates(cx,paths,calendar,month,threshold,limit):
         if kind=="OVERNIGHT_PRICE_GAP":
             # Price change is the reciprocal of new/old shares, if a split.
             nearest=min([float(r) for r in RATIOS]+[1/r for r in RATIOS],
-                        key=lambda x:abs(math.log(ratio/x)))
-            candidate["split_like_price_ratio"]=nearest if abs(math.log(ratio/nearest))<=math.log(1.10) else None
+                        key=lambda x:abs(math.log(ratio)-math.log(x)))
+            candidate["split_like_price_ratio"]=nearest if abs(math.log(ratio)-math.log(nearest))<=math.log(1.10) else None
         output.append(candidate)
     return output, int(rows[0][-1]) if rows else 0
 
@@ -189,11 +189,15 @@ def investigate(month,*,max_events=10,per_event=5,fetch=False,max_requests=20):
     if queue.get("schema")!="atlaspm_market_event_discovery_v54" or queue.get("month")!=month:
         raise ValueError("Invalid queue")
     mapping,source=issuer_leads()
+    candidates=queue["candidates"]
+    eligible=sum(len(mapping.get(x["symbol"],set()))==1 for x in candidates)
+    # Prioritize investigable leads without hiding unresolved queue coverage.
+    ordered=sorted(candidates,key=lambda x:len(mapping.get(x["symbol"],set()))!=1)
     results=[]
     requests=0
     downloads=0
     network_stopped=False
-    for item in queue["candidates"][:max_events]:
+    for item in ordered[:max_events]:
         symbol=item["symbol"]
         ciks=sorted(mapping.get(symbol,set()))
         row={"event_id":item["event_id"],"symbol":symbol,"date":item["date"],
@@ -223,7 +227,8 @@ def investigate(month,*,max_events=10,per_event=5,fetch=False,max_requests=20):
     report={"schema":"atlaspm_targeted_filing_discovery_v54",**v4.GUARDS,
             "local_only":not fetch,"network_downloads":downloads,"requests_attempted":requests,
             "network_stopped":network_stopped,"month":month,"issuer_snapshot":source,
-            "events_considered":len(results),"results":results,
+            "events_considered":len(results),"queue_candidates":len(candidates),
+            "unambiguous_current_leads":eligible,"results":results,
             "status":"EVIDENCE_REVIEW_REQUIRED",
             "warning":"Issuer leads are contemporary, not historical. Filing hints are unreviewed. No V5.3 claims created."}
     report["summary_path"]=str(private_path(BASE/"latest.json"))
