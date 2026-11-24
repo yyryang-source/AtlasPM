@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from atlaspm.cli import main
-from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
+from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
 
 
 ROOT = Path(__file__).resolve().parents[2]

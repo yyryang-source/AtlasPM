@@ -13,10 +13,10 @@ import tempfile
 import unittest
 from zoneinfo import ZoneInfo
 
-from atlaspm.monthly_stock_selection import (
+from atlaspm.strategies.equity.monthly_stock_selection import (
     SCHEMA, month_end_nyse_session, monthly_candidates, write_monthly_research,
 )
-from atlaspm.ai_stock_ranker_v2 import train_stock_learning_to_rank
+from atlaspm.research.ai_stock_ranker_v2 import train_stock_learning_to_rank
 
 try:
     import pandas_market_calendars

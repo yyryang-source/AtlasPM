@@ -10,7 +10,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.stock_screener import screen_stocks
+from atlaspm.strategies.equity.stock_screener import screen_stocks
 
 
 class StockScreenerTest(unittest.TestCase):

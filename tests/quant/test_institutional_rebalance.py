@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.institutional_rebalance import plan_equity_trade
+from atlaspm.execution.institutional_rebalance import plan_equity_trade
 
 
 ROOT = Path(__file__).resolve().parents[2] / "examples"

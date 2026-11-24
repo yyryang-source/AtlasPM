@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from atlaspm.benchmark import compare_spy
+from atlaspm.monitoring.benchmark import compare_spy
 from atlaspm.cli import main
 
 

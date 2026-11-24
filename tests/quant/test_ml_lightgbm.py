@@ -5,10 +5,10 @@ import math
 import tempfile
 import unittest
 
-from atlaspm.ml_dynamic_rebalance import (
+from atlaspm.research.ml_dynamic_rebalance import (
     _features, backtest_ml_dynamic_rebalance,
 )
-from atlaspm.ml_lightgbm import (
+from atlaspm.research.ml_lightgbm import (
     train_lightgbm_risk, predict_lightgbm_risk,
 )
 

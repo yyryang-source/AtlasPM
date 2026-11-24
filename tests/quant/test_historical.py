@@ -6,7 +6,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.historical import estimate_from_prices, load_adjusted_prices
+from atlaspm.data.historical import estimate_from_prices, load_adjusted_prices
 
 
 class HistoricalTest(unittest.TestCase):

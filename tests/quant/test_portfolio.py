@@ -2,8 +2,8 @@
 
 import unittest
 
-from atlaspm.models import PortfolioAccount, Position
-from atlaspm.portfolio import analyze_accounts, parse_accounts
+from atlaspm.engine.models import PortfolioAccount, Position
+from atlaspm.engine.portfolio import analyze_accounts, parse_accounts
 
 
 class PortfolioTest(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 import unittest
 
-from atlaspm.performance import historical_spy_diagnostics
+from atlaspm.monitoring.performance import historical_spy_diagnostics
 
 
 def index_from_returns(returns):

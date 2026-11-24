@@ -7,7 +7,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.ml_dynamic_rebalance import (
+from atlaspm.research.ml_dynamic_rebalance import (
     _features, _train_asset_model, _forecast, _select_allocation,
     backtest_ml_dynamic_rebalance,
 )

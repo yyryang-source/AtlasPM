@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from atlaspm.selection.corporate_action_reconciliation import reconcile_reverse_splits
+from atlaspm.data.corporate_action_reconciliation import reconcile_reverse_splits
 
 _SEC = "https://www.sec.gov/Archives/edgar/data/1638911/000121390026024093/ea0279505-8k_duke.htm"
 

@@ -12,7 +12,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.ai_stock_ranker_v2 import (
+from atlaspm.research.ai_stock_ranker_v2 import (
     _rank_queries, _rank_scores, train_stock_learning_to_rank, rank_stocks_v2,
 )
 

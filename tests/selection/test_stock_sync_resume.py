@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from atlaspm.us_market_prices import sync_us_market_prices
+from atlaspm.data.us_market_prices import sync_us_market_prices
 
 START = "2024-01-01"
 END = "2024-02-01"
@@ -126,7 +126,7 @@ class BoundedStockMarketSyncTests(unittest.TestCase):
 
     def test_ctrl_c_between_batches_still_builds_partial_csv_and_report(self):
         # Interruption while paused between bounded batches is recoverable.
-        with mock.patch("atlaspm.selection.us_market_prices.time.sleep",
+        with mock.patch("atlaspm.data.us_market_prices.time.sleep",
                         side_effect=KeyboardInterrupt):
             result = self.run_sync(batch_pause_seconds=0.1)
         self.assertTrue(result["stopped_early"])

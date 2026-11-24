@@ -6,7 +6,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.risk_backtest import (
+from atlaspm.risk.risk_backtest import (
     backtest_risk_budget, choose_budgeted_exposure, _trade_to_risk_budget
 )
 

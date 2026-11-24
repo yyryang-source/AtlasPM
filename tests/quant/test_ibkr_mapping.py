@@ -6,8 +6,8 @@ import unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
-from atlaspm.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
+from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
+from atlaspm.execution.ibkr_mapping import diagnose_ibkr_contract_mapping, mapping_redacted_summary
 
 
 ROOT = Path(__file__).resolve().parents[2] / "examples"

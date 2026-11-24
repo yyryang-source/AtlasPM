@@ -5,11 +5,11 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.oms_controls import (
+from atlaspm.execution.oms_controls import (
     canonical_bytes, chain_audit_events, verify_audit_chain,
     post_fill_risk_snapshot,
 )
-from atlaspm.paper_oms import replay_paper_orders
+from atlaspm.execution.paper_oms import replay_paper_orders
 
 
 ROOT = Path(__file__).resolve().parents[2] / "examples"

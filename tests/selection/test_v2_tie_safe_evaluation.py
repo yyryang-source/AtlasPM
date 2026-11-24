@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from atlaspm.ai_stock_ranker_v2 import _rank_evaluation, _model_research_review
+from atlaspm.research.ai_stock_ranker_v2 import _rank_evaluation, _model_research_review
 
 
 def cohort(day: str, predictions: list[float]):

@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.institutional_gate import assess_institutional_intent
+from atlaspm.execution.institutional_gate import assess_institutional_intent
 
 
 SAMPLE = Path(__file__).resolve().parents[2] / "examples" / "institutional_scenario.json"

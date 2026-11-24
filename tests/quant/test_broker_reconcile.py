@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.broker_reconcile import reconcile_imported_broker_snapshot
+from atlaspm.execution.broker_reconcile import reconcile_imported_broker_snapshot
 
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"

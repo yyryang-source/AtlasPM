@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from atlaspm.audit import audit_backtests
+from atlaspm.monitoring.audit import audit_backtests
 from atlaspm.cli import main
 
 

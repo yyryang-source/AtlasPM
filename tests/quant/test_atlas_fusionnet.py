@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from atlaspm.atlas_fusion_allocator import (
+from atlaspm.engine.atlas_fusion_allocator import (
     _project_capped_simplex, _shrunken_correlation, allocate_fusion_sleeve,
 )
-from atlaspm.atlas_fusionnet import (
+from atlaspm.risk.atlas_fusionnet import (
     FUSION_NAME, fit_atlas_fusionnet, fusion_feature_names,
     fusion_feature_vector, predict_atlas_fusionnet,
 )
-from atlaspm.atlas_risknet import RISKNET_NAME
+from atlaspm.risk.atlas_risknet import RISKNET_NAME
 from .test_atlas_regimenet import make_prices, run, synthetic_returns
 
 HAS_NUMPY=importlib.util.find_spec("numpy") is not None

@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 
 from atlaspm.cli import main
-from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin
-from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
-from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
+from atlaspm.risk.ibkr_financing import reconcile_ibkr_financing_margin
+from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
+from atlaspm.risk.ibkr_margin_monitor import collect_ibkr_margin_monitor
 
 ROOT = Path(__file__).resolve().parents[2]
 

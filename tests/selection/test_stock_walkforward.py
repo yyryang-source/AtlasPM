@@ -12,7 +12,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.stock_walkforward import backtest_stock_screener
+from atlaspm.research.stock_walkforward import backtest_stock_screener
 
 
 class StockWalkforwardTest(unittest.TestCase):

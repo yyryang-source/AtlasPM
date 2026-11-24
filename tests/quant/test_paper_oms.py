@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.paper_oms import replay_paper_orders
+from atlaspm.execution.paper_oms import replay_paper_orders
 
 
 ROOT = Path(__file__).resolve().parents[2] / "examples"
