@@ -280,10 +280,19 @@ def all_jobs() -> None:
 
 
 def api_management() -> None:
-    from atlaspm.monitoring.api_management import inventory, public_smoke
+    from atlaspm.monitoring.api_management import inventory, public_smoke, set_enabled
     st.title("API 管理中心")
     st.caption("仅本地进程状态；未验证的订阅、费用、权限和连接不会显示为已通过。")
-    st.dataframe(inventory(),hide_index=True)
+    rows=inventory()
+    st.dataframe(rows,hide_index=True)
+    provider=st.selectbox("供应商（仅当前工作台进程）",[row["provider"] for row in rows])
+    left,right=st.columns(2)
+    if left.button("启用研究接口"):
+        set_enabled(provider,True)
+        st.rerun()
+    if right.button("禁用研究接口"):
+        set_enabled(provider,False)
+        st.rerun()
     st.info("通过本地环境变量或操作系统凭证启动器配置密钥。此页面不接收或显示密钥。")
     if st.button("测试 Treasury 公开接口"):
         try:

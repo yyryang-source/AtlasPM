@@ -323,7 +323,7 @@ New feature tests require fresh CI and local acceptance; no real connections.
   successful data receipt, latency, circuit status, token expiry metadata
   when supplied, explicit public Treasury smoke. Not provider quota/fee
   verification; all actual monetary cost values null, no account entitlement
-  claims. Local switches ATLASPM_ENABLE_<PROVIDER>=0 block applicable gateway
+  claims. Local switches ATLASPM_ENABLE_<PROVIDER>=0 (or the workbench current-process enable/disable controls) block applicable gateway
   and rights-guarded adapter calls; no order permission changes. Public
   legacy calls remain explicit, not auto-started.
 * Existing external AI public excerpt guard extended to recognized ratings,
@@ -365,9 +365,9 @@ subscription does not prove machine-readable redistribution rights.
 
 ### Concentrated offline acceptance
 
-New tests expected count 1067 (previous confirmed 1054 + 13); this is
+New tests expected count 1068 (previous confirmed 1054 + 14); this is
 an expectation, not measured. Use prior Windows review checkout flow,
-replace minimum-passed with 1067, leave external AI and Paper opt-in unset.
+replace minimum-passed with 1068, leave external AI and Paper opt-in unset.
 No credentials needed and no paid connection should occur in tests.
 Existing workbench extra (Streamlit) needed only to open API page; use
 `python -m streamlit run src/atlaspm/research_dashboard.py --server.address 127.0.0.1`

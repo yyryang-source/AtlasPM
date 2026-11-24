@@ -50,3 +50,15 @@ class APIManagementTests(unittest.TestCase):
         bad=Gateway(opener=lambda *a,**kw:BytesIO(b'<!DOCTYPE rss><rss><channel/></rss>'))
         with self.assertRaises(ValueError):
             fed_events(gateway=bad)
+
+
+    def test_local_enable_switch_is_not_credential_or_order_approval(self):
+        g=Gateway(opener=lambda *a,**kw:self.fail("network"))
+        with patch.dict(os.environ,{"XPRESSAPI_TOKEN":"","XPRESSAPI_USERNAME":"","XPRESSAPI_PASSWORD":""}):
+            m.set_enabled("xpressapi",True)
+            row=next(r for r in m.inventory(g) if r["provider"]=="xpressapi")
+            self.assertEqual(row["effective_status"],"DISABLED_OR_BLOCKED")
+            m.set_enabled("xpressapi",False)
+            self.assertFalse(next(r for r in m.inventory(g) if r["provider"]=="xpressapi")["enabled_by_configuration"])
+            with self.assertRaises(ValueError):
+                m.set_enabled("live_orders",True)

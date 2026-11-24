@@ -46,6 +46,7 @@ def inventory(gateway=DEFAULT_GATEWAY):
             "mode":"BLOCKED_WIRE_SPEC_OR_ENTITLEMENT" if name in _BLOCKED else
                    "LOCAL_SESSION_OR_ARCHIVE" if name in {"ibkr","hf"} else "IMPLEMENTED_ADAPTER",
             "enabled_by_configuration":enabled,"ready_for_manual_attempt":ready,
+            "effective_status":"READY_FOR_MANUAL_ATTEMPT" if ready else "DISABLED_OR_BLOCKED",
             "credential_env":env,"credential_configured":configured,"rights_attested":rights,
             "token_expiry_operator_valid":expiry,"auth_mode":
                 "local_gateway" if name=="ibkr" else "oauth2_client_credentials_data_pending" if name=="finra" else
