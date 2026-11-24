@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from itertools import groupby
 import json
 
 from atlaspm.engine.contracts import finite, timestamp
 from atlaspm.research.training_dataset import build_panel, MarketRegimes, validated_sessions, validate_panel_metadata
-from atlaspm.research.training_engine import train
+from atlaspm.research.training_engine import train, _fingerprint
 from atlaspm.research.training_registry import FLAGS, digest, register, local_path
 from atlaspm.research.alpha_factory import factor_selection, scores
 from atlaspm.research.alpha_metrics import summary, eligible, selection_score
@@ -38,6 +37,8 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
     if max_drawdown > 1 or cost_bps >= 1000:
         raise ValueError("INVALID_ALPHA_RISK_CONFIG")
     days = [s["date"] for s in sessions]
+    if days != sorted(set(days)):
+        raise ValueError("SESSION_ORDER")
     if validation_start not in days or holdout_start not in days:
         raise ValueError("ALPHA_SPLIT_NOT_SESSION")
     vi,hi = days.index(validation_start),days.index(holdout_start)
@@ -54,28 +55,27 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
     tracker = MarketRegimes()
     latest = {}
     daily_rules = {}
-    for day, marks in validated_sessions(sessions,names):
+    # Only prefix data is visible to candidate scoring and training.
+    for day, marks in validated_sessions(sessions[:hi],names):
         tracker.observe(day,marks)
-        latest = scores({s:v[1] for s,v in marks.items()},names,factors["weights"],tracker.states[day])
-        daily_rules[day] = latest
+        if day >= validation_start:
+            daily_rules[day] = scores({s:v[1] for s,v in marks.items()},names,
+                                      factors["weights"],tracker.states[day])
     models = ["ridge","historical_mean"] if models is None else models
     options = dict(horizon=1,minimum_train_sessions=20,test_sessions=5,embargo_sessions=1,
                    models=models,sequence_length=sequence_length,seed=seed)
     if len(models)>1:
         options.update(ensemble={},regime_ensemble={})
-    if artifact_path is not None:
-        options["model_artifact_path"] = str(local_path(artifact_path))
-    trained = train(payload,**options)
-    predictions = trained["predictions"]
+    tuning = train({**payload,"sessions":sessions[:hi]},**options)
+    predictions = tuning["predictions"]
     reference = predictions[models[0]]
-    # Reuse model labels and identical prediction universe for every rule.
-    # Sequence warmup and missing future paths are retained in that universe.
     rule_names = sorted(daily_rules[validation_start])
+    def rule_rows(reference, name):
+        return ({**row,"prediction":daily_rules[row["date"]][name][row["security_id"]]}
+                for row in reference if row["date"] in daily_rules)
     streams = {"model:"+k:v for k,v in predictions.items()}
     for name in rule_names:
-        streams["rule:"+name] = [
-            {**row,"prediction":daily_rules[row["date"]][name][row["security_id"]]}
-            for row in reference]
+        streams["rule:"+name] = lambda name=name: rule_rows(reference,name)
     validation = {}
     for name, rows in streams.items():
         validation[name] = summary(rows,validation_days,cost_bps=cost_bps,
@@ -83,26 +83,61 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
     qualified = [n for n,m in validation.items() if eligible(m,minimum_sessions=minimum_sessions,
                                                             max_drawdown=max_drawdown)]
     winner = min(qualified,key=lambda n:(-selection_score(validation[n]),n)) if qualified else None
-    holdout = summary(streams[winner],holdout_days,cost_bps=cost_bps,trials=1,
-                      regimes=tracker.states) if winner else None
+    validation_folds = tuning["folds"]
+    missing_label_paths = tuning["missing_label_paths"]
+    del streams, predictions, reference, tuning
+    daily_rules.clear()
+    # The candidate identity is locked before any holdout feature is read.
+    # Validate even a NO_TRADE input; never ignore corrupted later data.
+    for day, marks in validated_sessions(sessions[hi:],names):
+        if day <= days[hi-1]:
+            raise ValueError("SESSION_ORDER")
+        tracker.observe(day,marks)
+        if winner and winner.startswith("rule:"):
+            latest = scores({s:v[1] for s,v in marks.items()},names,
+                            factors["weights"],tracker.states[day])
+            daily_rules[day] = latest
+    trained = None
+    holdout = None
+    dataset = _fingerprint(payload)
+    if winner:
+        name = winner.split(":",1)[1]
+        selected_options = {k:v for k,v in options.items() if k not in ("ensemble","regime_ensemble")}
+        if winner.startswith("rule:"):
+            selected_options["models"] = ["historical_mean"]
+        elif name in ("adaptive_ensemble","regime_ensemble"):
+            selected_options = dict(options)
+        else:
+            selected_options["models"] = [name]
+        if artifact_path is not None and winner.startswith("model:") and name in models:
+            selected_options["model_artifact_path"] = str(local_path(artifact_path))
+        trained = train(payload,**selected_options)
+        dataset = trained["dataset_sha256"]
+        missing_label_paths = trained["missing_label_paths"]
+        if winner.startswith("rule:"):
+            rows = lambda: rule_rows(trained["predictions"]["historical_mean"],name)
+        else:
+            rows = trained["predictions"][name]
+        holdout = summary(rows,holdout_days,cost_bps=cost_bps,trials=1,
+                          regimes=tracker.states)
     accepted = bool(holdout and eligible(holdout,minimum_sessions=minimum_sessions,max_drawdown=max_drawdown))
     config = dict(validation_start=validation_start,holdout_start=holdout_start,models=models,
                   cost_bps=cost_bps,minimum_sessions=minimum_sessions,max_drawdown=max_drawdown,
                   sequence_length=sequence_length,seed=seed)
     strategy_id = digest(dict(config=config,winner=winner,factors=factors["weights"],
                               engine_version="autonomous_alpha_v1")) if winner else None
-    version = digest(dict(strategy_id=strategy_id,dataset=trained["dataset_sha256"])) if winner else None
+    version = digest(dict(strategy_id=strategy_id,dataset=dataset)) if winner else None
     final_scores = {}
     artifact_id = None
     if accepted and winner.startswith("rule:"):
         final_scores = latest[winner.removeprefix("rule:")]
-    elif accepted and artifact_path is not None:
+    elif accepted and artifact_path is not None and winner.removeprefix("model:") in models:
         from atlaspm.research.training_artifacts import ModelArtifacts, predict_snapshot
         name = winner.removeprefix("model:")
         artifact_id = trained["folds"][-1].get("model_artifact_ids",{}).get(name)
         if artifact_id:
             record = ModelArtifacts(artifact_path).load(artifact_id)
-            if record["dataset_sha256"] != trained["dataset_sha256"] or record["model"] != name:
+            if record["dataset_sha256"] != dataset or record["model"] != name:
                 raise ValueError("ALPHA_ARTIFACT_IDENTITY_MISMATCH")
             result = predict_snapshot(record,{**payload,"sessions":sessions[-sequence_length:]})
             final_scores = {r["security_id"]:r["prediction"] for r in result["predictions"]}
@@ -120,7 +155,7 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
                 asset_type="equity",sector=assets[sid].get("sector","Unclassified"),
                 strategy_id=strategy_id,model_version=artifact_id or version,
                 factor_score=2*strength[sid]-1,model_rank=rank,
-                signal_direction="LONG_RESEARCH",signal_strength=strength[sid],
+                signal_direction="LONG_CANDIDATE" if strength[sid]>=.75 else "NEUTRAL",signal_strength=strength[sid],
                 expected_holding_sessions=1,risk_classification="UNASSESSED",
                 generated_at=close.isoformat(),available_at=close.isoformat(),
                 data_available_at=assets[sid]["available_at"],
@@ -128,7 +163,7 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
                 identity_source="synthetic",data_source="synthetic",data_quality="synthetic_test_only",
                 validation_status="SYNTHETIC_HOLDOUT_PASSED",research_eligible=True,
                 model_approved_for_training=False))
-    report = dict(version="autonomous_alpha_v1",dataset_sha256=trained["dataset_sha256"],
+    report = dict(version="autonomous_alpha_v1",dataset_sha256=dataset,
                   config=config, factor_selection=factors, validation=validation,
                   selected_strategy=winner, strategy_id=strategy_id,strategy_version=version,
                   holdout=holdout,holdout_mode="locked_candidate_walk_forward_refit",
@@ -137,8 +172,11 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
                   decision="SYNTHETIC_RESEARCH_SIGNAL" if signals else "NO_TRADE",
                   market_state=tracker.states[days[-1]],market_state_history=tracker.states,
                   market_state_probability=None,model_artifact_id=artifact_id,
-                  signals=signals, training_folds=trained["folds"],
-                  missing_label_paths=trained["missing_label_paths"],
+                  signals=signals, validation_folds=validation_folds,
+                  training_folds=trained["folds"] if trained else [],
+                  missing_label_paths=missing_label_paths,
+                  missing_label_scope="full_panel" if trained else "validation_prefix",
+                  holdout_candidates_evaluated=[winner] if winner else [],
                   **FLAGS)
     if registry_path is not None:
         report["registry_run_id"] = register(local_path(registry_path),config,report,kind="experiment")
@@ -169,6 +207,13 @@ def simulate(payload, portfolio, **kwargs):
         raise ValueError("ALPHA_PORTFOLIO_UNIVERSE_MISMATCH")
     if portfolio.get("constraints",{}).get("method","equal_weight") != "equal_weight":
         raise ValueError("ALPHA_UNCALIBRATED_RETURN_OPTIMIZER_BLOCKED")
+    latest_assets = {a["security_id"]:a for a in payload["sessions"][-1]["assets"]}
+    for holding in portfolio["account"]["positions"]:
+        sid = "SYN:"+holding["symbol"]
+        if sid not in latest_assets or abs(finite(holding["mark_price"],"mark_price")-latest_assets[sid]["close"])>1e-6:
+            raise ValueError("ALPHA_PORTFOLIO_MARK_MISMATCH")
+        if holding["sector"] != signals[holding["symbol"]]["sector"]:
+            raise ValueError("ALPHA_PORTFOLIO_SECTOR_MISMATCH")
     # This bridge validates the contracts and OMS, not alpha-driven sizing.
     result = run_unified_portfolio({**portfolio,"signals":[signals[s] for s in symbols]})
     return dict(research=report,portfolio=result,decision=result["decision"],**FLAGS)

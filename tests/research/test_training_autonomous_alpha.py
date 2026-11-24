@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import date,timedelta
 from importlib.util import find_spec
 
-from atlaspm.research.autonomous_alpha import research
+from atlaspm.research.autonomous_alpha import research, simulate
 from atlaspm.research.alpha_metrics import evaluate, block_lower
 
 
@@ -84,3 +84,33 @@ class AlphaTests(unittest.TestCase):
         p["live_execution_enabled"]=True
         with self.assertRaisesRegex(ValueError,"ALPHA_PERMISSION_OVERRIDE"):
             research(p,**options(p))
+
+    @unittest.skipUnless(find_spec("scipy"),"portfolio extra required")
+    def test_real_paper_oms_adapter_with_synthetic_panel(self):
+        import json
+        from pathlib import Path
+        p=fixture()
+        # Exact synthetic identities, sectors and final marks match the existing
+        # independently tested Unified Portfolio fixture.
+        for row in p["sessions"]:
+            row["assets"]=row["assets"][:2]
+        last=p["sessions"][-1]["assets"]
+        scales=[100/a["close"] for a in last]
+        for row in p["sessions"]:
+            for i,a in enumerate(row["assets"]):
+                a["close"]*=scales[i]
+                a["security_id"]="SYN:"+("AAA","BBB")[i]
+                a["sector"]=("Technology","Healthcare")[i]
+        portfolio=json.loads((Path(__file__).resolve().parents[2]/"examples"/"unified_portfolio_synthetic.json").read_text(encoding="utf-8"))
+        portfolio["as_of"]=p["sessions"][-1]["close_at"]
+        # Fixture history is separate from the synthetic alpha timeline; do not
+        # pass historical portfolio performance into this contract smoke test.
+        portfolio.pop("history",None)
+        out=simulate(p,portfolio,**options(p),models=["historical_mean"],cost_bps=0)
+        self.assertEqual(out["decision"],"SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE",out.get("portfolio"))
+        self.assertTrue(all(out["portfolio"]["reconciliation_checks"].values()))
+        self.assertFalse(out["live_execution_enabled"])
+        self.assertEqual(out["research"]["holdout_candidates_evaluated"],[out["research"]["selected_strategy"]])
+        portfolio["account"]["positions"][0]["mark_price"]=101
+        with self.assertRaisesRegex(ValueError,"ALPHA_PORTFOLIO_MARK_MISMATCH"):
+            simulate(p,portfolio,**options(p),models=["historical_mean"],cost_bps=0)

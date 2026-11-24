@@ -34,8 +34,10 @@ Scores are ordinal research ranks, not expected returns or probabilities.
 
 Only one-session horizon is supported in this orchestration. Validation and
 holdout use disjoint dates; the boundary-maturing validation label is excluded.
-Models may refit on matured past observations within holdout; hyperparameters
-and candidate identity are fixed. The benchmark is an equal-weight same-universe
+Candidate models receive only the validation prefix. After candidate identity
+is locked, only that candidate (or its required ensemble constituents) is
+trained/evaluated over the holdout. Models may refit on matured past observations
+within holdout; hyperparameters and candidate identity are fixed. The benchmark is an equal-weight same-universe
 return proxy; evaluation uses previous close ranks for the next close-to-close
 interval, costs are simplified and actual execution is not implied. Missing
 paths invalidate evaluation days. Synthetic data is bounded to 200,000 rows.

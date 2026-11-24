@@ -21,8 +21,9 @@ def evaluate(rows, dates, *, cost_bps, fraction=.25, regimes=None):
     A discontinuity is charged as a fresh entry; incomplete coverage is
     explicitly reported and never eligible for synthetic admission.
     """
+    selected_dates = set(dates)
     days = {day: {r["security_id"]: r for r in group}
-            for day, group in groupby(rows, key=lambda r: r["date"])}
+            for day, group in groupby(rows, key=lambda r: r["date"]) if day in selected_dates}
     equity = peak = 1.
     drawdown = 0.
     previous_weights = {}
@@ -73,7 +74,8 @@ def evaluate(rows, dates, *, cost_bps, fraction=.25, regimes=None):
     cagr = exp(annual_log)-1 if n and annual_log < 700 else None
     beta = None
     if n > 1 and stdev(benchmarks):
-        beta = sum((a-fmean(net))*(b-fmean(benchmarks)) for a,b in zip(net,benchmarks)) / ((n-1)*stdev(benchmarks)**2)
+        mn, mb = fmean(net), fmean(benchmarks)
+        beta = sum((a-mn)*(b-mb) for a,b in zip(net,benchmarks)) / ((n-1)*stdev(benchmarks)**2)
     tail = sorted(net)[:max(1, ceil(n*.05))]
     return dict(sessions=n, missing_sessions=missing, cagr=cagr,
                 sharpe=sharpe*sqrt(252) if sharpe is not None else None,
@@ -108,9 +110,10 @@ def block_lower(values, *, trials, seed=42, draws=500, block=5):
 
 
 def summary(rows, dates, *, cost_bps, trials, regimes=None):
-    result = evaluate(rows, dates, cost_bps=cost_bps, regimes=regimes)
+    source = rows if callable(rows) else lambda: iter(rows)
+    result = evaluate(source(), dates, cost_bps=cost_bps, regimes=regimes)
     result["bootstrap_lower_excess"] = block_lower(result.pop("excess"), trials=trials)
-    stressed = evaluate(rows, dates, cost_bps=2*cost_bps, regimes=regimes)
+    stressed = evaluate(source(), dates, cost_bps=2*cost_bps, regimes=regimes)
     result["double_cost_mean_excess"] = stressed["mean_excess"]
     return result
 
