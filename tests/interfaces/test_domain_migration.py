@@ -72,10 +72,19 @@ class DomainMigrationTests(unittest.TestCase):
                     raise
                 self.assertIs(legacy, importlib.import_module(new))
 
-    def test_unimplemented_modules_remain_unimplemented(self):
+    def test_multiasset_research_uses_canonical_packages(self):
+        for name in (
+            "strategies.options.option_replay",
+            "strategies.options.protective_put",
+            "strategies.bonds.treasury_replay",
+            "hedging.multiasset_hedge",
+        ):
+            with self.subTest(module=name):
+                module = importlib.import_module(f"atlaspm.{name}")
+                self.assertTrue(Path(module.__file__).is_file())
+
+    def test_portfolio_module_does_not_shadow_a_package(self):
         root = Path(atlaspm.__file__).resolve().parent
-        for dest in ("strategies/options", "strategies/bonds", "hedging"):
-            self.assertEqual(list((root / dest).glob("*.py")), [])
         self.assertFalse((root / "portfolio" / "__init__.py").exists())
 
 if __name__ == "__main__":

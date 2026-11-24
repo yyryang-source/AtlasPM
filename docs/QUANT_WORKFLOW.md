@@ -1,6 +1,6 @@
 # AtlasPM — Standard Quantitative Investment Workflow
 
-**Architecture specification, not a claim that AtlasPM already runs every stage.**
+**Architecture specification with current implementation status.**
 
 This is the intended institutional-style *research-to-execution* lifecycle. Unlike a one-pass trading diagram, risk controls are **continuous**, and hedge design is coupled to portfolio construction. Three asset research sleeves feed the same cross-asset capital/risk budget.
 
@@ -12,8 +12,8 @@ flowchart LR
     B --> C["03 样本外验证与准入"]
     C --> D{"04 多资产研究策略"}
     D --> S(("股票选股"))
-    D --> O(("期权策略 · 规划"))
-    D --> F(("债券策略 · 规划"))
+    D --> O(("期权历史回放"))
+    D --> F(("国债历史回放"))
     S --> E["05 组合优化 + 统一风险预算 + 对冲"]
     O --> E
     F --> E
@@ -29,49 +29,44 @@ flowchart LR
     R -.-> I
 ```
 
-> Diagram nodes describe a **target architecture**. Alpha research, basic risk modeling and simulated OMS already exist; option/bond selection, unified cross-asset hedge optimization, broker paper adapters and real-time risk monitoring remain incomplete or not implemented.
+> The diagram shows the target architecture. AtlasPM supports historical multi-asset research and a local, operator-approved Paper workflow. Authenticated Paper acceptance, joint hedge optimization and real-time monitoring remain open in [TODO.md](TODO.md).
 
 ## Domain directory organization
 
-Existing `quant/` and `selection/` modules have been moved into specialized
-domains without changing their original source code. The old paths remain
-lightweight module aliases. **Options, bonds, portfolio and hedging** remain
-reserved or not implemented. See [canonical source map](CODE_LAYOUT.md).
+The domain packages hold the implementations. Existing `quant/` and
+`selection/` import paths use lightweight aliases. See [canonical source map](CODE_LAYOUT.md).
 
 ```text
 src/atlaspm/
   data/                  # Real stock market data and quote-quality code
   research/              # Real stock rankers, validations and ML studies
   strategies/equity/     # Real screening, monthly candidates and alpha gate
-  strategies/options/    # RESERVED, not implemented
-  strategies/bonds/      # RESERVED, not implemented
+  strategies/options/    # Historical options and protective put replay
+  strategies/bonds/      # Treasury prices, cash flows and duration replay
   risk/                  # Real risk and margin simulations
   execution/             # Offline synthetic OMS and read-only IBKR
   monitoring/            # Historical performance, audits and local UI
   quant/                 # Core portfolio/backtest + alias wrappers
   selection/             # Alias wrappers for existing imports
   portfolio/             # RESERVED; root portfolio.py shadows package
-  hedging/               # RESERVED, not implemented
+  hedging/               # Historical comparison of equity and hedge combinations
 ```
 
-**Legacy import paths remain importable** as thin module aliases; new modules
-reside in the domains above. The existing root `atlaspm/portfolio.py` still
-shadows the reserved `portfolio/` folder and has not been changed. Existing
-broker execution permissions remain disabled; this is a source move, not a
-functional expansion.
+The unified equity engine lives in `engine/`. The local market-close and IBKR
+Paper commands are documented in [the rebalance guide](quant/MARKET_CLOSE_REBALANCE.md).
 
 ## Code-to-stage mapping and completion boundary
 
 | Stage | Existing code | Current maturity |
 | --- | --- | --- |
-| **01 Data** | `selection/us_market_universe.py`, `us_market_quality.py`, `corporate_action_reconciliation.py` | Partial research; point-in-time delistings missing |
-| **02 Alpha** | `selection/ai_stock_ranker_v2.py`, `consensus_20_screener.py` | Research, **not proven profitable** |
-| **03 Validation** | `selection/stock_walkforward.py`, `alpha_eligibility.py`; `quant/atlas_robustness_audit.py` | Partial; truly new holdout and cost validation needed |
-| **04 Asset sleeves** | `selection/monthly_stock_selection.py` (equities only) | Equities experimental; **options and bonds planned** |
-| **05 Portfolio + hedging** | `quant/mean_variance.py`, `risk_budget.py`, `ibkr_multiasset_budget.py`, `atlas_risknet.py`, `atlas_fusionnet.py` | Offline risk research; unified hedge optimizer planned |
-| **06 Pretrade** | `quant/institutional_gate.py`, `institutional_batch.py` | Synthetic-only / no broker-authorized purchasing power |
-| **07 OMS + reconciliation** | `quant/paper_oms.py`, `broker_reconcile.py` | Synthetic replay only, **no broker order submission** |
-| **08 Monitor + feedback** | `quant/performance.py`, `ibkr_dashboard.py` | Offline snapshots; not real-time portfolio supervision |
+| **01 Data** | `data/historical_universe.py`, `data/stock_fundamentals_import.py`, `market_close.py` | Dated membership, filings and price audit. Complete IPO and delisting coverage is pending. |
+| **02 Alpha** | `research/ai_stock_ranker_v2.py`, `strategies/equity/consensus_20_screener.py` | Stock research with unverified out-of-sample alpha. |
+| **03 Validation** | `research/stock_walkforward.py`, `research/stock_comparison.py` | Costed comparisons with a separate holdout. Broader independent tests remain open. |
+| **04 Asset sleeves** | `strategies/equity/`, `strategies/options/`, `strategies/bonds/` | Equity screening, protective puts and historical Treasury replay. |
+| **05 Portfolio + hedging** | `engine/stock_allocation.py`, `risk/risk_budget.py`, `hedging/multiasset_hedge.py` | Equity allocation and historical hedge comparison. Joint cross-asset optimization is pending. |
+| **06 Pretrade** | `rebalance_workbench.py`, `ibkr_whatif.py`, `ibkr_next_day.py` | Draft generation, Paper estimates and next-session rechecks. |
+| **07 OMS + reconciliation** | `execution/paper_oms.py`, `ibkr_paper_orders.py`, `paper_order_journal.py` | Synthetic OMS and operator-approved IBKR Paper path with authenticated acceptance pending. |
+| **08 Monitor + feedback** | `monitoring/performance.py`, `monitoring/ibkr_dashboard.py` | Offline snapshots and risk review. |
 
 Note: **RiskNet is primarily a risk model**, not proof of stock-selection Alpha. Candidate scores are ordinal model output and are not calibrated expected returns.
 
@@ -88,11 +83,9 @@ The existing `alpha_eligibility` module is only a research candidate allowlist. 
 ### How to inspect the architecture without any market data
 
 ```powershell
-cd C:\Users\Kevin\Desktop\AtlasPM
-git pull --ff-only origin main
 .\.venv\Scripts\python.exe -m atlaspm.framework --format json
 .\.venv\Scripts\python.exe -m atlaspm.framework --format mermaid
-.\.venv\Scripts\python.exe -m unittest tests.test_standard_quant_workflow -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_standard_quant_workflow.py -v
 ```
 
 This command prints an independently testable **machine-readable registry**; it never loads your `local_data/`, broker data, credentials, or model weights, and it never authorizes positions or orders.
@@ -107,10 +100,6 @@ This command prints an independently testable **machine-readable registry**; it 
 
 ## Next development checkpoints
 
-1. Introduce verified historical PIT US equity universe and cross-asset reference-data contracts.
-2. Improve V2 stock ranking relative to the unambiguous momentum baseline; reject tied/negative-IC models.
-3. Develop option and bond *research-only* price/risk adapters with reproducible synthetic fixtures.
-4. Create a no-orders unified risk exposure schema and portfolio plus hedge research preview.
-5. Add costed paper simulation and independent reconciled risk controls before considering any real broker integration.
+See [TODO.md](TODO.md) for the remaining data coverage, strategy research, deployment and Paper acceptance work.
 
 Machine-readable source of truth: `src/atlaspm/framework/workflow.py`; run `python -m atlaspm.framework --format mermaid` to print an automatically derived diagram.

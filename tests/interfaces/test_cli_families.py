@@ -1,4 +1,4 @@
-"""Protect modular CLI handler/parsing grouping without changing 45 commands."""
+"""Protect modular CLI handler and parser grouping."""
 
 from __future__ import annotations
 
@@ -8,22 +8,21 @@ import unittest
 from atlaspm.cli import build_parser
 from atlaspm.commands import broker_cli, quant_cli, selection_cli
 from atlaspm.commands import (
-    stock_data_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli,
-    portfolio_research_cli, quant_backtesting_cli, quant_models_cli,
+    stock_data_cli, stock_history_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli,
+    multiasset_research_cli, portfolio_research_cli, quant_backtesting_cli, quant_models_cli,
     broker_accounts_cli, broker_risk_cli, broker_audits_cli, broker_paper_cli,
 )
 
 class FocusedCLIContractTests(unittest.TestCase):
-    def test_submodules_partition_all_45_commands_exactly(self):
+    def test_submodules_partition_all_family_commands_exactly(self):
         for public, families in (
-            (selection_cli, (stock_data_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli)),
-            (quant_cli, (portfolio_research_cli, quant_backtesting_cli, quant_models_cli)),
+            (selection_cli, (stock_data_cli, stock_history_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli)),
+            (quant_cli, (multiasset_research_cli, portfolio_research_cli, quant_backtesting_cli, quant_models_cli)),
             (broker_cli, (broker_accounts_cli, broker_risk_cli, broker_audits_cli, broker_paper_cli)),
         ):
             with self.subTest(public=public.__name__):
                 self.assertEqual(set().union(*(x.COMMANDS for x in families)), public.COMMANDS)
                 self.assertEqual(sum(len(x.COMMANDS) for x in families), len(public.COMMANDS))
-        self.assertEqual(sum(len(p.COMMANDS) for p in (selection_cli, quant_cli, broker_cli)), 45)
 
     def test_command_parser_contracts_preserved(self):
         parser = build_parser()

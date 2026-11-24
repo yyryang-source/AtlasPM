@@ -73,8 +73,9 @@ class StandardWorkflowContractTests(unittest.TestCase):
         ):
             self.assertIs(report[flag], False)
         sleeves = {s["code"]: s for s in report["asset_sleeves"]}
-        self.assertEqual(sleeves["options"]["capability"], "planned")
-        self.assertEqual(sleeves["bonds"]["capability"], "planned")
+        for name in ("options", "bonds"):
+            self.assertEqual(sleeves[name]["capability"], "partial_research")
+            self.assertTrue(sleeves[name]["existing_modules"])
         self.assertTrue(sleeves["equity"]["existing_modules"])
         self.assertGreaterEqual(len(REQUIRED_GATES), 4)
         self.assertGreaterEqual(len(CROSS_CUTTING_CONTROLS), 5)

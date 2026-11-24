@@ -5,7 +5,7 @@ All command flags, output schemas, error behavior and permissions remain unchang
 
 from __future__ import annotations
 
-from atlaspm.commands import stock_data_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli
+from atlaspm.commands import stock_data_cli, stock_history_cli, stock_models_cli, stock_rules_cli, stock_monthly_cli
 
 COMMANDS = frozenset({
     "stock-alpha-gate",
@@ -23,7 +23,7 @@ COMMANDS = frozenset({
     "stock-sync-market",
     "stock-backtest",
     "stock-screen",
-})
+}) | stock_history_cli.COMMANDS
 
 
 def run(args) -> dict:
@@ -35,6 +35,8 @@ def run(args) -> dict:
         return stock_rules_cli.run(args)
     elif args.command in stock_monthly_cli.COMMANDS:
         return stock_monthly_cli.run(args)
+    elif args.command in stock_history_cli.COMMANDS:
+        return stock_history_cli.run(args)
     raise ValueError("Unsupported selection_cli command")
 
 
@@ -54,5 +56,6 @@ def register_parsers(sub) -> None:
     stock_data_cli.register_stock_sync_market(sub)
     stock_rules_cli.register_stock_backtest(sub)
     stock_rules_cli.register_stock_screen(sub)
+    stock_history_cli.register_parsers(sub)
 
 

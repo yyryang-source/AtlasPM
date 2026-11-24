@@ -5,7 +5,7 @@ All command flags, output schemas, error behavior and permissions remain unchang
 
 from __future__ import annotations
 
-from atlaspm.commands import portfolio_research_cli, quant_backtesting_cli, quant_models_cli
+from atlaspm.commands import multiasset_research_cli, portfolio_research_cli, quant_backtesting_cli, quant_models_cli
 
 COMMANDS = frozenset({
     "analyze",
@@ -22,7 +22,7 @@ COMMANDS = frozenset({
     "ml-model-tournament",
     "atlas-native-backtest",
     "atlas-native-audit",
-})
+}) | multiasset_research_cli.COMMANDS
 
 
 def run(args, *, price_downloader) -> dict:
@@ -32,6 +32,8 @@ def run(args, *, price_downloader) -> dict:
         return quant_backtesting_cli.run(args)
     elif args.command in quant_models_cli.COMMANDS:
         return quant_models_cli.run(args)
+    elif args.command in multiasset_research_cli.COMMANDS:
+        return multiasset_research_cli.run(args)
     raise ValueError("Unsupported quant_cli command")
 
 
@@ -46,6 +48,7 @@ def register_core_parsers(sub) -> None:
     quant_backtesting_cli.register_benchmark_spy(sub)
     quant_backtesting_cli.register_risk_check(sub)
     quant_backtesting_cli.register_backtest_risk(sub)
+    multiasset_research_cli.register_parsers(sub)
 
 
 def register_model_parsers(sub) -> None:

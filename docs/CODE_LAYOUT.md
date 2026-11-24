@@ -1,6 +1,6 @@
 # Canonical code layout
 
-AtlasPM now classifies existing **source files** into specialized domains. The original Python code was moved byte-for-byte; old `atlaspm.selection.*`, `atlaspm.quant.*` and top-level compatibility imports remain available via small module-identity aliases. This is a code-maintenance refactor, **not a new trading system**.
+AtlasPM groups source files by domain. Legacy `atlaspm.selection.*`, `atlaspm.quant.*` and top-level compatibility imports use module-identity aliases for the relocated implementations.
 
 | Package | Functionality | Status |
 | --- | --- | --- |
@@ -15,8 +15,10 @@ AtlasPM now classifies existing **source files** into specialized domains. The o
 | `atlaspm.framework` | Standard research workflow orchestration | Existing |
 | `atlaspm.quant` | Compatibility aliases only; algorithms live in their canonical domains | Compatibility |
 | `atlaspm.selection` | Legacy import aliases | Existing |
-| `strategies.options`, `strategies.bonds` | Planned research | No implementation |
-| `portfolio/`, `hedging/` | Reserved; portfolio.py root alias remains | Reserved namespace; unified equity engine lives in `engine` |
+| `atlaspm.strategies.options` | Historical options and protective put replay | Research |
+| `atlaspm.strategies.bonds` | Treasury pricing and cash flow replay | Research |
+| `atlaspm.hedging` | Historical equity, Treasury and protective put comparisons | Research |
+| `portfolio/` | Reserved for future package use | Unified equity engine lives in `atlaspm.engine` |
 
 ## Migrated source files
 
@@ -64,7 +66,7 @@ AtlasPM now classifies existing **source files** into specialized domains. The o
 - `atlaspm.quant.ibkr_risk_audit_diff` → `atlaspm.monitoring.ibkr_risk_audit_diff`
 - `atlaspm.quant.audit` → `atlaspm.monitoring.audit`
 
-New code should import canonical paths. Existing CLI flags, JSON schemas, model formulas and risk protections have not changed. The Python source files are identical at their new locations; only import compatibility wrappers have been added. `atlaspm/portfolio.py` remains a module that would shadow a same-named Python package; the `portfolio/` folder is not activated as a package. Hedging/options/bonds strategies are not implemented. **Do not infer improved strategy performance or broker authorization from file movement.**
+New code should import canonical paths. `atlaspm/portfolio.py` is the compatibility module for the unified equity engine, and the `portfolio/` directory is reserved. The local workflow entry points and Paper validation scope are listed in [FUNCTIONS.md](FUNCTIONS.md).
 
 ## Maintenance rules
 

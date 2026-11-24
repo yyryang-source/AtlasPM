@@ -10,8 +10,6 @@ alpha model, a live feed, a recommendation, or a broker trade signal.
 From your AtlasPM folder, with Python 3.12+ and its existing `.venv`:
 
 ```powershell
-git fetch origin
-git switch --track origin/feature/stock-screener-v1
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_stock_screener.py" -v
 
@@ -51,6 +49,13 @@ At least **253 observations per symbol through the cutoff date** are needed.
 The last price must be no more than 10 calendar days old by default; 253
 observations must fall within 420 calendar days, with no gap over 14 days.
 Inputs may include rows after the cutoff; these are ignored.
+Add `--require-decision-close` to require a close on `--as-of`, matching the
+price-date rule used by `stock-backtest`.
+
+Use `--universe-history local_data\historical_members.csv` to limit ranks to
+the latest complete membership snapshot available by `--as-of`. In this mode
+the command requires a decision-day close for every member. See the
+[snapshot schema and freshness rules](STOCK_WALKFORWARD.md#supply-historical-membership).
 
 Optional fundamentals CSV format (the following entries are **fictional
 schema examples, not market facts**):
@@ -62,7 +67,9 @@ as_of_date,symbol,sector,market_cap_usd,roe,revenue_growth_yoy,debt_to_equity,fc
 ```
 
 - `as_of_date` **must mean the first date the complete snapshot was publicly
-  available**, not the end of its fiscal quarter and not the date you downloaded it.
+  available by the decision close**, using the next decision-session date for
+  after-close releases. Fiscal quarter ends and download dates do not represent
+  publication dates.
 - Financial ratios use decimals: ROE 25% = `0.25`, FCF yield 6% = `0.06`.
   All five fundamental factor values are required; EV/EBITDA must be positive.
 - Only the latest snapshot for each symbol with `as_of_date <= --as-of` is
@@ -79,6 +86,40 @@ Run with licensed, manually prepared, publication-dated financial data:
 ```
 
 This command **does not fetch or infer fundamentals**.
+
+### Import a normalized annual filing feed
+
+`stock-import-fundamentals` joins verified annual financial statement inputs to
+point-in-time market capitalization. Prepare the filing inputs from annual
+reports or an as-published feed, preserving each original and amended filing
+as a separate row. Retain accession numbers or report URLs as `source_ref`.
+
+```csv
+symbol,sector,accepted_at,filed_date,period_start,period_end,prior_period_end,source_ref,revenue_usd,prior_revenue_usd,net_income_usd,equity_usd,prior_equity_usd,debt_usd,operating_cash_flow_usd,capex_usd,operating_income_usd,depreciation_amortization_usd,cash_usd
+```
+
+Supply amounts in USD without scaling. Use the same fiscal-year definitions
+for current and prior-year amounts. `accepted_at` includes a UTC offset. The
+first eligible close is the first supplied benchmark session after the New York
+acceptance date and on or after `filed_date`. This daily-close policy applies
+to intraday and after-hours filings alike. Provide the market capitalization
+on that exact session using `date,symbol,market_cap_usd,source_ref`. The
+benchmark CSV supplies the calendar, including holidays.
+
+```powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli stock-import-fundamentals --filings local_data\annual_filings.csv --market-caps local_data\historical_market_caps.csv --benchmark-prices local_data\benchmark.csv --output local_data\published_fundamentals.csv
+```
+
+The import computes ROE using average equity, revenue growth using prior-year
+revenue, debt-to-equity using period-end equity, and FCF yield using operating
+cash flow less capex. It estimates EV as market cap plus debt less cash and
+EBITDA as operating income plus depreciation and amortization. Valuations are
+fixed to each emitted snapshot date. Missing exact-date valuations and input
+ratios outside the screener's accepted range appear in the import summary.
+Amendments to an older fiscal period leave newer fiscal periods in effect.
+The output preserves filing and valuation references. SEC documents the source
+fields in its [Financial Statement Data Sets guide](https://www.sec.gov/files/financial-statement-data-sets.pdf)
+and [EDGAR API guide](https://www.sec.gov/search-filings/edgar-application-programming-interfaces).
 
 ## Factor ranking methodology
 
@@ -128,6 +169,7 @@ can all invalidate naive backtest conclusions. No spread or transaction
 costs, borrow costs, liquidity constraints, independent point-in-time data
 audit or unseen out-of-sample performance verification is implemented yet.
 
-**Planned, not included:** historical point-in-time fundamentals ingestion,
-survivorship-safe universe construction, stock-selection walk-forward
-backtesting against SPY and Atlas FusionNet ranking/risk integration.
+Use [stock-backtest](STOCK_WALKFORWARD.md) for rolling historical evaluation of
+these factors against SPY and an equal-weight baseline. For historical
+performance evaluation, supply complete membership including former listings
+and independently verify the input data vintages.
