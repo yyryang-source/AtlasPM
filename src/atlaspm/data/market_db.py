@@ -405,6 +405,12 @@ def register_parser(sub):
     t.add_argument('--plan-only',action='store_true')
     t=actions.add_parser('training-dataset-inspect-v6',help='Verify local research dataset hashes')
     t.add_argument('--dataset-id',required=True)
+    t=actions.add_parser('training-preflight-v61',help='Reconcile actual dataset labels and audit purged fold sample counts')
+    t.add_argument('--dataset-id',required=True)
+    t.add_argument('--minimum-train-rows',type=int,default=1000)
+    t.add_argument('--minimum-test-rows',type=int,default=100)
+    t.add_argument('--memory',default='2GB')
+    t.add_argument('--threads',type=int,default=2)
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -596,6 +602,10 @@ def run(args):
                              horizons=args.horizons,minimum_train_sessions=args.minimum_train_sessions,
                              test_sessions=args.test_sessions,embargo_sessions=args.embargo_sessions,
                              memory=args.memory,threads=args.threads,plan_only=args.plan_only)
+    if args.db_action == 'training-preflight-v61':
+        from atlaspm.research import real_dataset_preflight_v61 as preflight
+        return preflight.run(args.dataset_id,minimum_train_rows=args.minimum_train_rows,
+                             minimum_test_rows=args.minimum_test_rows,memory=args.memory,threads=args.threads)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
