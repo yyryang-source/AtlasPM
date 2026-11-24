@@ -9,7 +9,9 @@ from atlaspm.engine.contracts import finite, timestamp
 HORIZONS = (1, 5, 10, 21, 63)
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False):
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None):
+    if feature_column is not None and not compact:
+        raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     if type(sequence_length) is not int or not 1 <= sequence_length <= 252:
         raise ValueError('INVALID_SEQUENCE_LENGTH')
     if payload.get("mode") != "synthetic" or payload.get("synthetic_fixture") is not True:
@@ -51,7 +53,7 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False):
         observations.append(marks)
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
     if compact:
-        prediction_samples=CompactSamples(dates,horizon,len(features))
+        prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
         valid_indices=array('Q')
     for i in range(max(0,len(observations)-horizon)):
         marks=observations[i]
@@ -79,6 +81,8 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False):
             else:
                 samples.append(sample)
     if compact:
+        if feature_column is not None:
+            feature_column.seal()
         samples=IndexedRows(prediction_samples,valid_indices)
     return dict(feature_names=features,dates=dates,samples=samples,horizon=horizon,
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
