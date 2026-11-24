@@ -333,6 +333,72 @@ def joint_local_review(*, security_id, asset_type, as_of, events, research_rows,
             "trade_authorized":False,"identity_independently_verified":False}
 
 
+# Event classification routes normalized evidence, not guessed vendor schemas.
+_EVENT_TOPICS={
+    "news":("news","sentiment"),"analyst_rating":("analyst",),"earnings_forecast":("analyst","fundamental"),
+    "credit_rating":("credit","bond"),"credit_outlook":("credit","bond"),"credit_watch":("credit","risk"),
+    "credit_withdrawal":("credit","risk"),"default":("credit","risk","bond"),
+    "earnings":("fundamental","financial_statement"),"sec_disclosure":("sec","financial_statement"),
+    "options_flow":("options",),"volume_anomaly":("technical",),"macro_release":("macro","regime"),
+    "rate_decision":("macro","bond","regime"),"index_change":("industry","factor"),
+    "corporate_action":("fundamental","risk"),"position_risk":("risk",),"bond_trade":("bond",),
+}
+
+
+def event_research(event_report):
+    """Generate deterministic, descriptive research contracts from visible events.
+
+    No raw report text, no price prediction, no vendor calls. Unmapped ticker,
+    LEI or CUSIP stays blocked rather than inventing a security identity.
+    The event queue persists only bounded contract identifiers and coverage.
+    """
+    from datetime import timedelta
+    from atlaspm.research.research_contract import contract
+    from atlaspm.research.financial_events import FLAGS,review
+    from atlaspm.research.training_registry import digest
+    if not isinstance(event_report,dict) or any(event_report.get(k) is not v for k,v in FLAGS.items()):
+        raise ValueError("EVENT_RESEARCH_PERMISSION_MISMATCH")
+    cutoff=_timestamp(event_report["as_of"])
+    events=event_report["events"]
+    if not isinstance(events,list) or len(events)>100:
+        raise ValueError("EVENT_RESEARCH_CAPACITY")
+    # Revalidate metadata rather than trusting an imported review.
+    normalized=[{k:e[k] for k in ("provider","source_id","kind","subjects","published_at",
+        "first_available_at","effective_at","evidence_sha256","delivery","expiry_seconds",
+        "received_at","event_id","revision","rights_status")} for e in events]
+    visible=review(normalized,as_of=cutoff.isoformat())["events"]
+    rows=[]
+    blocked=[]
+    for e in visible:
+        if e["expired"]:
+            continue
+        synthetic=e["provider"]=="synthetic"
+        for subject in e["subjects"]:
+            for topic in _EVENT_TOPICS[e["kind"]]:
+                if len(rows)+len(blocked)>=256:
+                    raise ValueError("EVENT_RESEARCH_TASK_CAPACITY")
+                # The event contract has no instrument type. Only synthetic
+                # equity test IDs can be typed locally; real IDs require an
+                # independently verified instrument mapping first.
+                if not synthetic:
+                    blocked.append({"event_revision":e["revision"],"topic":topic,
+                                    "reason":"VERIFIED_INSTRUMENT_MAPPING_REQUIRED"})
+                    continue
+                raw={"security_id":subject,"asset_type":"stock","category":topic,
+                    "kind":"objective","source":"synthetic","model_version":"event_metadata_v1",
+                    "evidence":[{"sha256":e["evidence_sha256"],"available_at":e["first_available_at"],
+                        "received_at":e["received_at"],"source":"synthetic","rights_status":"synthetic_test_only"}],
+                    "generated_at":cutoff.isoformat(),"expires_at":(cutoff+timedelta(seconds=1)).isoformat(),
+                    "horizon_days":1,"expected_return":None,"uncertainty_radius":None,
+                    "risk_factors":["event metadata only; no verified price impact"],
+                    "invalidation":["superseding or expired event"],"synthetic_fixture":True}
+                item=contract(raw,as_of=cutoff.isoformat())
+                rows.append({"research_id":item["research_id"],"topic":topic,"event_revision":e["revision"],
+                             "contract_sha256":digest(item["contract"]),"numeric_eligible":False})
+    return {**FLAGS,"research_tasks":rows,"blocked_tasks":blocked,
+            "network_calls":0,"trade_authorized":False}
+
+
 def offline_model_responses():
     """Exercise the actual request/response schemas without transport or keys.
 

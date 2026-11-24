@@ -182,3 +182,44 @@ class ContinuousTests(unittest.TestCase):
         raw["subjects"]=["conid:123"]
         with self.assertRaisesRegex(ValueError,"synthetic subject"):
             normalize(raw,received_at=row["received_at"])
+
+
+    def test_event_task_routing_persists_research_and_rejects_real_identity_guess(self):
+        now=datetime.now(UTC)-timedelta(minutes=1)
+        rows=[]
+        for kind in ("news","options_flow","credit_rating","analyst_rating","sec_disclosure",
+                     "rate_decision","index_change","volume_anomaly","bond_trade"):
+            rows.append(normalize({"provider":"synthetic","source_id":"SYN:"+kind,"kind":kind,
+                "subjects":["SYN:AAA"],"published_at":now.isoformat(),"first_available_at":now.isoformat(),
+                "effective_at":None,"evidence_sha256":"a"*64,"delivery":"file","expiry_seconds":3600},
+                received_at=now.isoformat()))
+        event_queue.enqueue(rows)
+        self.assertEqual(event_queue.drain(as_of=now.isoformat(),limit=20)["completed"],len(rows))
+        state=event_queue._read_state(event_queue.PATH)
+        tasks=[task for item in state.values() for task in item["report"]["specialist_tasks"]]
+        self.assertTrue({"news","options","credit","analyst","sec","macro","industry","technical","bond","factor"}
+                        <= {t["topic"] for t in tasks})
+        self.assertTrue(all(not t["numeric_eligible"] for t in tasks))
+        event_queue.enqueue(rows)
+        self.assertEqual(event_queue.drain(as_of=now.isoformat())["completed"],0)
+        real=normalize({"provider":"sec","source_id":"real-shaped-fixture","kind":"sec_disclosure",
+            "subjects":["CIK:0000320193"],"published_at":None,"first_available_at":None,"effective_at":None,
+            "evidence_sha256":"b"*64,"delivery":"file","expiry_seconds":3600},received_at=now.isoformat())
+        event_queue.enqueue([real])
+        self.assertEqual(event_queue.drain(as_of=now.isoformat())["completed"],1)
+        state=event_queue._read_state(event_queue.PATH)
+        blocked=[task for item in state.values() for task in item["report"]["blocked_specialist_tasks"]]
+        self.assertTrue(all(t["reason"]=="VERIFIED_INSTRUMENT_MAPPING_REQUIRED" for t in blocked))
+        self.assertEqual(len(blocked),2)
+
+    def test_atomic_write_failure_retries_without_committing_partial_tasks(self):
+        row=fixture()["sessions"][0]["events"][0]
+        event_queue.enqueue([row])
+        before=event_queue.PATH.read_bytes()
+        with patch.object(event_queue,"_atomic_write",side_effect=OSError("injected write failure")):
+            with self.assertRaises(OSError):
+                event_queue.drain(as_of=row["received_at"])
+        self.assertEqual(event_queue.PATH.read_bytes(),before)
+        self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
+        self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],1)
+        self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)

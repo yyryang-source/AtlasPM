@@ -125,9 +125,13 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
                 if provider in RIGHTS_ENV:
                     local_rights(provider,retention=True)
                 report=review([task["event"]],as_of=as_of,holdings=holdings)
+                from atlaspm.research.intelligence import event_research
+                research=event_research(report)
                 task["report"]={"research_requests":report["research_requests"],
                                 "risk_review_requests":report["risk_review_requests"],
-                                "review_sha256":digest(report),"as_of":as_of}
+                                "review_sha256":digest(report),"as_of":as_of,
+                                "specialist_tasks":research["research_tasks"],
+                                "blocked_specialist_tasks":research["blocked_tasks"]}
                 task["state"]="completed"
                 complete+=1
             except (ValueError,TypeError,KeyError):
