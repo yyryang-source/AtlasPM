@@ -137,7 +137,7 @@ def _evaluate(sessions,strategy,execution,*,include_path=False):
 
 def run(payload,market,*,model_config,model_candidates,model_selection_end,
         strategy_holdout_start,strategies,execution,selection_metric="mae",
-        signal_model="selected",ensemble=None,max_validation_drawdown=.25):
+        signal_model="selected",ensemble=None,max_validation_drawdown=.25,leverage_scenarios=None):
     if not isinstance(model_config,dict):
         raise ValueError("INVALID_MODEL_CONFIG")
     validate_panel_metadata(payload,model_config.get("horizon",5),model_config.get("sequence_length",1))
@@ -151,6 +151,10 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
     if not isinstance(execution,dict) or set(execution)-EXECUTION_FIELDS or "initial_cash" not in execution:
         raise ValueError("INVALID_EXECUTION_CONFIG")
     finite(execution["initial_cash"],"initial_cash",minimum=.01)
+    finance=None
+    if leverage_scenarios is not None:
+        from atlaspm.risk.leverage_envelope import envelope
+        finance=envelope(execution["initial_cash"],scenarios=leverage_scenarios)
     if not isinstance(strategies,list) or not 2<=len(strategies)<=32:
         raise ValueError("REQUIRES_2_TO_32_STRATEGIES")
     configs=[_strategy(s) for s in strategies]
@@ -197,7 +201,7 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
     eligible=[t for t in trials if t["eligible"]]
     base={"schema":"atlaspm_synthetic_strategy_closed_loop_v7","selection":selection,
           "strategy_trials":trials,"strategy_selection_rule":"validation_net_sharpe_with_drawdown_cap",
-          "max_validation_drawdown":cap,"model_selection_end":payload["sessions"][model_selection_end]["date"],
+          "max_validation_drawdown":cap,"hypothetical_financing":finance,"model_selection_end":payload["sessions"][model_selection_end]["date"],
           "strategy_holdout_start":payload["sessions"][strategy_holdout_start]["date"],**FLAGS}
     if not eligible:
         return {**base,"status":"NO_VALID_STRATEGY","holdout_evaluated":False}
