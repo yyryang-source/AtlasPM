@@ -806,7 +806,7 @@ the same existing SEC contact User-Agent and shared V5.2 body cache.
 Request budgets count network attempts only; a failed network request
 stops further downloads. For a broad sample omit --ciks, use
 --max-issuers (1..100), and continue with --after-cik only once
-page_complete is true and more_issuers is true. Repeat the same page
+page_advance_allowed is true and more_issuers is true. Repeat the same page
 to finish missing cached bodies. A cache error requires review rather
 than silent replacement. The cursor is lexical over padded historical
 CIKs, not a guarantee of historical listed-security coverage.
@@ -817,10 +817,38 @@ and exchange facts only in the same table row and XBRL context. Unknown
 exchange names, cross-context joins and conflicting ticker observations
 are rejected or marked for review. A filing-date observation is not an
 effective interval or a stable share-class identity. Older filings
-without inline DEI cover facts remain unresolved. The current module
-does not extract untagged legacy cover tables, resolve historical ticker
-reuse, certify corporate actions or import V5.3 claims.
+without inline DEI cover facts remain unresolved. The current module does not resolve historical ticker reuse, certify
+corporate actions or import V5.3 claims.
 
 Reports: local_data/stock_5m/huggingface/quality/certification_v5/identity_v56/latest.json
 and bounded page reports. Body references retain raw SHA-256. No
 historical identity, data rights or training permission is granted.
+
+
+### V5.7–V5.8 legacy cover and lifecycle leads
+
+For documents without inline XBRL tags, the extractor accepts an untagged
+HTML table only when the first row has the exact title-of-class, trading
+symbol and registered-exchange column headers. Each subsequent row must
+have exactly three cells; nested tables, merged cells and inline tagged
+tables are not accepted by this fallback. A two-column pre-ticker-disclosure
+table or a narrative ticker mention does not establish a mapping. Older
+filings frequently lack explicit ticker columns, so this is a limited
+legacy HTML fallback, not a complete 2000–2018 parser. Tagged documents
+never fall back to untagged text to evade context validation.
+
+Historical issuer pages now include CIKs with only registration, exit or
+merger filing leads, even when no 8-K/6-K cover sample is available.
+The additional index query is offline and bounded to 10,000 leads per
+page; use a smaller issuer page if truncated. The report distinguishes
+exit, registration and merger registration forms and exposes
+issuers_without_sampled_cover_filing. All effective dates and stable
+security IDs remain null. Filing dates are not actual listing/delisting
+dates. A registration filing may never become effective, and a Form 15
+does not necessarily establish exchange delisting. No automatic ticker
+change or action certification is attempted.
+
+page_advance_allowed is false for missing index quarters, truncated
+event leads, missing bodies or collection/cache errors. Use this flag
+rather than page_complete alone before advancing a cursor. Reuse the
+same historical SEC index and raw body cache; no index rebuild needed.
