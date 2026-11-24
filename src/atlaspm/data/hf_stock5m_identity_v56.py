@@ -168,19 +168,20 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
     try:
         partitions=cx.execute("SELECT quarter,digest,parser_version,candidate_rows FROM partitions WHERE starts_with(quarter,?) ORDER BY quarter",[str(year)]).fetchall()
         expected=list(ev.quarters(f"{year}-Q1",f"{year}-Q{1 if year==2026 else 4}"))
-        where="filed_date BETWEEN ? AND ? AND form IN ('8-K','6-K') AND cik>?"
+        where="filed_date BETWEEN ? AND ? AND cik>?"
+        eligible=" AND form IN ('8-K','6-K','25','25-NSE','25/A','15-12B','15-12G','15-15D','8-A12B','8-A12G','S-1','S-1/A','F-1','F-1/A','S-4','F-4')"
         params=[f"{year}-01-01",f"{year}-03-31" if year==2026 else f"{year}-12-31",cursor]
         if ids is not None:
             where+=" AND cik IN (SELECT unnest(?))"
             params.append(ids)
-        issuers=[r[0] for r in cx.execute(f"SELECT DISTINCT cik FROM filings WHERE {where} ORDER BY cik LIMIT ?",[*params,max_issuers+1]).fetchall()]
+        issuers=[r[0] for r in cx.execute(f"SELECT DISTINCT cik FROM filings WHERE {where}{eligible} ORDER BY cik LIMIT ?",[*params,max_issuers+1]).fetchall()]
         selected=issuers[:max_issuers]
         events=cx.execute("""SELECT cik,form,filed_date,source_url,quarter FROM filings
             WHERE cik IN (SELECT unnest(?)) AND filed_date BETWEEN ? AND ?
               AND form IN ('25','25-NSE','25/A','15-12B','15-12G','15-15D','8-A12B','8-A12G','S-1','S-1/A','F-1','F-1/A','S-4','F-4')
             ORDER BY cik,filed_date,form,source_url LIMIT 10001""",[selected,*params[:2]]).fetchall() if selected else []
         rows=cx.execute(f"""SELECT quarter,cik,issuer,form,filed_date,source_url FROM filings
-             WHERE {where} AND cik IN (SELECT unnest(?))
+             WHERE {where} AND form IN ('8-K','6-K') AND cik IN (SELECT unnest(?))
              QUALIFY row_number() OVER (PARTITION BY cik,quarter ORDER BY filed_date DESC,source_url)=1
              ORDER BY cik,quarter""",[*params,selected]).fetchall() if selected else []
     finally:
@@ -190,6 +191,7 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
             "next_after_cik":selected[-1] if len(issuers)>max_issuers else None,
             "missing_index_quarters":sorted(set(expected)-{p[0] for p in partitions}),
             "index_partition_sha256":ev._sha(json.dumps(partitions,separators=(",",":")).encode()),
+            "issuers_without_sampled_cover_filing":sorted(set(selected)-{r[1] for r in rows}),
             "event_index_truncated":len(events)>10000,
             "event_index_leads":[{"cik":c,"form":f,"filed_date":d.isoformat(),"source_url":u,"quarter":q,
                                   "kind":"EXIT_FILING_LEAD" if f.startswith(("25","15-")) else "MERGER_REGISTRATION_LEAD" if f in ("S-4","F-4") else "REGISTRATION_FILING_LEAD",
