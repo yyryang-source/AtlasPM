@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -121,6 +121,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         raise ValueError('EPOCH_CHECKPOINT_REQUIRES_FOLD_STORE')
     if epoch_checkpoint and not any(m in SEQUENCE_MODELS for m in models):
         raise ValueError('EPOCH_CHECKPOINT_REQUIRES_SEQUENCE_MODEL')
+    if type(incremental_ridge) is not bool or (incremental_ridge and set(models)-{'ridge','historical_mean'}):
+        raise ValueError('INCREMENTAL_RIDGE_REQUIRES_LINEAR_BASELINES')
     artifact_store=None
     if model_artifact_path is not None:
         from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
@@ -156,6 +158,12 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if incremental_ridge:
+        config['incremental_ridge']=True
+    if regime_ensemble is not None:
+        config['regime_ensemble']=regime_ensemble
+    if monitoring is not None:
+        config['monitoring']=monitoring
     if epoch_checkpoint:
         config['epoch_checkpoint']=True
     if artifact_store is not None:
@@ -169,10 +177,17 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         store=FoldStore(checkpoint_path,dict(dataset=fingerprint,config=config,
                        dependencies=dependency_versions,source_hashes=source_hashes,
                        runtime=platform.python_version(),platform=platform.platform()))
+    incremental=None
+    if incremental_ridge:
+        from atlaspm.research.training_models import ExpandingRidge
+        incremental=ExpandingRidge(len(panel['feature_names']))
     resumed=0
     # Validate resource settings even when every fold is cached.
     FoldArrays(array_budget_mib,spill_dir)
     for fold_index,fold in enumerate(folds):
+        added=None
+        if incremental is not None:
+            added=incremental.update_prefix(IndexedRows(samples,fold['train']))
         cached=store.load(fold_index) if store is not None else None
         if cached is not None:
             if set(cached["predictions"])!=set(models):
@@ -203,21 +218,25 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             fold_predictions={m:[] for m in models}
             train_rows=IndexedRows(samples,fold["train"])
             test_rows=IndexedRows(samples,fold["test"])
-            x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
-            y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
-            mean=x.mean(axis=0)
-            x-=mean
-            # Compute variance on centered data in bounded blocks, not a full-size temporary.
-            squared=np.zeros(x.shape[1],dtype=np.float64)
-            for start in range(0,len(x),4096):
-                block=x[start:start+4096]
-                squared+=np.einsum("ij,ij->j",block,block)
-            scale=np.sqrt(squared/len(x))
-            scale=np.where(scale>1e-12,scale,1.)
-            x/=scale
-            z=x
-            intercept=float(y.mean())
-            coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
+            x=y=z=block=None
+            if incremental is not None:
+                mean,scale,coef,intercept=incremental.solve(alpha)
+            else:
+                x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
+                y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
+                mean=x.mean(axis=0)
+                x-=mean
+                # Compute variance on centered data in bounded blocks, not a full-size temporary.
+                squared=np.zeros(x.shape[1],dtype=np.float64)
+                for start in range(0,len(x),4096):
+                    block=x[start:start+4096]
+                    squared+=np.einsum("ij,ij->j",block,block)
+                scale=np.sqrt(squared/len(x))
+                scale=np.where(scale>1e-12,scale,1.)
+                x/=scale
+                z=x
+                intercept=float(y.mean())
+                coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
             test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
             test-=mean
             test/=scale
@@ -280,6 +299,9 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                               coefficients=coef.tolist(),intercept=intercept,
                               model_settings=dict(model_settings),
                               array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
+            if incremental is not None:
+                audit[-1]["incremental_training_rows_added"]=added
+                audit[-1]["incremental_training_rows_total"]=incremental.count
             if artifact_store is not None:
                 audit[-1]["model_artifact_ids"]=artifact_ids
             if store is not None:

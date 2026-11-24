@@ -179,3 +179,58 @@ def load_estimator_predictor(name,weights,feature_count):
             model.load_model(str(path),format="json")
         return model.predict
     raise ValueError("UNKNOWN_OPTIONAL_MODEL")
+
+
+class ExpandingRidge:
+    """Exact expanding-window sufficient statistics, up to floating-point rounding.
+
+    Each matured row is consumed once. Batch-combined centered moments avoid
+    catastrophic cancellation from raw second-moment subtraction.
+    """
+    def __init__(self,features):
+        import numpy as np
+        self.count=0
+        self.mean=np.zeros(features,dtype=np.float64)
+        self.target_mean=0.
+        self.scatter=np.zeros((features,features),dtype=np.float64)
+        self.cross=np.zeros(features,dtype=np.float64)
+
+    def update_prefix(self,rows,*,batch_size=4096):
+        import numpy as np
+        if len(rows)<self.count:
+            raise ValueError("NONEXPANDING_RIDGE_PREFIX")
+        initial=self.count
+        for start in range(initial,len(rows),batch_size):
+            stop=min(start+batch_size,len(rows))
+            batch=[rows[i] for i in range(start,stop)]
+            x=np.asarray([r["x"] for r in batch],dtype=np.float64)
+            y=np.asarray([r["y"] for r in batch],dtype=np.float64)
+            if not np.isfinite(x).all() or not np.isfinite(y).all():
+                raise ValueError("INVALID_INCREMENTAL_RIDGE_INPUT")
+            n=len(x)
+            mean=x.mean(axis=0)
+            target=float(y.mean())
+            dx=mean-self.mean
+            dy=target-self.target_mean
+            combined=self.count+n
+            factor=self.count*n/combined
+            x-=mean
+            y-=target
+            self.scatter+=x.T@x+factor*np.outer(dx,dx)
+            self.cross+=x.T@y+factor*dx*dy
+            self.mean+=dx*n/combined
+            self.target_mean+=dy*n/combined
+            self.count=combined
+        return self.count-initial
+
+    def solve(self,alpha):
+        import numpy as np
+        if not self.count:
+            raise ValueError("EMPTY_INCREMENTAL_RIDGE")
+        scale=np.sqrt(np.maximum(np.diag(self.scatter)/self.count,0.))
+        scale=np.where(scale>1e-12,scale,1.)
+        gram=self.scatter/scale[:,None]/scale[None,:]
+        coef=np.linalg.solve(gram+alpha*np.eye(len(scale)),self.cross/scale)
+        if not np.isfinite(coef).all():
+            raise ValueError("INVALID_INCREMENTAL_RIDGE_OUTPUT")
+        return self.mean.copy(),scale,coef,self.target_mean

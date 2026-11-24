@@ -131,3 +131,7 @@ Set `"monitoring": {"window_dates": 30, "minimum_dates": 10, "coverage": 0.9, "b
 ### Market-state-conditioned experts
 
 Opt in with `"regime_ensemble": {"market": {"lookback": 20, "trend_threshold": 0.02, "volatility_threshold": 0.25}, "weights": {"minimum_dates": 5, "window_dates": 20}}`. A synthetic equal-weight shared-security close proxy classifies warmup, uptrend, downtrend, sideways and high volatility. The ensemble reuses existing model experts, calibrates each state's mixture from matured errors in that state, and falls back to global weights until sufficient history exists. No future prices enter the regime classifier. This is a regime-conditioned mixture, not independently fitted regime-specific models or a validated market index.
+
+### Incremental expanding-window Ridge
+
+Use `"incremental_ridge": true` with `"models": ["ridge", "historical_mean"]`. The training engine updates centered covariance and target cross-moments only for newly admitted matured rows, then solves the same fold-local standardized Ridge objective without retaining a full training matrix. This is an expanding-window sufficient-statistics update, not incremental neural/tree fitting. Replaying completed fold checkpoints reconstructs the moments in chronological order. Floating-point differences from full refits are tested within numerical tolerance. The feature matrix and label availability rules are unchanged.
