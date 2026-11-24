@@ -114,10 +114,15 @@ def validate(row, checked):
     if not isinstance(r["evidence_sha256"],str) or not SHA.fullmatch(r["evidence_sha256"]):
         raise ValueError("Invalid evidence SHA-256")
     path=private_path(Path(r["evidence_path"]),exists=True)
-    # Do not allow an extracted V5.2 hint to masquerade as primary evidence.
-    hint_dir=private_path(ROOT/"filings_v52"/"hints")
-    if path.is_relative_to(hint_dir):
-        raise ValueError("V5.2 text hints are not primary source evidence")
+    # Within our own evidence tree, only raw content-addressed bodies or
+    # collector objects can be cited. Reports, queues, hints and manifests
+    # are derived artifacts, not independent source bytes.
+    root=private_path(ROOT)
+    if path.is_relative_to(root):
+        raw_roots=(private_path(ROOT/"filings_v52"/"bodies"),
+                   private_path(ROOT/"collector"/"objects"))
+        if path.parent not in raw_roots or path.name!=r["evidence_sha256"]+".bin":
+            raise ValueError("Pipeline reports and hints are not primary source evidence")
     key=str(path)
     if key not in checked:
         checked[key]=fingerprint(path)["sha256"]
@@ -151,6 +156,8 @@ def ingest(filename):
     added=0
     total=0
     with closing(_db()) as cx, cx:
+        cx.execute("BEGIN IMMEDIATE")
+        _verify_ledger(cx)
         with path.open(encoding="utf-8-sig") as handle:
             for line_no,line in enumerate(handle,1):
                 if not line.strip():
@@ -171,6 +178,30 @@ def ingest(filename):
     return {"schema":"atlaspm_security_master_ingest_v53",**v4.GUARDS,
             "claims_read":total,"claims_added":added,"claims_reused":total-added,
             "status":"REVIEWED_ASSERTIONS_IMPORTED"}
+
+
+def _verify_ledger(cx):
+    # Validate metadata before the date filter: changing known_date alone
+    # must not make a corrupted claim disappear from a historical snapshot.
+    for key,kind,record,family,known,raw in cx.execute(
+            "SELECT claim_id,record_type,record_id,source_family,known_date,claim_json FROM claims"):
+        try:
+            row=json.loads(raw)
+            if (not isinstance(row,dict) or set(row)!=FIELDS or _canonical(row)!=raw
+                    or ev._sha(raw.encode())!=key
+                    or (row["record_type"],row["record_id"],row["source_family"],row["known_date"])!=(kind,record,family,known)):
+                raise ValueError("Claim digest or metadata mismatch")
+            if kind not in TYPES or row["state"] not in ("ASSERTED","RETRACTED"):
+                raise ValueError("Unknown claim type or state")
+            _date(known)
+            for field in ("record_id","source_family","reviewer"):
+                _token(row[field])
+            if row["state"]=="ASSERTED" and _payload(kind,row["payload"])!=row["payload"]:
+                raise ValueError("Noncanonical claim payload")
+            if row["state"]=="RETRACTED" and row["payload"] is not None:
+                raise ValueError("Invalid retraction")
+        except (ValueError,TypeError,KeyError) as exc:
+            raise ValueError("Historical claim ledger integrity failure") from exc
 
 
 def _groups(cx,as_of):
@@ -220,6 +251,8 @@ def snapshot(as_of,trade_date=None):
     checked={}
     retracted=0
     with closing(_db()) as cx:
+        cx.execute("BEGIN")
+        _verify_ledger(cx)
         for (kind,key),rows in _groups(cx,as_of):
             result,reason=_resolve(rows,checked)
             if reason=="RETRACTED":
