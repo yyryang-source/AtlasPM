@@ -332,3 +332,52 @@ holdout metrics, weight history and retraining review requests rather
 than duplicate prediction arrays. The V6 real dataset is still blocked
 from this synthetic runner. Full certification, economic strategy
 evaluation and deployment controls are separate prerequisites.
+
+
+## Synthetic forecast-to-strategy closed loop (V7 integration)
+
+Run the integrated model selection, portfolio policy competition and
+next-open cash replay with:
+
+~~~powershell
+& $py -m atlaspm.research.strategy_closed_loop --file local_data/closed_loop.json
+~~~
+
+Request keys: payload (existing synthetic training panel); market (mode
+synthetic, synthetic_fixture true, sectors mapping, sessions containing
+date, open_at, close_at, source synthetic, open/close symbol-price
+maps and optional volume); model_config; model_candidates (existing
+tournament candidates); model_selection_end and strategy_holdout_start
+(zero-based session indices); strategies (2–32 distinct dictionaries
+with top_k, rebalance_sessions, cash_reserve and optional optimizer);
+execution (initial_cash, optional fee_bps, slippage_bps,
+settlement_sessions and execution_policy). Optional selection_metric,
+signal_model (selected or adaptive_ensemble), ensemble and
+max_validation_drawdown. Use the same explicitly synthetic fixed
+universe of at most 20 names and identical closing marks in both
+inputs. No externally supplied signals are accepted.
+
+The three stages are model selection on the first prefix, strategy
+competition on a subsequent validation interval and selected policy
+only on the final holdout. Strategy trials use actual simulated net
+returns and a validation drawdown cap, choosing maximum zero-risk-free
+Sharpe among eligible trials. Cash starts fresh for every evaluation.
+The chosen forecast is converted to close-available synthetic signals,
+then executed at the next supplied open. Costs, settlement, integer
+shares and rolling allocation use existing replay code. Empty forecast
+sessions explicitly hold existing positions; this is necessary because
+the trainer censors final horizon sessions. The original replay default
+still rejects empty signals. A price-only fractional equal-weight
+buy-and-hold benchmark is aligned to the evaluation window. No final
+liquidation is assumed. The drawdown cap is a selection filter, not
+a guaranteed future loss limit.
+
+No candidate strategy uses holdout returns to select its parameters.
+Only the selected policy runs on the final interval. A failed holdout
+does not trigger a fallback search. The existing seven rolling allocation
+methods may be requested subject to their input and feasibility checks.
+This cash-only synthetic integration does not connect to the
+institutional OMS, enable leverage or independently verify broker margin.
+It demonstrates an offline research loop, not live autonomous trading
+or real-data profitability. Real model training, verified identity,
+corporate actions, data rights and deployment approval remain blocked.
