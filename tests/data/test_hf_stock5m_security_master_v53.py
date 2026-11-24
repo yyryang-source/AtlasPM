@@ -89,6 +89,24 @@ class SecurityMasterTests(unittest.TestCase):
         Path("local_data/B.txt").write_text("tampered",encoding="utf-8")
         self.assertEqual(m.snapshot("2020-01-02")["unresolved"][0]["reason"],"EVIDENCE_HASH_MISMATCH")
 
+    def test_ledger_metadata_tampering_before_date_filter(self):
+        from contextlib import closing
+        self.ingest(self.pair("listing",self.identity()))
+        with closing(m._db()) as cx,cx:
+            cx.execute("UPDATE claims SET known_date='2030-01-01'")
+        with self.assertRaisesRegex(ValueError,"ledger integrity failure"):
+            m.snapshot("2020-01-02")
+
+    def test_derived_report_cannot_be_primary_evidence(self):
+        path=m.ROOT/"identity_v56"/"latest.json"
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text("derived report",encoding="utf-8")
+        claim=self.claim("listing",self.identity(),"A")
+        claim.update(evidence_path=str(path),evidence_sha256=ev._sha(path.read_bytes()))
+        with self.assertRaisesRegex(ValueError,"not primary source evidence"):
+            self.ingest([claim])
+        self.assertEqual(m.inventory()["claim_counts"],{})
+
     def test_atomic_rejection(self):
         bad=self.claim("bad",self.identity(),"B")
         bad["evidence_sha256"]="0"*64
