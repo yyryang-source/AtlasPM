@@ -1,5 +1,6 @@
 """Continuous offline lifecycle and single-queue controls."""
 from datetime import UTC,datetime,timedelta
+import importlib.util
 import os
 from pathlib import Path
 import tempfile
@@ -162,8 +163,8 @@ class ContinuousTests(unittest.TestCase):
         self.assertFalse(result["trade_authorized"])
 
 
-    @unittest.skipUnless(__import__("importlib").util.find_spec("scipy") and
-                         __import__("importlib").util.find_spec("pandas_market_calendars"),
+    @unittest.skipUnless(importlib.util.find_spec("scipy") and
+                         importlib.util.find_spec("pandas_market_calendars"),
                          "portfolio/calendar extras required")
     def test_offline_entry_real_modules_and_isolated_fixture(self):
         out=orchestrator.offline_release(checkpoint="local_data/rc.continuous.json")

@@ -552,3 +552,77 @@ No paid credentials required. Keep #94 frozen, formal training/backtest and
 automatic live disabled. Do not treat earlier CI as current acceptance.
 
 Multiasset position review reuses institutional ledger valuation with synthetic option multipliers, signed delta-dollar exposure, gamma/vega illustrations and Treasury DV01, financing-cost assumptions and explicit NO_TRADE. No option/bond sizing or verified margin/credit approval; no real execution.
+
+
+## Offline Release Candidate integration batch (not yet approved)
+
+Starting head 6e98ae2: actual Windows full optional suite 1098/1100,
+one assertion failure and one error, zero skips. The prior c4bb1c2
+full Windows suite was 1088/1090 with the same failures. Fix 14c112e
+preserves the original assertions: revision-event means include only new
+matched report receipts, not unchanged carried-forward forecasts; genuine
+new reiterations count zero. Consensus retains all comparable forecasts.
+The OMS-to-Holding adapter converts only finite exactly integral whole-share
+values (rejects fractional, negative, boolean, nonfinite or oversized values).
+No change to Holding's strict contract, account risk policy or order limits.
+
+The unified entry is:
+```powershell
+python -m atlaspm.framework.orchestrator offline
+```
+Uses isolated synthetic event queue namespace, actual existing event
+deduplication, NYSE calendar, joint evidence review, experimental fusion,
+continuous replay with next-session fills, position stop, settlement and
+attribution, checkpoint rerun, existing independent OMS cycle and existing
+matured-label learning monitor. Synthetic events use an explicit synthetic
+provider and synthetic subject, never a vendor identity. Fixture model
+request/response schemas for all three providers are exercised without
+credentials or transport; a separate integration test runs actual dispatch
+against an injected in-memory opener, including dedup, budget and malformed
+response. Neither is real inference. Current continuous path uses fixed
+synthetic forecasts and existing cash replay; it is not a live OMS,
+a general automatic multiasset execution engine, or trained AI performance.
+Timing fields are actual process CPU/wall measurements only when executed;
+production CPU/RSS/disk/throughput remain unverified. The local stop latch
+is checked between stages, not a broker cancellation or mid-transaction
+interrupt. No release approval returned by the fixture even on PASS.
+
+CI now requires at least 1105 executed successful tests on the full Windows
+gate, with zero skips, and runs the unified offline command on both the
+Windows and Linux full dependency gates. Expected 1105 = 1100 + 5 new
+test methods; do not treat as measured until the exact head passes.
+Use same Windows review checkout with --minimum-passed 1105 then
+python -m atlaspm.framework.orchestrator offline. No real credentials.
+If checkpoint conflicts after a version/fixture change, use a new explicit
+local checkpoint ending .continuous.json; do not remove old data silently.
+
+### Consolidated local configuration and subsequent live verification
+
+Use existing API management inventory and earlier designated provider
+documentation above; this is not a purchase instruction. Keep all credentials
+in a local OS-vault launcher/environment; do not put values in Git or logs.
+Set nonsecret contract reference variables only after confirming rights.
+Every license must separately cover acquisition, archive retention,
+machine processing, third-party AI transmission and training.
+
+| Provider | Required local preparation | Actual connection step after permission |
+| --- | --- | --- |
+| IBKR | Local Client Portal/TWS session, Paper account and market data entitlements; ATLASPM_IBKR_MARKET_DATA_RIGHTS | Read-only account, contract mapping, quotes, Greeks, subscription limits, What-If; human-approved Paper lifecycle only |
+| Yahoo Finance | ATLASPM_YAHOO_NEWS_RIGHTS; licensed feed specification and retention rights | Authorized feed/file ingestion; no guessed URL |
+| Bloomberg | ATLASPM_BLOOMBERG_NEWS_RIGHTS, ATLASPM_BLOOMBERG_RESEARCH_RIGHTS plus explicit retention rights, enterprise delivery entitlement | Licensed news and third-party research schema/receipt smoke |
+| Unusual Whales | UNUSUAL_WHALES_API_KEY (check actual gateway key name in inventory), ATLASPM_UW_RIGHTS, ATLASPM_UW_MAX_REQUESTS | One bounded flow request then context/units/coverage checks |
+| Investment banks | ATLASPM_INVESTMENT_BANKS_RIGHTS and corresponding document RESEARCH_RIGHTS / RETENTION | Licensed original report import and identity/PIT validation; Bloomberg preferred |
+| XpressAPI (S&P/Moody's/Fitch) | XPRESSAPI_TOKEN or approved local username/password, token expiry, ATLASPM_XPRESSAPI_RIGHTS, ATLASPM_XPRESSAPI_MAX_REQUESTS | One rating scope request, independent publication/basis/coverage review |
+| S&P DJI/MSCI/FTSE Russell | Corresponding ATLASPM_*_RIGHTS and documented authorized delivery | Licensed normalized index-event import |
+| SEC EDGAR | ATLASPM_SEC_USER_AGENT | Companyfacts and disclosures, fair-access rate, source/receipt audit |
+| FRED/Federal Reserve | FRED_API_KEY; official public policy documents | Date vintage, publication and revision validation |
+| Treasury FiscalData | Public official feed; no token | Bounded public auction check, not market quotes |
+| FINRA/MSRB | FINRA_CLIENT_ID / FINRA_CLIENT_SECRET, ATLASPM_FINRA_RIGHTS / MAX_REQUESTS, MSRB authorized data delivery | Token/auth smoke only where documented, then licensed dataset schema |
+| OpenAI/Claude/Gemini | OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY, configured model IDs, explicit approved public excerpts | Single bounded manual inference per provider; actual usage and rights audit |
+| Existing HF/Massive/local archive | No duplicate download; MASSIVE_API_KEY only if optional historical reference authorized; archive rights review | Independent identity/action/PIT and performance audit |
+
+Provider inventory is authoritative for actual implemented env names;
+pricing, entitlement, quota, retention and API addresses must be confirmed
+from supplier agreement and official documentation before paid activation.
+No credentials supplied or real calls made in this batch. PR #94 remains
+frozen, formal training, formal backtest and automatic live remain disabled.

@@ -105,3 +105,27 @@ class IntelligenceTests(unittest.TestCase):
         self.assertIn("random_forest", report["local"])
         self.assertTrue(all(not v["connection_verified"] for v in report["external"].values()))
         self.assertFalse(report["live_execution_enabled"])
+
+
+    def test_joint_dispatch_three_controlled_transports_budget_and_failure(self):
+        # Existing real request path with injected opener; never touches network.
+        responses=[self.response(p) for p in ("openai","anthropic","gemini")]
+        # A malformed fourth reply is blocked; the duplicate first task must
+        # not result in a second billable request.
+        responses.append({"status":"incomplete"})
+        def respond(request, timeout):
+            self.requests.append(request)
+            return BytesIO(json.dumps(responses.pop(0)).encode())
+        gateway=Gateway(opener=respond,sleep=lambda _:None)
+        tasks=[{"kind":"public","provider":p,"model":"configured-model","topic":"sec",
+                "as_of":"2020-01-02T00:00:00Z","evidence":self.evidence,"max_tokens":128}
+               for p in ("openai","anthropic","gemini")]
+        tasks.extend([dict(tasks[0]),{**tasks[0],"model":"different-fixture-model"}])
+        with patch.dict(os.environ,self.env):
+            result=ai.dispatch_tasks(tasks,external_output_budget=640,allow_external=True,gateway=gateway)
+        self.assertEqual(len(self.requests),4)
+        self.assertEqual(result["unique_tasks"],4)
+        self.assertEqual([x["status"] for x in result["tasks"]],
+                         ["completed","completed","completed","completed","blocked"])
+        self.assertFalse(result["broker_order_submission_enabled"])
+        self.assertIsNone(result["actual_cost_usd"])
