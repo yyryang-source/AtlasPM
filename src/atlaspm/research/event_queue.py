@@ -16,6 +16,7 @@ from atlaspm.research.training_registry import digest
 PATH=Path("local_data/runs/financial_event_queue.json")
 MAX_BYTES=8*1024*1024
 MAX_ITEMS=1000
+CONTROL_KEY="__system_control__"
 
 
 def _read_state(path):
@@ -80,7 +81,7 @@ def enqueue(events, *, path=PATH):
     return _transaction(path,add)
 
 
-def drain(*, as_of, holdings=(), limit=20,path=PATH):
+def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
     """At most limit deterministic reviews per call; atomic commit or retry.
     Process restart resumes pending items. No claim of exactly-once external
     delivery; no external side effect is allowed here.
@@ -92,7 +93,14 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH):
     if cutoff>datetime.now(UTC):
         raise ValueError("FUTURE_EVENT_DRAIN")
     def process(items):
-        visible=[(k,v) for k,v in items.items() if _time(v["event"]["received_at"])<=cutoff]
+        control=items.get(CONTROL_KEY,{})
+        if control.get("stopped") or control.get("manual_takeover"):
+            return {**FLAGS,"status":"PAUSED","completed":0,"pending":sum(t.get("state")=="pending" for t in items.values())}
+        if schedule is not None and control.get("last_tick")==schedule["tick_id"]:
+            return {**FLAGS,"status":"DUPLICATE_TICK","completed":0,"pending":sum(t.get("state")=="pending" for t in items.values())}
+        if schedule is not None and control.get("last_as_of") and cutoff<_time(control["last_as_of"]):
+            raise ValueError("NONMONOTONIC_SYSTEM_TICK")
+        visible=[(k,v) for k,v in items.items() if k!=CONTROL_KEY and _time(v["event"]["received_at"])<=cutoff]
         latest={}
         for key,task in visible:
             event=task["event"]
@@ -127,9 +135,13 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH):
                 if task["attempts"]>=3:
                     task["state"]="failed"
                 failed+=1
-        return {**FLAGS,"completed":complete,"failed_attempts":failed,"superseded":superseded,
-                "pending":sum(t["state"]=="pending" for t in items.values()),
-                "quarantined":sum(t["state"]=="failed" for t in items.values())}
+        result={**FLAGS,"status":"REVIEWED","completed":complete,"failed_attempts":failed,"superseded":superseded,
+                "pending":sum(t.get("state")=="pending" for t in items.values()),
+                "quarantined":sum(t.get("state")=="failed" for t in items.values())}
+        if schedule is not None:
+            items[CONTROL_KEY]={**control,"last_tick":schedule["tick_id"],"last_as_of":cutoff.isoformat(),
+                                "phase":schedule["phase"],"last_result":result}
+        return result
     return _transaction(path,process)
 
 
