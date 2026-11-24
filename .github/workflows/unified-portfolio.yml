@@ -1,0 +1,46 @@
+name: Unified Portfolio Engine research-only
+
+on:
+  push:
+    branches:
+      - feature/unified-portfolio-engine-v1
+  pull_request:
+    paths:
+      - 'src/atlaspm/engine/**'
+      - 'src/atlaspm/commands/portfolio_engine_cli.py'
+      - 'src/atlaspm/cli.py'
+      - 'tests/test_unified_portfolio_engine.py'
+      - 'examples/unified_portfolio_synthetic.json'
+      - 'pyproject.toml'
+      - '.github/workflows/unified-portfolio.yml'
+
+concurrency:
+  group: unified-portfolio-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-portfolio:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install portfolio dependencies
+        run: python -m pip install -e ".[portfolio]"
+      - name: Compile engine and CLI
+        run: python -m compileall -q src/atlaspm/engine src/atlaspm/commands/portfolio_engine_cli.py src/atlaspm/cli.py
+      - name: Synthetic OMS and risk integration tests
+        run: python -m unittest discover -s tests -p "test_unified_portfolio_engine.py" -v
+      - name: Legacy quant OMS optimizer performance regressions
+        run: python -m unittest discover -s tests/quant -p "test_paper_oms.py" -v
+      - name: Command smoke test
+        run: python -m atlaspm.cli portfolio-engine --file examples/unified_portfolio_synthetic.json

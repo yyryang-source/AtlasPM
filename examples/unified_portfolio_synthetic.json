@@ -1,0 +1,277 @@
+{
+  "mode": "synthetic",
+  "synthetic_fixture": true,
+  "as_of": "2026-11-20T21:00:00Z",
+  "research_only": true,
+  "live_execution_enabled": false,
+  "broker_order_submission_enabled": false,
+  "account": {
+    "account_id": "SYN-CASH-001",
+    "account_type": "cash",
+    "settled_cash": 10000,
+    "margin_debt": 0,
+    "positions": [
+      {
+        "symbol": "AAA",
+        "sector": "Technology",
+        "shares": 100,
+        "mark_price": 100
+      },
+      {
+        "symbol": "BBB",
+        "sector": "Healthcare",
+        "shares": 100,
+        "mark_price": 100
+      }
+    ]
+  },
+  "signals": [
+    {
+      "symbol": "AAA",
+      "security_id": "SYN:AAA",
+      "identity_source": "synthetic",
+      "sector": "Technology",
+      "model_rank": 1,
+      "factor_score": 0.83,
+      "model_version": "synthetic-v1",
+      "generated_at": "2026-11-20T20:30:00Z",
+      "available_at": "2026-11-20T20:45:00Z",
+      "data_available_at": "2026-11-20T20:20:00Z",
+      "expires_at": "2026-11-20T22:00:00Z",
+      "data_source": "synthetic",
+      "data_quality": "synthetic_test_only",
+      "research_eligible": true,
+      "model_approved_for_training": false
+    },
+    {
+      "symbol": "BBB",
+      "security_id": "SYN:BBB",
+      "identity_source": "synthetic",
+      "sector": "Healthcare",
+      "model_rank": 2,
+      "factor_score": 0.74,
+      "model_version": "synthetic-v1",
+      "generated_at": "2026-11-20T20:30:00Z",
+      "available_at": "2026-11-20T20:45:00Z",
+      "data_available_at": "2026-11-20T20:20:00Z",
+      "expires_at": "2026-11-20T22:00:00Z",
+      "data_source": "synthetic",
+      "data_quality": "synthetic_test_only",
+      "research_eligible": true,
+      "model_approved_for_training": false
+    }
+  ],
+  "market": {
+    "symbols": [
+      "AAA",
+      "BBB"
+    ],
+    "covariance": [
+      [
+        0.04,
+        0.01
+      ],
+      [
+        0.01,
+        0.09
+      ]
+    ],
+    "expected_returns": {
+      "AAA": 0.1,
+      "BBB": 0.08
+    },
+    "betas": {
+      "AAA": 1.1,
+      "BBB": 0.65
+    },
+    "scenario_returns": [
+      [
+        -0.008571,
+        -0.006667
+      ],
+      [
+        -0.005714,
+        -0.003333
+      ],
+      [
+        -0.002857,
+        0
+      ],
+      [
+        0,
+        0.003333
+      ],
+      [
+        0.002857,
+        0.006667
+      ],
+      [
+        0.005714,
+        -0.006667
+      ],
+      [
+        0.008571,
+        -0.003333
+      ],
+      [
+        -0.008571,
+        0
+      ],
+      [
+        -0.005714,
+        0.003333
+      ],
+      [
+        -0.002857,
+        0.006667
+      ],
+      [
+        0,
+        -0.006667
+      ],
+      [
+        0.002857,
+        -0.003333
+      ],
+      [
+        0.005714,
+        0
+      ],
+      [
+        0.008571,
+        0.003333
+      ],
+      [
+        -0.008571,
+        0.006667
+      ],
+      [
+        -0.005714,
+        -0.006667
+      ],
+      [
+        -0.002857,
+        -0.003333
+      ],
+      [
+        0,
+        0
+      ],
+      [
+        0.002857,
+        0.003333
+      ],
+      [
+        0.005714,
+        0.006667
+      ],
+      [
+        0.008571,
+        -0.006667
+      ],
+      [
+        -0.008571,
+        -0.003333
+      ],
+      [
+        -0.005714,
+        0
+      ],
+      [
+        -0.002857,
+        0.003333
+      ],
+      [
+        0,
+        0.006667
+      ],
+      [
+        0.002857,
+        -0.006667
+      ],
+      [
+        0.005714,
+        -0.003333
+      ],
+      [
+        0.008571,
+        0
+      ],
+      [
+        -0.008571,
+        0.003333
+      ],
+      [
+        -0.005714,
+        0.006667
+      ]
+    ]
+  },
+  "constraints": {
+    "method": "equal_weight",
+    "max_name_weight": 0.55,
+    "sector_limits": {
+      "Technology": 0.6,
+      "Healthcare": 0.6
+    },
+    "min_cash_fraction": 0.19,
+    "max_gross_exposure": 0.805,
+    "max_turnover": 1,
+    "min_trade_notional": 100,
+    "max_single_order_fraction": 0.4,
+    "max_signal_data_age_seconds": 86400,
+    "max_annual_volatility": 0.7,
+    "uniform_equity_shock": 0.2,
+    "max_stress_loss_fraction": 0.5,
+    "max_historical_cvar": 0.2,
+    "max_absolute_beta": 2,
+    "annual_margin_rate": 0.065
+  },
+  "paper": {
+    "slippage_bps": 0,
+    "fee_per_order": 1,
+    "fill_fraction": 1
+  },
+  "history": {
+    "portfolio": [
+      0.004,
+      -0.002,
+      0.003,
+      0.006,
+      -0.005,
+      0.004,
+      0.002,
+      -0.001
+    ],
+    "spy": [
+      0.002,
+      -0.001,
+      0.002,
+      0.004,
+      -0.006,
+      0.003,
+      0.001,
+      0.001
+    ],
+    "qqq": [
+      0.005,
+      -0.003,
+      0.004,
+      0.007,
+      -0.008,
+      0.004,
+      0.002,
+      0.001
+    ],
+    "equal_weight": [
+      0.003,
+      -0.002,
+      0.002,
+      0.005,
+      -0.005,
+      0.003,
+      0.001,
+      0.001
+    ]
+  }
+}
