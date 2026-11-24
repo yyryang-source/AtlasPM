@@ -160,6 +160,62 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         self.assertEqual([o["status"] for o in out["paper_oms"]["orders"]], ["REJECTED","REJECTED"])
         self.assertEqual(out["paper_oms"]["account_replay"]["settled_cash"],10000)
 
+    def test_direct_optimizer_methods_obey_all_fractional_limits(self) -> None:
+        from atlaspm.engine.allocation import optimize_target
+        from atlaspm.engine.contracts import Account, validate_candidates, timestamp
+        as_of = timestamp(self.payload["as_of"], "as_of")
+        account = Account.from_payload(self.payload["account"])
+        candidates = validate_candidates(self.payload["signals"], as_of=as_of,
+                                         max_age_seconds=86400)
+        for method in ("equal_weight", "risk_parity", "minimum_variance", "mean_variance",
+                       "cvar", "maximum_diversification", "risk_budgeting"):
+            with self.subTest(method=method):
+                constraints = dict(self.payload["constraints"], method=method)
+                if method == "risk_budgeting":
+                    constraints["risk_budgets"] = {"AAA": .5, "BBB": .5}
+                result = optimize_target(candidates, account, self.payload["market"], constraints)
+                self.assertEqual(result["method"], method)
+                weights = result["weights"]
+                self.assertAlmostEqual(sum(weights.values()), .805, delta=1e-6)
+                self.assertTrue(all(0 <= x <= .55+1e-6 for x in weights.values()))
+                self.assertLessEqual(result["turnover_fraction_conservative"], 1+1e-6)
+
+    def test_real_oms_sale_creates_unsettled_receivable(self) -> None:
+        self.payload["constraints"].update({
+            "method": "minimum_variance",
+            "min_cash_fraction": .05,
+            "max_gross_exposure": .785,
+            "max_name_weight": .555,
+        })
+        result = self.run_case()
+        self.assertEqual(result["decision"], "SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE",
+                         result.get("block_reasons"))
+        self.assertTrue(any(leg["action"] == "SELL_EQUITY"
+                            for leg in result["generated_order_intents"]))
+        self.assertGreater(result["paper_oms"]["account_replay"]["unsettled_receivable"], 0)
+        self.assertTrue(result["reconciliation_checks"]["unsettled_sale_receivables"])
+
+    def test_synthetic_market_impact_is_reported_separately(self) -> None:
+        self.payload["paper"]["market_impact_bps"] = 2
+        result = self.run_case()
+        self.assertEqual(result["decision"], "SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE",
+                         result.get("block_reasons"))
+        self.assertGreater(result["analytics"]["paper_market_impact_assumption_usd"], 0)
+        self.assertEqual(result["analytics"]["paper_slippage_usd"], 0)
+
+    def test_named_regime_shocks_are_scenario_inputs_not_verified_history(self) -> None:
+        self.payload["market"]["historical_scenarios"] = {
+            "2008": {"AAA":-.5,"BBB":-.4},
+            "2020": {"AAA":-.34,"BBB":-.3},
+            "2022": {"AAA":-.25,"BBB":-.15},
+        }
+        self.payload["constraints"]["max_named_scenario_loss_fraction"] = .30
+        result = self.run_case()
+        self.assertEqual(result["decision"],"BLOCK")
+        self.assertIn("NAMED_STRESS_SCENARIO_LIMIT",result["block_reasons"])
+        self.assertFalse(result["risk"]["historical_named_regimes_available"])
+        self.assertLess(result["risk"]["user_supplied_regime_shocks_illustrative"]["2008"], -.3)
+
     def test_cli_output_stays_json_and_legacy_commands_remain_registered(self) -> None:
         from atlaspm.cli import build_parser
         parser=build_parser()
