@@ -19,7 +19,7 @@ from pathlib import Path
 import time
 from typing import Any, Callable
 
-from atlaspm.us_market_universe import read_market_universe
+from atlaspm.data.us_market_universe import read_market_universe
 
 _RATE_LIMIT_ERROR = re.compile(r"yfratelimit|rate[ _-]?limit|too many requests|http.?429|\b429\b", re.IGNORECASE)
 

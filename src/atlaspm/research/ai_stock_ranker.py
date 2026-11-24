@@ -21,9 +21,9 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.historical import load_adjusted_prices
-from atlaspm.selection.price_arrays import load_stock_price_arrays
-from atlaspm.selection.recent_prices import load_recent_stock_price_arrays
+from atlaspm.data.historical import load_adjusted_prices
+from atlaspm.data.price_arrays import load_stock_price_arrays
+from atlaspm.data.recent_prices import load_recent_stock_price_arrays
 
 
 FEATURE_NAMES = (

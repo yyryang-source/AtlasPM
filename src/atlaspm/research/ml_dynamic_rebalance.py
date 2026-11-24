@@ -16,10 +16,10 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from atlaspm.backtest import _metrics
-from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
-from atlaspm.optimizer import inverse_volatility_weights
-from atlaspm.risk_backtest import _trade_to_risk_budget
+from atlaspm.engine.backtest import _metrics
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.engine.optimizer import inverse_volatility_weights
+from atlaspm.risk.risk_backtest import _trade_to_risk_budget
 
 FEATURE_NAMES = (
     "last_daily_return", "mean_last_5", "rms_last_5",
@@ -306,7 +306,7 @@ def backtest_ml_dynamic_rebalance(
         raise ValueError("Supported supervised risk models: ridge or lightgbm")
     if model_family == "lightgbm":
         # Do not import the optional dependency for default Ridge use.
-        from atlaspm.ml_lightgbm import (
+        from atlaspm.research.ml_lightgbm import (
             _dependency, train_lightgbm_risk, predict_lightgbm_risk,
         )
         _dependency()

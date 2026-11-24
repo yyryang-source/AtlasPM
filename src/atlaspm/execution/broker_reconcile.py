@@ -10,7 +10,7 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any, Mapping
 
-from atlaspm.institutional_ledger import build_institutional_ledger, _timestamp
+from atlaspm.execution.institutional_ledger import build_institutional_ledger, _timestamp
 
 
 def _obj(value: Any, name: str) -> dict[str, Any]:

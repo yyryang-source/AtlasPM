@@ -9,8 +9,8 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any, Mapping
 
-from atlaspm.institutional_gate import assess_institutional_intent
-from atlaspm.institutional_ledger import build_institutional_ledger
+from atlaspm.execution.institutional_gate import assess_institutional_intent
+from atlaspm.execution.institutional_ledger import build_institutional_ledger
 
 
 def _obj(x: object, name: str) -> dict[str, Any]:

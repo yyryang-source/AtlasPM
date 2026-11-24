@@ -15,16 +15,16 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from atlaspm.backtest import _metrics
-from atlaspm.historical import load_adjusted_prices
-from atlaspm.ml_dynamic_rebalance import (
+from atlaspm.engine.backtest import _metrics
+from atlaspm.data.historical import load_adjusted_prices
+from atlaspm.research.ml_dynamic_rebalance import (
     _features, _forecast, _integer, _real, _rms, _select_allocation,
     _train_asset_model,
 )
-from atlaspm.ml_lightgbm import (
+from atlaspm.research.ml_lightgbm import (
     _dependency, predict_lightgbm_risk, train_lightgbm_risk,
 )
-from atlaspm.risk_backtest import _trade_to_risk_budget
+from atlaspm.risk.risk_backtest import _trade_to_risk_budget
 
 CANDIDATES = ("trailing_vol", "ridge", "lightgbm")
 POLICY_NAME = "rolling_matured_prequential_risk_mae_v1"

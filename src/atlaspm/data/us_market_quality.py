@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from atlaspm.us_market_universe import read_market_universe
+from atlaspm.data.us_market_universe import read_market_universe
 
 SCHEMA = "atlaspm_us_market_data_audit_v1"
 _SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$")

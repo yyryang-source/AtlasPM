@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from atlaspm.monthly_stock_selection import SCHEMA as MONTHLY_SCHEMA
+from atlaspm.strategies.equity.monthly_stock_selection import SCHEMA as MONTHLY_SCHEMA
 
 GATE_SCHEMA = "atlaspm_monthly_alpha_eligibility_v1"
 STOCK_ACTIONS = frozenset({"OPEN", "INCREASE", "HOLD", "REDUCE", "CLOSE"})

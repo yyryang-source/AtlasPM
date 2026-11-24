@@ -10,10 +10,10 @@ from math import isfinite, sqrt
 from pathlib import Path
 from typing import Any
 
-from atlaspm.backtest import _metrics, _sample_estimates
-from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
-from atlaspm.mean_variance import optimize_mean_variance
-from atlaspm.tail_risk import historical_daily_expected_shortfall
+from atlaspm.engine.backtest import _metrics, _sample_estimates
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.engine.mean_variance import optimize_mean_variance
+from atlaspm.risk.tail_risk import historical_daily_expected_shortfall
 
 
 def _fraction(value: object, name: str, minimum: float = 0.0,
@@ -49,7 +49,7 @@ def choose_budgeted_exposure(
     Assumes long-only weights sum to 1, and covariance matches weight order.
     Holding composition comes from optimizer; this just scales risk exposure.
     """
-    from atlaspm.mean_variance import _validate_covariance
+    from atlaspm.engine.mean_variance import _validate_covariance
     if not weights or abs(sum(weights.values()) - 1) > 1e-8:
         raise ValueError("Risk-sleeve weights must sum to 1")
     symbols = list(weights)

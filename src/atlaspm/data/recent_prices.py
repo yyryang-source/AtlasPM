@@ -14,7 +14,7 @@ from datetime import date
 from math import isfinite
 from pathlib import Path
 
-from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.data.price_arrays import load_stock_price_arrays
 
 _FEATURE_WINDOW = 253
 

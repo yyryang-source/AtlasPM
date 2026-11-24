@@ -14,8 +14,8 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.historical import load_adjusted_prices
-from atlaspm.stock_screener import screen_stocks_from_prices
+from atlaspm.data.historical import load_adjusted_prices
+from atlaspm.strategies.equity.stock_screener import screen_stocks_from_prices
 
 
 def _ratio_drawdown(values: list[float]) -> float:
