@@ -103,7 +103,6 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     if checkpoint_path is not None:
         from atlaspm.research.training_checkpoint import FoldStore
         import platform
-        from pathlib import Path
         source_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
                        for p in Path(__file__).parent.glob("training_*.py")}
         store=FoldStore(checkpoint_path,dict(dataset=fingerprint,config=config,
@@ -188,7 +187,6 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         combined=adaptive_ensemble(predictions,**ensemble)
         predictions["adaptive_ensemble"]=combined["predictions"]
         ensemble_audit=combined["weight_history"]
-    fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 ensemble_weight_history=ensemble_audit,training_config=config,
