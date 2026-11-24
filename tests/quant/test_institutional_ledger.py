@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.institutional_ledger import build_institutional_ledger
+from atlaspm.execution.institutional_ledger import build_institutional_ledger
 
 
 SAMPLE = Path(__file__).resolve().parents[2] / "examples" / "institutional_ledger.json"

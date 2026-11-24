@@ -5,10 +5,10 @@ import math
 import tempfile
 import unittest
 
-from atlaspm.atlas_risknet import (
+from atlaspm.risk.atlas_risknet import (
     RISKNET_NAME, fit_atlas_risknet, predict_atlas_risknet,
 )
-from atlaspm.atlas_regimenet import (
+from atlaspm.research.atlas_regimenet import (
     MODEL_NAME, fit_atlas_regimenet, native_feature_vector,
 )
 from .test_atlas_regimenet import synthetic_returns, make_prices, run

@@ -12,7 +12,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.selection.us_market_quality import SCHEMA, audit_current_us_stock_prices
+from atlaspm.data.us_market_quality import SCHEMA, audit_current_us_stock_prices
 
 try:
     import pandas_market_calendars as mcal

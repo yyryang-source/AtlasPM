@@ -8,11 +8,11 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.atlas_regimenet import (
+from atlaspm.research.atlas_regimenet import (
     MODEL_NAME, _capped_native_weights, fit_atlas_regimenet,
     native_feature_vector, predict_atlas_regimenet, backtest_atlas_native,
 )
-from atlaspm.ml_dynamic_rebalance import _select_allocation
+from atlaspm.research.ml_dynamic_rebalance import _select_allocation
 
 ROOT=Path(__file__).resolve().parents[2]
 HAVE_NUMPY=importlib.util.find_spec("numpy") is not None

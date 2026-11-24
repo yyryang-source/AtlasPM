@@ -5,8 +5,8 @@ import math
 import tempfile
 import unittest
 
-from atlaspm.atlas_execution_policy import assess_native_no_trade
-from atlaspm.ml_dynamic_rebalance import _select_allocation
+from atlaspm.execution.atlas_execution_policy import assess_native_no_trade
+from atlaspm.research.ml_dynamic_rebalance import _select_allocation
 from .test_atlas_regimenet import make_prices, run
 
 NAMES = ["AAA", "BBB", "CCC"]
@@ -126,7 +126,7 @@ class OriginalReturnHeadAblationTests(unittest.TestCase):
         for step in report["rebalances"]:
             risks=step["annualized_risk_forecasts"]
             expected=[1/max(risks[k],.03) for k in NAMES]
-            from atlaspm.atlas_regimenet import _capped_native_weights
+            from atlaspm.research.atlas_regimenet import _capped_native_weights
             sleeve = _capped_native_weights(expected,.7)
             for k,value in zip(NAMES,sleeve):
                 self.assertAlmostEqual(

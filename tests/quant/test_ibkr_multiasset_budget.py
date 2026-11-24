@@ -5,11 +5,11 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
-from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin
-from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
-from atlaspm.ibkr_margin_stress import run_margin_stress
-from atlaspm.ibkr_multiasset_budget import (
+from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
+from atlaspm.risk.ibkr_financing import reconcile_ibkr_financing_margin
+from atlaspm.risk.ibkr_margin_monitor import collect_ibkr_margin_monitor
+from atlaspm.risk.ibkr_margin_stress import run_margin_stress
+from atlaspm.risk.ibkr_multiasset_budget import (
     _correlation_matrix, analyze_multiasset_risk_budget, redacted_multiasset_summary,
 )
 

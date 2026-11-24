@@ -12,9 +12,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.us_market_universe import build_us_listed_universe, read_market_universe
-from atlaspm.us_market_prices import sync_us_market_prices
-from atlaspm.stock_screener import screen_stocks
+from atlaspm.data.us_market_universe import build_us_listed_universe, read_market_universe
+from atlaspm.data.us_market_prices import sync_us_market_prices
+from atlaspm.strategies.equity.stock_screener import screen_stocks
 
 
 NASDAQ = """Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares

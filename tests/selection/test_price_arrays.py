@@ -8,9 +8,9 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from atlaspm.historical import load_adjusted_prices
-from atlaspm.selection.ai_stock_ranker import _history_arrays, create_training_rows
-from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.data.historical import load_adjusted_prices
+from atlaspm.research.ai_stock_ranker import _history_arrays, create_training_rows
+from atlaspm.data.price_arrays import load_stock_price_arrays
 
 
 class StockPriceArrayTests(unittest.TestCase):
@@ -82,7 +82,7 @@ class StockPriceArrayTests(unittest.TestCase):
     def test_training_labels_match_reference_rows(self):
         # Reference path is deliberately independent of the new CSV loader.
         # Test next-close labels, dates and feature vectors unchanged.
-        from atlaspm.selection.ai_stock_ranker import _candidate_rows
+        from atlaspm.research.ai_stock_ranker import _candidate_rows
         bench_path = self.root / "benchmark.csv"
         days = []
         cursor = date(2023, 1, 2)

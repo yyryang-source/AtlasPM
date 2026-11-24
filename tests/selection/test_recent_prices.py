@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from atlaspm.selection.ai_stock_ranker import _features
-from atlaspm.selection.price_arrays import load_stock_price_arrays
-from atlaspm.selection.recent_prices import load_recent_stock_price_arrays
+from atlaspm.research.ai_stock_ranker import _features
+from atlaspm.data.price_arrays import load_stock_price_arrays
+from atlaspm.data.recent_prices import load_recent_stock_price_arrays
 
 
 class RecentPriceInferenceTests(unittest.TestCase):
@@ -72,7 +72,7 @@ class RecentPriceInferenceTests(unittest.TestCase):
     def test_ticker_major_fast_path_matches_full(self):
         self.fixture(date_major=False)
         with patch(
-            "atlaspm.selection.recent_prices.load_stock_price_arrays",
+            "atlaspm.data.recent_prices.load_stock_price_arrays",
             side_effect=AssertionError("Expected streaming fast path"),
         ):
             self.assert_matches_full_arrays()
@@ -80,7 +80,7 @@ class RecentPriceInferenceTests(unittest.TestCase):
     def test_date_major_fast_path_matches_full(self):
         self.fixture(date_major=True)
         with patch(
-            "atlaspm.selection.recent_prices.load_stock_price_arrays",
+            "atlaspm.data.recent_prices.load_stock_price_arrays",
             side_effect=AssertionError("Expected streaming fast path"),
         ):
             self.assert_matches_full_arrays()
@@ -94,7 +94,7 @@ class RecentPriceInferenceTests(unittest.TestCase):
         ])
         self.cutoff = date(2024, 1, 3)
         with patch(
-            "atlaspm.selection.recent_prices.load_stock_price_arrays",
+            "atlaspm.data.recent_prices.load_stock_price_arrays",
             wraps=load_stock_price_arrays,
         ) as fallback:
             self.assert_matches_full_arrays()

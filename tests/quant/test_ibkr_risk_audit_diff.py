@@ -4,8 +4,8 @@ import copy
 import json
 import unittest
 
-from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain
-from atlaspm.ibkr_risk_audit_diff import (
+from atlaspm.monitoring.ibkr_risk_chain_audit import audit_ibkr_risk_chain
+from atlaspm.monitoring.ibkr_risk_audit_diff import (
     compare_ibkr_risk_audits, redacted_audit_diff_summary,
 )
 from .test_ibkr_risk_chain_audit import synthetic_chain

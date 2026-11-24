@@ -6,7 +6,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.backtest import backtest_walk_forward
+from atlaspm.engine.backtest import backtest_walk_forward
 
 
 def sample_csv(folder, change_future=False, missing=False):

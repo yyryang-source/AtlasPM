@@ -12,7 +12,7 @@ from copy import deepcopy
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.atlas_robustness_audit import audit_atlas_risknet
+from atlaspm.research.atlas_robustness_audit import audit_atlas_risknet
 from atlaspm.cli import main
 
 ROOT = Path(__file__).resolve().parents[2]

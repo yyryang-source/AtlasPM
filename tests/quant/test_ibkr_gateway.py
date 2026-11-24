@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from atlaspm.ibkr_gateway import (
+from atlaspm.execution.ibkr_gateway import (
     FixtureGatewayTransport, LocalGatewayTransport,
     collect_ibkr_readonly_account, redacted_console_summary,
     require_private_output, validate_gateway_url,

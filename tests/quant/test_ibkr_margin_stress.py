@@ -6,12 +6,12 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from atlaspm.ibkr_financing import reconcile_ibkr_financing_margin
-from atlaspm.ibkr_gateway import (
+from atlaspm.risk.ibkr_financing import reconcile_ibkr_financing_margin
+from atlaspm.execution.ibkr_gateway import (
     FixtureGatewayTransport, collect_ibkr_readonly_account,
 )
-from atlaspm.ibkr_margin_monitor import collect_ibkr_margin_monitor
-from atlaspm.ibkr_margin_stress import run_margin_stress, redacted_stress_console
+from atlaspm.risk.ibkr_margin_monitor import collect_ibkr_margin_monitor
+from atlaspm.risk.ibkr_margin_stress import run_margin_stress, redacted_stress_console
 
 ROOT = Path(__file__).resolve().parents[2]
 

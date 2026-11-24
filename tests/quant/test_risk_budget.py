@@ -1,7 +1,7 @@
 """Numerical checks for pretrade risk budgets."""
 import unittest
 
-from atlaspm.risk_budget import check_risk_budget
+from atlaspm.risk.risk_budget import check_risk_budget
 
 
 class RiskBudgetTests(unittest.TestCase):

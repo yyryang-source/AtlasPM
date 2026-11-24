@@ -7,7 +7,7 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.ml_model_tournament import (
+from atlaspm.research.ml_model_tournament import (
     CANDIDATES, backtest_model_tournament, choose_tournament_weights,
     score_matured_forecasts,
 )

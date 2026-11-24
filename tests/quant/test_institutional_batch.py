@@ -8,7 +8,7 @@ import json
 import unittest
 from pathlib import Path
 
-from atlaspm.institutional_batch import propose_multi_asset_batch
+from atlaspm.execution.institutional_batch import propose_multi_asset_batch
 
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"

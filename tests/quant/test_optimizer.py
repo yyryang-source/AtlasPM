@@ -1,6 +1,6 @@
 import unittest
 
-from atlaspm.optimizer import inverse_volatility_weights
+from atlaspm.engine.optimizer import inverse_volatility_weights
 
 
 class OptimizerTest(unittest.TestCase):

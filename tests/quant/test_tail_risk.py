@@ -6,8 +6,8 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
-from atlaspm.tail_risk import historical_daily_expected_shortfall
-from atlaspm.risk_backtest import backtest_risk_budget, choose_budgeted_exposure
+from atlaspm.risk.tail_risk import historical_daily_expected_shortfall
+from atlaspm.risk.risk_backtest import backtest_risk_budget, choose_budgeted_exposure
 
 
 def tail_rows():

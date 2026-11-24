@@ -11,11 +11,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.alpha_eligibility import (
+from atlaspm.strategies.equity.alpha_eligibility import (
     GATE_SCHEMA, build_alpha_eligibility, build_from_file,
     research_action_check, write_eligibility_json,
 )
-from atlaspm.monthly_stock_selection import SCHEMA as MONTHLY_SCHEMA
+from atlaspm.strategies.equity.monthly_stock_selection import SCHEMA as MONTHLY_SCHEMA
 
 REPORT_SHA = "a" * 64
 MODEL_SHA = "b" * 64

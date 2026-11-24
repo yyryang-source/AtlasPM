@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.selection.consensus_20_screener import (
+from atlaspm.strategies.equity.consensus_20_screener import (
     _percentiles, _signals, SIGNALS, SIGNAL_FAMILIES, FAMILY_WEIGHTS,
     run_20_signal_research,
 )

@@ -10,7 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from atlaspm.selection.v2_momentum_diagnostics import _review_momentum_cohorts
+from atlaspm.research.v2_momentum_diagnostics import _review_momentum_cohorts
 
 
 class MomentumDiagnosticTests(unittest.TestCase):

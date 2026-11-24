@@ -6,8 +6,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from atlaspm.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
-from atlaspm.ibkr_margin_monitor import (
+from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport, collect_ibkr_readonly_account
+from atlaspm.risk.ibkr_margin_monitor import (
     collect_ibkr_margin_monitor, normalize_ibkr_margin_summary, redacted_margin_console,
 )
 

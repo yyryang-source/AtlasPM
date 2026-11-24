@@ -4,9 +4,9 @@ import copy
 import json
 import unittest
 
-from atlaspm.ibkr_risk_chain_audit import audit_ibkr_risk_chain
-from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits
-from atlaspm.ibkr_dashboard import (
+from atlaspm.monitoring.ibkr_risk_chain_audit import audit_ibkr_risk_chain
+from atlaspm.monitoring.ibkr_risk_audit_diff import compare_ibkr_risk_audits
+from atlaspm.monitoring.ibkr_dashboard import (
     build_dashboard_view, render_dashboard_html, redacted_dashboard_console,
 )
 from .test_ibkr_risk_chain_audit import synthetic_chain

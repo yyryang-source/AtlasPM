@@ -3,8 +3,8 @@
 import math
 import unittest
 
-from atlaspm.mean_variance import optimize_mean_variance
-from atlaspm.models import PortfolioAccount, Position
+from atlaspm.engine.mean_variance import optimize_mean_variance
+from atlaspm.engine.models import PortfolioAccount, Position
 
 
 class MeanVarianceTest(unittest.TestCase):
