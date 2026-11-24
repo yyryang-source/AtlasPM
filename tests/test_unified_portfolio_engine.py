@@ -160,6 +160,31 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         self.assertEqual([o["status"] for o in out["paper_oms"]["orders"]], ["REJECTED","REJECTED"])
         self.assertEqual(out["paper_oms"]["account_replay"]["settled_cash"],10000)
 
+    def test_cvar_sparse_constraints_and_large_scenario_set(self) -> None:
+        from unittest.mock import patch
+        from scipy.optimize import linprog
+        from scipy.sparse import issparse
+        from atlaspm.engine.allocation import optimize_target
+        from atlaspm.engine.contracts import Account, validate_candidates, timestamp
+        account=Account.from_payload(self.payload["account"])
+        candidates=validate_candidates(self.payload["signals"],
+                    as_of=timestamp(self.payload["as_of"],"as_of"),max_age_seconds=86400)
+        market=copy.deepcopy(self.payload["market"])
+        market["scenario_returns"]=market["scenario_returns"]*100
+        captured=[]
+        def checked(*args,**kwargs):
+            matrix=kwargs["A_ub"]
+            self.assertTrue(issparse(matrix))
+            self.assertTrue(issparse(kwargs["A_eq"]))
+            self.assertLess(matrix.nnz,matrix.shape[0]*matrix.shape[1]//10)
+            captured.append(matrix.shape)
+            return linprog(*args,**kwargs)
+        with patch("scipy.optimize.linprog",side_effect=checked):
+            result=optimize_target(candidates,account,market,dict(self.payload["constraints"],method="cvar"))
+        self.assertTrue(captured)
+        self.assertAlmostEqual(sum(result["weights"].values()),.805,delta=1e-6)
+        self.assertFalse(result["live_execution_enabled"])
+
     def test_direct_optimizer_methods_obey_all_fractional_limits(self) -> None:
         from atlaspm.engine.allocation import optimize_target
         from atlaspm.engine.contracts import Account, validate_candidates, timestamp
