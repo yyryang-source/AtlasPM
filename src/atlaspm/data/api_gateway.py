@@ -18,7 +18,7 @@ from threading import Lock
 import time
 from types import MappingProxyType
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
@@ -39,6 +39,7 @@ PROVIDERS = MappingProxyType({
     "treasury": Provider("api.fiscaldata.treasury.gov", 0.5, None, "public_government_data", True),
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
+    "fred": Provider("api.stlouisfed.org", 1.0, "FRED_API_KEY", "series_specific_rights_review_required"),
 })
 
 
@@ -137,7 +138,15 @@ class Gateway:
             token = key if key is not None else os.environ.get(spec.key_env, "").strip()
             if not isinstance(token, str) or not token or any(not 33 <= ord(c) <= 126 for c in token):
                 raise GatewayError(f"{spec.key_env} missing or invalid")
-            headers["Authorization"] = "Bearer " + token
+            if provider == "fred":
+                if p.path != "/fred/series/observations":
+                    raise GatewayError("FRED endpoint not enabled")
+                # Version 1 requires a query credential. Inject only after
+                # checking the public URL; do not log/hash the authenticated URL.
+                url = urlunsplit((p.scheme, p.netloc, p.path,
+                                  urlencode(query + [("api_key", token)]), ""))
+            else:
+                headers["Authorization"] = "Bearer " + token
         elif key is not None:
             raise GatewayError("Unexpected credential for public provider")
         if provider == "sec":
@@ -336,13 +345,28 @@ class Gateway:
         """
         if not isinstance(requests, (list, tuple)) or not 1 <= len(requests) <= 32:
             raise ValueError("Batch must contain 1..32 (provider, URL) pairs")
-        semaphore = asyncio.Semaphore(3)
-
-        async def one(provider, url):
-            async with semaphore:
-                return await asyncio.to_thread(self.fetch, provider, url)
-        return await asyncio.gather(*(one(provider, url) for provider, url in requests),
-                                    return_exceptions=True)
+        if any(not isinstance(pair, (tuple, list)) or len(pair) != 2
+               or any(not isinstance(value, str) for value in pair) for pair in requests):
+            raise ValueError("Expected provider and URL strings")
+        pairs = [tuple(pair) for pair in requests]
+        unique = list(dict.fromkeys(pairs))
+        results = {}
+        retained = 0
+        # Bound retained response bytes and transient in-flight responses.
+        # Duplicate requests within this batch share an immutable response.
+        for start in range(0, len(unique), 3):
+            chunk = unique[start:start+3]
+            batch = await asyncio.gather(*(asyncio.to_thread(self.fetch, *pair) for pair in chunk),
+                                         return_exceptions=True)
+            for pair, item in zip(chunk, batch):
+                if isinstance(item, Response):
+                    if retained + len(item.body) > self._max_bytes:
+                        item = GatewayError("Batch retained byte budget exceeded")
+                    else:
+                        retained += len(item.body)
+                results[pair] = item
+            del batch
+        return [results[pair] for pair in pairs]
 
     def health(self):
         result = {}
@@ -365,3 +389,26 @@ class Gateway:
 
 # Shared by the existing downloader and new adapters; no network at import.
 DEFAULT_GATEWAY = Gateway()
+
+
+def main():
+    from argparse import ArgumentParser
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument("--smoke-treasury", action="store_true",
+                        help="Explicitly perform one public FiscalData request")
+    args = parser.parse_args()
+    report = {}
+    if args.smoke_treasury:
+        url = ("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/"
+               "accounting/od/treasury_securities_auctions_v2?page%5Bsize%5D=1")
+        response = DEFAULT_GATEWAY.fetch("treasury", url)
+        rows = response.data().get("data")
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise GatewayError("Treasury smoke response missing requested row")
+        report["treasury_smoke"] = response.evidence()
+    report["providers"] = DEFAULT_GATEWAY.health()
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == "__main__":
+    main()

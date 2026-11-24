@@ -104,11 +104,37 @@ class GatewayTests(unittest.TestCase):
     def test_batch_is_bounded_and_legacy_uses_same_transport(self):
         with self.assertRaises(ValueError):
             asyncio.run(self.gateway.fetch_many([("treasury", T)]*33))
-        results = asyncio.run(self.gateway.fetch_many([("treasury", T), ("invalid", T)]))
+        results = asyncio.run(self.gateway.fetch_many([("treasury", T), ("invalid", T), ("treasury", T)]))
         self.assertIsInstance(results[0], api.Response)
         self.assertIsInstance(results[1], api.GatewayError)
+        self.assertIs(results[0], results[2])
+        self.assertEqual(len(self.requests), 1)
         with patch.object(market_fetch, "DEFAULT_GATEWAY", self.gateway):
             self.assertEqual(market_fetch.get_json(T), {"data": []})
+
+
+    def test_batch_retention_budget(self):
+        small = api.Gateway(opener=self.open, clock=self.clock, sleep=self.clock.sleep, max_bytes=20)
+        results = asyncio.run(small.fetch_many([("treasury", T+"?page="+str(i)) for i in range(3)]))
+        self.assertIsInstance(results[0], api.Response)
+        self.assertIsInstance(results[1], api.GatewayError)
+        self.assertIsInstance(results[2], api.GatewayError)
+
+    def test_fred_vintage_scope_and_secret_exclusion(self):
+        from atlaspm.data.fred_observations import observations
+        self.events = [json.dumps({"count": 1, "observations": [
+            {"date": "2020-01-01", "realtime_start": "2020-02-01",
+             "realtime_end": "2020-02-01", "value": "1.5"}]}).encode()]
+        with patch.dict(os.environ, {"FRED_API_KEY": "fixture-secret"}):
+            result = observations("DGS10", start="2020-01-01", end="2020-01-31",
+                                  as_of="2020-02-01", gateway=self.gateway)
+        self.assertIn("api_key=fixture-secret", self.requests[0][0].full_url)
+        self.assertNotIn("fixture-secret", json.dumps(result))
+        self.assertFalse(result["point_in_time_verified"])
+        self.assertEqual(result["observations"][0]["value"], "1.5")
+        with self.assertRaises(ValueError):
+            observations("DGS10", start="2020-01-01", end="2020-02-02",
+                         as_of="2020-02-01", gateway=self.gateway)
 
 
 class SECDownloadTests(unittest.TestCase):

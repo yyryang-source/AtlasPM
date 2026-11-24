@@ -33,6 +33,11 @@ class ArtifactTests(unittest.TestCase):
             n=record["sequence_length"]
             window={**self.payload,"sessions":self.payload["sessions"][i-n+1:i+1]}
             replay=predict_snapshot(record,window)
+            from atlaspm.research.intelligence import predict_local_artifact
+            routed=predict_local_artifact(self.path,key,window)
+            self.assertEqual(replay['predictions'],routed['predictions'])
+            self.assertEqual(routed['artifact_id'],key)
+            self.assertFalse(routed['approved_for_backtest'])
             expected={r["security_id"]:r["prediction"] for r in out["predictions"][name] if r["date"]==day}
             self.assertFalse(replay["live_execution_enabled"])
             self.assertFalse(record["model_registry_admission"])
