@@ -141,3 +141,17 @@ Use `"incremental_ridge": true` with `"models": ["ridge", "historical_mean"]`. T
 Monitoring emits model_review statuses: REFERENCE_BASELINE, INSUFFICIENT_EVIDENCE, CANDIDATE_FOR_INDEPENDENT_REVIEW, RETAIN_AS_CHALLENGER and REVIEW_FOR_DEGRADATION. These are review-queue classifications, not actual deployment or destructive model retirement. Independent point-in-time data and holdout admission gates remain mandatory. Archived model snapshots remain immutable for reproducibility.
 
 All lifecycle options may be combined for ridge/historical mean, including disk prediction archives, model snapshots, incremental refits, regime ensembles and monitoring. Deep estimators use epoch_checkpoint instead of incremental_ridge. Real data and broker permissions remain disabled.
+
+### Runtime efficiency
+
+Training only the historical mean or sequence models skips unused tabular
+feature matrices and Ridge solves. When Ridge is not selected, the fold audit
+may contain null coefficients; when tabular preprocessing is not needed, its
+mean/scale are null as well. Sequence-specific scaling remains in model settings.
+Prediction metadata is read without copying feature vectors. Prediction archive
+readers use bounded keyset pages after the requested model has finished writing,
+so appending other models does not pin a full-run SQLite WAL read transaction.
+
+All model snapshots retain the panel's trailing-window eligibility length,
+including tabular estimators that consume only the final feature row. Ensemble
+and monitoring share one aligned chronological forecast validation contract.

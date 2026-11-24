@@ -1,10 +1,11 @@
 """Adaptive synthetic ensemble with bounded daily working memory."""
 from __future__ import annotations
 from collections import deque
-from itertools import zip_longest,groupby
+from itertools import groupby
 from math import exp
 from statistics import fmean
 from atlaspm.engine.contracts import finite
+from atlaspm.research.training_predictions import aligned_forecasts
 
 
 def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01, regimes=None):
@@ -15,32 +16,16 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
     names=sorted(predictions)
     if len(names)<2:
         raise ValueError("ENSEMBLE_REQUIRES_TWO_MODELS")
-    def aligned():
-        previous=None
-        for rows in zip_longest(*(iter(predictions[n]) for n in names)):
-            if any(r is None for r in rows):
-                raise ValueError("UNALIGNED_ENSEMBLE_FORECASTS")
-            base=rows[0]
-            key=(base["date"],base["security_id"])
-            if previous is not None and key<=previous:
-                raise ValueError("DUPLICATE_OR_UNSORTED_FORECAST")
-            previous=key
-            for row in rows:
-                if (row["date"],row["security_id"])!=key:
-                    raise ValueError("UNALIGNED_ENSEMBLE_FORECASTS")
-                if (row["actual"],row["label_end_date"])!=(base["actual"],base["label_end_date"]):
-                    raise ValueError("INCONSISTENT_ENSEMBLE_LABEL")
-                if row["label_end_date"]<=row["date"]:
-                    raise ValueError("INVALID_LABEL_MATURITY")
-                finite(row["prediction"],"prediction")
-                if row["actual"] is not None:
-                    finite(row["actual"],"actual")
-            yield rows
+    aligned=aligned_forecasts(predictions,names,
+        mismatch="UNALIGNED_ENSEMBLE_FORECASTS",
+        order="DUPLICATE_OR_UNSORTED_FORECAST",
+        label_mismatch="INCONSISTENT_ENSEMBLE_LABEL",
+        maturity="INVALID_LABEL_MATURITY")
     pending=deque()
     matured=deque(maxlen=window_dates)
     conditioned={}
     seen=False
-    for day,group in groupby(aligned(),key=lambda rows:rows[0]["date"]):
+    for day,group in groupby(aligned,key=lambda rows:rows[0]["date"]):
         seen=True
         while pending and pending[0][0]<day:
             _,state,errors=pending.popleft()
@@ -55,7 +40,8 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
             loss={n:fmean(d[n] for d in selected) for n in names}
             best=min(loss.values())
             raw={n:exp(-(loss[n]-best)/temp) for n in names}
-            weights={n:raw[n]/sum(raw.values()) for n in names}
+            normalizer=sum(raw.values())
+            weights={n:raw[n]/normalizer for n in names}
         else:
             weights={n:1/len(names) for n in names}
         output=[]

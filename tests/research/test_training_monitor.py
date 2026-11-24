@@ -42,6 +42,13 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(result["model_review"]["ridge"]["status"],"REVIEW_FOR_DEGRADATION")
         self.assertFalse(result["model_review"]["ridge"]["automatic_retirement"])
 
+    def test_duplicate_security_rejected(self):
+        p=streams()
+        for rows in p.values():
+            rows.insert(1,dict(rows[0]))
+        with self.assertRaisesRegex(ValueError,'MONITOR_DATE_OR_SECURITY_ORDER'):
+            monitor_predictions(p)
+
     def test_missing_and_alignment(self):
         p=streams()
         for rows in p.values():

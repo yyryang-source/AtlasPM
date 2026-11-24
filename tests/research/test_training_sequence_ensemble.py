@@ -67,6 +67,13 @@ class EnsembleTests(unittest.TestCase):
         self.assertEqual(out["weight_history"][4]["weighting_scope"],"regime")
         self.assertEqual(out["weight_history"][4]["regime_matured_dates"],1)
 
+    def test_invalid_calendar_date_rejected(self):
+        p=self.forecasts()
+        for rows in p.values():
+            rows[0]['label_end_date']='2020-99-99'
+        with self.assertRaisesRegex(ValueError,'INVALID_LABEL_MATURITY'):
+            adaptive_ensemble(p)
+
     def test_alignment_refused(self):
         p=self.forecasts()
         p["good"].pop()
