@@ -7,6 +7,7 @@ as passes. This gate does not certify trading readiness.
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import json
 from pathlib import Path
 import sys
@@ -27,8 +28,10 @@ def main():
     if Path.cwd().resolve()!=root:
         parser.error("Run from the checkout root")
     start=perf_counter()
-    suite=unittest.defaultTestLoader.discover(str(root/"tests"))
-    result=unittest.TextTestRunner(verbosity=1).run(suite)
+    # Preserve machine-readable stdout even when fixtures print diagnostics.
+    with redirect_stdout(sys.stderr):
+        suite=unittest.defaultTestLoader.discover(str(root/"tests"))
+        result=unittest.TextTestRunner(verbosity=1).run(suite)
     passed=result.testsRun-len(result.failures)-len(result.errors)-len(result.skipped)-len(result.expectedFailures)-len(result.unexpectedSuccesses)
     structure=audit(root)
     ok=(result.wasSuccessful() and passed>=args.minimum_passed and not structure["errors"]
@@ -36,7 +39,9 @@ def main():
         and not result.expectedFailures and not result.unexpectedSuccesses)
     report=dict(status="PASS" if ok else "FAIL",tests_run=result.testsRun,
                 passed=passed,failures=len(result.failures),errors=len(result.errors),
-                skipped=len(result.skipped),expected_failures=len(result.expectedFailures),
+                skipped=len(result.skipped),
+                skipped_tests=[{"test":case.id(),"reason":reason} for case,reason in result.skipped],
+                expected_failures=len(result.expectedFailures),
                 unexpected_successes=len(result.unexpectedSuccesses),
                 minimum_passed=args.minimum_passed,elapsed_seconds=perf_counter()-start,
                 source_audit_errors=structure["errors"],

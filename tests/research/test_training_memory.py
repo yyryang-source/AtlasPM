@@ -95,10 +95,33 @@ class MemoryTests(unittest.TestCase):
                 p["mode"]="historical"
                 with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
                     train(p,feature_cache_dir="local_data/features")
-                self.assertEqual(list(Path("local_data/features").iterdir()),[])
+                # Admission precedes allocation: rejected data must not create
+                # even the cache root, much less a temporary feature workspace.
+                self.assertFalse(Path("local_data").exists())
             finally:
                 os.chdir(cwd)
 
+
+    def test_disk_panel_cleanup_after_late_validation_failure(self):
+        from atlaspm.research.training_engine import train
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                p=fixture()
+                # Valid metadata opens the workspace; a late future feature
+                # fails after earlier sessions have populated the disk cache.
+                p["sessions"][-1]["assets"][0]["available_at"]="2021-01-01T16:00:00-05:00"
+                cache=Path("local_data/features")
+                cache.mkdir(parents=True)
+                sentinel=cache/"existing.txt"
+                sentinel.write_text("preserve",encoding="utf-8")
+                with self.assertRaisesRegex(ValueError,"FEATURE_LOOKAHEAD"):
+                    train(p,feature_cache_dir=str(cache))
+                self.assertEqual(list(cache.iterdir()),[sentinel])
+                self.assertEqual(sentinel.read_text(encoding="utf-8"),"preserve")
+            finally:
+                os.chdir(cwd)
 
     def test_fold_index_prefix_is_shared(self):
         from atlaspm.research.training_compact import IndexPrefix
