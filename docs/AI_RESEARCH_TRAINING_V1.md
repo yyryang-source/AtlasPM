@@ -155,3 +155,57 @@ so appending other models does not pin a full-run SQLite WAL read transaction.
 All model snapshots retain the panel's trailing-window eligibility length,
 including tabular estimators that consume only the final feature row. Ensemble
 and monitoring share one aligned chronological forecast validation contract.
+
+
+## V6 real research dataset bridge (not approved for training)
+
+The existing synthetic trainer, streaming loader, fold engine, models,
+checkpoint and artifact code remain unchanged. V6 builds separate
+real-unverified-research Parquet samples from the HF RTH factor mart,
+without converting tickers to synthetic or certified security IDs.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db training-dataset-v6 --start-month 2020-01 --end-month 2020-06 --plan-only
+& $py -m atlaspm.cli market-db training-dataset-v6 --start-month 2020-01 --end-month 2020-06 --horizons 1 5 21 --memory 2GB --threads 2
+~~~
+
+Build missing factor partitions separately using the existing factor CLI.
+The plan does not run the calendar or read prices. Materialization checks
+factor manifests, calendar membership, positive prices, unique keys and
+last observed full-slot availability. A historical partial final bucket
+or non-NYSE date blocks the partition; do not silently repair it.
+Underlying factor derivation and vendor availability remain unverified.
+
+Labels use observed close-to-close price change at exact NYSE session
+offsets 1, 5, 10, 21 or 63. Missing intermediate sessions and end-of-range
+censoring produce null labels; features with missing or nonfinite values
+remain in the research dataset with features_complete=false. These are
+not trade-executable or total-return labels, and ticker reuse, unverified
+corporate actions and delisting missingness can materially bias them.
+The close timestamp is only an earliest assumed feature availability time,
+not independently proven vendor delivery. No sample is eligible for
+formal model training.
+
+Each month reads only the signal month and the necessary future months,
+under the existing bounded DuckDB memory configuration. Content-addressed
+registry IDs bind the selected configuration, calendar digest and input
+file hashes; cached output partitions are verified before reuse.
+The manifest includes counts and expanding-window folds with strict
+label-end purge and embargo. Folds are calendar plans, not proof that
+every fold contains sufficient valid samples. A short range may have no
+folds. No model fitting takes place.
+
+Registry output: local_data/training/v6/<dataset ID prefix>/manifest.json,
+monthly Parquet partitions, and local_data/training/v6/latest.json.
+Use the full dataset ID with training-dataset-inspect-v6 --dataset-id
+to check registry identity and output hashes. Hashes establish local
+integrity, not source authenticity; the manifest is not signed.
+Run one writer at a time. Source data stays local.
+
+V5 historical identity, action completeness, price adjustment, rights,
+and feature availability gates remain unresolved. Synthetic trainer
+validation rejects V6 manifests. Do not relabel the data to bypass
+the guard. Future certified sample adapters must enforce the actual
+evidence and time-aware security identity rather than trusting boolean
+flags in a user-editable manifest.
