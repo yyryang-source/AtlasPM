@@ -488,8 +488,19 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
                 "ic_stability": _periods(dated, c),
                 "daily_ic_preview": dated[:10],
             })
-        matrix = {name: {other: (1.0 if name==other else None)
-                         for other in c["factors"]} for name in c["factors"]}
+        usable_date_counts = {
+            row["factor"]: (row["pre_holdout_standardized_dates"]
+                            if c["holdout_start"] else row["standardized_dates"])
+            for row in coverage
+        }
+        matrix = {
+            name: {
+                other: (1.0 if name == other
+                        and usable_date_counts[name] >= c["min_dates"] else None)
+                for other in c["factors"]
+            }
+            for name in c["factors"]
+        }
         for pair in correlations:
             matrix[pair["a"]][pair["b"]] = pair["mean_signed_spearman"]
             matrix[pair["b"]][pair["a"]] = pair["mean_signed_spearman"]
