@@ -179,6 +179,79 @@ def review_actions(report):
     return {**_FLAGS,"model":"credit_action_rules_v1","transport":report["transport"],"actions":results}
 
 
+def archive_observations(report, *, path=None):
+    """Retain bounded authorized normalized rating revisions, not raw wire data.
+
+    Existing local research-state writer is reused. Receipt is the local
+    archival time, not the effective date or independently proven publication.
+    No automatic retention and no formal dataset admission.
+    """
+    from datetime import UTC,datetime
+    from pathlib import Path
+    from atlaspm.research.event_queue import _transaction
+    from atlaspm.research.financial_events import _time
+    from atlaspm.research.training_registry import digest
+    local_rights("xpressapi",retention=True)
+    if (not isinstance(report,dict) or report.get("provider")!="xpressapi" or
+        any(report.get(k) is not v for k,v in _FLAGS.items())):
+        raise ValueError("INVALID_RATING_ARCHIVE_REPORT")
+    transport=report.get("transport",{})
+    source_hash=transport.get("sha256")
+    received=datetime.now(UTC)
+    fetched=_time(transport["retrieved_at_utc"])
+    if (transport.get("provider")!="xpressapi" or not isinstance(source_hash,str) or
+        not re.fullmatch(r"[0-9a-f]{64}",source_hash) or fetched>received):
+        raise ValueError("INVALID_RATING_ARCHIVE_TRANSPORT")
+    rows=report.get("ratings")
+    if not isinstance(rows,list) or len(rows)>1000:
+        raise ValueError("RATING_ARCHIVE_BATCH_LIMIT")
+    required={"agency","identifier_type","identifier","scope","rating","rating_type","effective_raw",
+              "action_raw","watch_outlook_raw","basis_raw","agency_entity_id","agency_issue_id",
+              "published_at","first_available_at"}
+    for row in rows:
+        if (not isinstance(row,dict) or set(row)!=required or row["agency"] not in {"sp_ratings","moodys","fitch"} or
+            row["published_at"] is not None or row["first_available_at"] is not None):
+            raise ValueError("INVALID_RATING_ARCHIVE_ROW")
+        pattern=_ID_TYPES.get(row["scope"],{}).get(row["identifier_type"])
+        if pattern is None or not isinstance(row["identifier"],str) or not re.fullmatch(pattern,row["identifier"]):
+            raise ValueError("INVALID_RATING_ARCHIVE_IDENTITY")
+        if not _text(row["rating"]) or not _text(row["rating_type"]) or not _text(row["effective_raw"]):
+            raise ValueError("MISSING_RATING_FIELDS")
+        if date.fromisoformat(row["effective_raw"][:10])>fetched.date():
+            raise ValueError("FUTURE_RATING_EFFECTIVE_DATE")
+    def write(items):
+        added=0
+        for row in rows:
+            key=digest(row)
+            if key not in items:
+                items[key]={"rating":row,"source_sha256":source_hash,
+                            "provider_retrieved_at":fetched.isoformat(),"archived_at":received.isoformat()}
+                added+=1
+        return {**_FLAGS,"added":added,"retained":len(items),"coverage_complete":False}
+    return _transaction(path or Path("local_data/runs/credit_rating_observations.json"),write)
+
+
+def rating_history(*, identifier_type, identifier, as_of, path=None):
+    from datetime import UTC,datetime
+    from pathlib import Path
+    from atlaspm.research.event_queue import _read_state
+    from atlaspm.research.financial_events import _time
+    from atlaspm.research.training_registry import digest
+    local_rights("xpressapi",retention=True)
+    cutoff=_time(as_of)
+    if cutoff>datetime.now(UTC):
+        raise ValueError("FUTURE_RATING_HISTORY_CUTOFF")
+    rows=[]
+    for key,item in _read_state(path or Path("local_data/runs/credit_rating_observations.json")).items():
+        row=item["rating"]
+        if digest(row)!=key or _time(item["provider_retrieved_at"])>_time(item["archived_at"]):
+            raise ValueError("RATING_ARCHIVE_INTEGRITY_FAILURE")
+        if row["identifier_type"]==identifier_type and row["identifier"]==identifier and _time(item["archived_at"])<=cutoff:
+            rows.append({**item,"revision_sha256":key})
+    return {**_FLAGS,"ratings":sorted(rows,key=lambda x:(x["archived_at"],x["revision_sha256"])),
+            "as_of":cutoff.isoformat(),"coverage_complete":False,"publication_time_verified":False}
+
+
 def main():
     from argparse import ArgumentParser
     import json
@@ -189,11 +262,14 @@ def main():
     parser.add_argument("--as-of",required=True)
     parser.add_argument("--start-date")
     parser.add_argument("--login",action="store_true",help="Explicit in-memory login; otherwise use XPRESSAPI_TOKEN")
+    parser.add_argument("--retain",action="store_true",help="Explicitly authorized local rating history")
     args=parser.parse_args()
     session=XpressSession() if args.login else None
     try:
         report=fetch_ratings(args.scope,args.identifier_type,args.identifier,as_of=args.as_of,
                              start_date=args.start_date,session=session)
+        if args.retain:
+            report["retention"]=archive_observations(report)
         # No proprietary rating values or private identifiers on stdout.
         summary={k:v for k,v in report.items() if k not in {"ratings","missing_identifiers"}}
         summary.update(rating_count=len(report["ratings"]),missing_identifier_count=len(report["missing_identifiers"]))

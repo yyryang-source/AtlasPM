@@ -135,3 +135,49 @@ class UnifiedResearchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"SYNTHETIC"):
             historical_diagnostics({"historical_mean":[{"security_id":"conid:123"}],
                                     "model":[{"security_id":"conid:123"}]})
+
+
+    def test_authorized_rating_history_receipt_cutoff_and_dedup(self):
+        from atlaspm.research.credit_intelligence import archive_observations,rating_history,_FLAGS
+        from unittest.mock import patch
+        temp=tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        cwd=Path.cwd()
+        os.chdir(temp.name)
+        self.addCleanup(os.chdir,cwd)
+        Path("local_data").mkdir()
+        now=datetime.now(UTC)
+        row={"agency":"sp_ratings","identifier_type":"LEI","identifier":"A"*20,
+            "scope":"issuer","rating":"BBB","rating_type":"Long Term","effective_raw":"2020-01-01",
+            "action_raw":"Downgrade","watch_outlook_raw":None,"basis_raw":[None,None],
+            "agency_entity_id":1,"agency_issue_id":None,"published_at":None,"first_available_at":None}
+        report={**_FLAGS,"provider":"xpressapi","ratings":[row],"transport":{
+                "provider":"xpressapi","sha256":"b"*64,"retrieved_at_utc":now.isoformat()}}
+        with patch.dict(os.environ,{"ATLASPM_XPRESSAPI_RIGHTS":"fixture",
+                        "ATLASPM_XPRESSAPI_RIGHTS_RETENTION":"1"}):
+            self.assertEqual(archive_observations(report)["added"],1)
+            self.assertEqual(archive_observations(report)["added"],0)
+            old=rating_history(identifier_type="LEI",identifier="A"*20,as_of=(now-timedelta(seconds=1)).isoformat())
+            self.assertEqual(old["ratings"],[])
+            current=rating_history(identifier_type="LEI",identifier="A"*20,as_of=datetime.now(UTC).isoformat())
+            self.assertEqual(len(current["ratings"]),1)
+            self.assertIsNone(current["ratings"][0]["rating"]["first_available_at"])
+            self.assertFalse(current["approved_for_model_training"])
+
+    def test_queue_supersedes_visible_old_revision(self):
+        temp=tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        cwd=Path.cwd()
+        os.chdir(temp.name)
+        self.addCleanup(os.chdir,cwd)
+        Path("local_data").mkdir()
+        now=datetime.now(UTC)
+        row={"provider":"sec","source_id":"same","kind":"sec_disclosure","subjects":["CIK:0000320193"],
+             "published_at":(now-timedelta(minutes=5)).isoformat(),"first_available_at":None,
+             "effective_at":None,"evidence_sha256":"a"*64,"delivery":"poll","expiry_seconds":3600}
+        first=normalize(row,received_at=(now-timedelta(minutes=2)).isoformat())
+        second=normalize({**row,"evidence_sha256":"b"*64},received_at=now.isoformat())
+        event_queue.enqueue([first,second])
+        result=event_queue.drain(as_of=now.isoformat())
+        self.assertEqual(result["completed"],1)
+        self.assertEqual(result["superseded"],1)

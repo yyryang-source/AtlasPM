@@ -475,15 +475,17 @@ PASS for this batch.
   automatic AI dispatch, cross-process network side effects, archive compaction
   or certified delivery yet. No new database.
 
-Remaining: complete specialized report/ratings/bond data history and actual
+Credit rating normalized history now has explicit --retain and local receipt cutoff, per-row revision dedup and source hash; shared atomic writer in local_data/runs, retention requires ATLASPM_XPRESSAPI_RIGHTS_RETENTION=1. Effective dates still not publication times. Queue marks earlier pending revisions superseded at cutoff and supports a bounded explicit CLI worker (python -m atlaspm.research.event_queue --cycles 3 --interval 5). No autonomous network scheduling.
+
+Remaining: complete specialized report/bond data history and actual
 security mapping, source-backed evidence verification, real-time stream
 scheduler, automatic model routing with observed performance and cost,
 validated risk/return models, cross-asset execution and verified real data.
 No formal training, formal backtest or automatic live permission.
 
-Expected tests 1088 (previous 1079 + 9), not measured. From the existing
+Expected tests 1090 (previous 1079 + 11), not measured. From the existing
 Windows review checkout, use previous consolidated validation with
---minimum-passed 1088, then:
+--minimum-passed 1090, then:
 ```powershell
 & $py -m atlaspm.framework.autonomous_cycle
 if ($LASTEXITCODE -ne 0) { throw "Synthetic event-to-flat validation failed" }
