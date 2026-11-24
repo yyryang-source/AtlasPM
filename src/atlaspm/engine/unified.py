@@ -203,8 +203,9 @@ def _build_paper_inputs(account: Account, as_of: Any, allocation: Mapping[str, A
     equity = account.net_liquidation
     fee = finite(paper.get("fee_per_order", 1.), "fee_per_order", minimum=0)
     slip = finite(paper.get("slippage_bps", 0.), "slippage_bps", minimum=0)
+    impact = finite(paper.get("market_impact_bps", 0.), "market_impact_bps", minimum=0)
     fill_fraction = finite(paper.get("fill_fraction", 1.), "fill_fraction", minimum=0)
-    if slip > 20 or fill_fraction > 1:
+    if slip + impact > 20 or fill_fraction > 1:
         raise ValueError("UNSUPPORTED_SLIPPAGE_OR_FILL_FRACTION")
     minimum = finite(constraints.get("min_trade_notional", 100.), "min_trade_notional", minimum=0)
     holdings = {h.symbol: h for h in account.holdings}
@@ -225,7 +226,7 @@ def _build_paper_inputs(account: Account, as_of: Any, allocation: Mapping[str, A
             continue
         side = "BUY_EQUITY" if quantity > 0 else "SELL_EQUITY"
         units = abs(quantity)
-        price = round(h.price*(1 + (slip/10000 if quantity > 0 else -slip/10000)), 8)
+        price = round(h.price*(1 + ((slip+impact)/10000 if quantity > 0 else -(slip+impact)/10000)), 8)
         if price <= 0:
             raise ValueError("INVALID_EXECUTION_PRICE")
         notional = units*price
@@ -416,13 +417,15 @@ def run_unified_portfolio(payload: Mapping[str, Any]) -> dict[str, Any]:
         receivable = 0.
         fees_paid = 0.
         slip_paid = 0.
+        impact_paid = 0.
         for fill in fills.values():
             leg = next(p for p in plan["legs"] if p["leg_id"] == fill["leg_id"])
             symbol = leg["identifier"]
             qty, px, fee_paid = fill["quantity"],fill["price"],fill["fee"]
             fees_paid += fee_paid
             original_price = next(h.price for h in account.holdings if h.symbol == symbol)
-            slip_paid += qty*abs(px-original_price)
+            slip_paid += qty*original_price*finite(paper.get("slippage_bps",0.),"slippage_bps",minimum=0)/10000
+            impact_paid += qty*original_price*finite(paper.get("market_impact_bps",0.),"market_impact_bps",minimum=0)/10000
             if fill["action"] == "BUY_EQUITY":
                 expected_shares[symbol] += qty
                 spent += qty*px+fee_paid
@@ -458,7 +461,7 @@ def run_unified_portfolio(payload: Mapping[str, Any]) -> dict[str, Any]:
             history, gross_notional=sum(fill["quantity"]*fill["price"]
                                         for fill in fills.values()),
             equity=account.net_liquidation,
-            order_fees=fees_paid,slippage_cost=slip_paid,
+            order_fees=fees_paid,slippage_cost=slip_paid,market_impact_cost=impact_paid,
             annual_interest_assumption=finite(
                 constraints.get("annual_margin_rate",.065),"annual_margin_rate",minimum=0),
             margin_debt=account.debt,factor_scores=factor_exposure,
