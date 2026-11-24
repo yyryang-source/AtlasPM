@@ -56,3 +56,45 @@ class MemoryTests(unittest.TestCase):
                 self.assertEqual(list(Path("local_data/cache").iterdir()),[])
             finally:
                 os.chdir(cwd)
+
+
+    def test_disk_panel_and_training_equivalence(self):
+        from atlaspm.research.training_compact import feature_workspace
+        from atlaspm.research.training_engine import train
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                p=fixture()
+                del p["sessions"][22]["assets"][0]
+                reference=build_panel(p,5,3,compact=True)
+                with feature_workspace("local_data/features") as column:
+                    disk=build_panel(p,5,3,compact=True,feature_column=column)
+                    self.assertEqual(list(reference["prediction_samples"]),list(disk["prediction_samples"]))
+                    self.assertEqual(purged_folds(reference,minimum_train_sessions=10,test_sessions=5),
+                                     purged_folds(disk,minimum_train_sessions=10,test_sessions=5))
+                    self.assertEqual(reference["prediction_samples"].numeric_bytes,
+                                     disk["prediction_samples"].numeric_bytes)
+                self.assertEqual(list(Path("local_data/features").iterdir()),[])
+                a=train(p,minimum_train_sessions=10)
+                b=train(p,minimum_train_sessions=10,feature_cache_dir="local_data/features")
+                self.assertEqual(a["predictions"],b["predictions"])
+                self.assertEqual(a["metrics"],b["metrics"])
+                self.assertEqual(b["feature_storage"],"memmap")
+                self.assertEqual(list(Path("local_data/features").iterdir()),[])
+            finally:
+                os.chdir(cwd)
+
+    def test_disk_panel_cleanup_after_invalid_input(self):
+        from atlaspm.research.training_engine import train
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                p=fixture()
+                p["mode"]="historical"
+                with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+                    train(p,feature_cache_dir="local_data/features")
+                self.assertEqual(list(Path("local_data/features").iterdir()),[])
+            finally:
+                os.chdir(cwd)
