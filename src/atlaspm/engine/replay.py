@@ -30,7 +30,20 @@ def replay(payload):
         raise ValueError("REQUIRES_TWO_SESSIONS")
     holdings, pending, curve, trades = {}, [], [], []
     targets = None
-    history, allocations = [], []
+    history, allocations, orders = [], [], []
+    policy = payload.get("execution_policy")
+    if policy is not None:
+        if not isinstance(policy, dict):
+            raise ValueError("INVALID_EXECUTION_POLICY")
+        from atlaspm.engine.replay_execution import execute_order
+    prior_volume = {}
+    def submit(s, side, qty, mark, budget, day):
+        if s not in prior_volume:
+            raise ValueError("MISSING_PRIOR_SESSION_VOLUME")
+        order = execute_order(s, side, qty, mark, budget, prior_volume[s], policy,
+                              fee, slip, f"SYN-{len(orders)+1}", str(day))
+        orders.append(order)
+        return order
     optimizer = payload.get("optimizer")
     if optimizer is not None:
         if not isinstance(optimizer, dict):
@@ -70,8 +83,15 @@ def replay(payload):
             for s in sorted(set(holdings) | set(desired)):
                 qty = max(0, holdings.get(s,0)-desired.get(s,0))
                 if qty:
+                    if policy is not None:
+                        order = submit(s, "SELL", qty, op[s], 0, day)
+                        qty = order["filled"]
+                        if not qty:
+                            continue
+                        cost = order["cost"]
+                    else:
+                        cost = qty*op[s]*(slip + (1-slip)*fee)
                     notional = qty*op[s]
-                    cost = notional*(slip + (1-slip)*fee)
                     pending.append((i+lag, notional-cost))
                     holdings[s] -= qty
                     cost_today += cost
@@ -79,6 +99,12 @@ def replay(payload):
             for s in sorted(desired):
                 unit = op[s]*(1+slip)*(1+fee)
                 qty = min(max(0, desired[s]-holdings.get(s,0)), max(0, floor((cash-opening_equity*reserve)/unit)))
+                if policy is not None:
+                    requested = max(0, desired[s]-holdings.get(s,0))
+                    if requested:
+                        order = submit(s, "BUY", requested, op[s], max(0,cash-opening_equity*reserve), day)
+                        qty = order["filled"]
+                        unit = order["price"]*(1+fee)
                 if qty:
                     cash -= qty*unit
                     holdings[s] = holdings.get(s,0)+qty
@@ -101,6 +127,11 @@ def replay(payload):
                           unsettled_cash=sum(v for _,v in pending), holdings=dict(holdings),
                           daily_return=equity/prior_equity-1, drawdown=equity/peak-1,
                           overnight_pnl=overnight, intraday_pnl=intraday, trade_cost=cost_today))
+        if policy is not None:
+            raw_volume = row.get("volume")
+            if not isinstance(raw_volume, dict) or set(raw_volume) != set(cl):
+                raise ValueError("MISSING_COMPLETED_SESSION_VOLUME")
+            prior_volume = {s:finite(v,"volume",minimum=0) for s,v in raw_volume.items()}
         history.append((str(day), cl))
         if i % cadence == 0:
             candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
@@ -122,7 +153,7 @@ def replay(payload):
     return dict(research_only=True, live_execution_enabled=False,
                 approved_for_model_training=False, historical_security_identity_verified=False,
                 broker_order_submission_enabled=False, execution_model="synthetic_next_open_cash_only",
-                curve=curve, trades=trades, allocations=allocations, total_cost=total_cost,
+                curve=curve, trades=trades, allocations=allocations, orders=orders, total_cost=total_cost,
                 total_return=prior_equity/initial-1, max_drawdown=min(p["drawdown"] for p in curve),
                 unexecuted_final_signal=targets is not None)
 
