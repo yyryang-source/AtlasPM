@@ -463,3 +463,45 @@ editor capable of rewriting both data and digests is outside this
 integrity check. No new borrowing, real training or broker order route
 is enabled. The institutional example and the historical cash replay
 remain separate acceptance stages, not a continuous live order bridge.
+
+
+## Opt-in assumed-margin session replay
+
+Cash-only replay remains the default. An explicit synthetic replay or
+closed-loop execution request may include:
+
+~~~json
+{"margin_policy":{"target_gross":1.5,"initial_fraction":0.5,
+                  "maintenance_fraction":0.3,"annual_apr":0.06},
+ "risk_policy":{"max_gross_leverage":2,"max_drawdown":0.25,
+                "equity_shock":0.2,"max_stress_loss_fraction":0.5}}
+~~~
+
+For the standalone replay set cash_reserve to zero. For the closed loop
+every candidate strategy must set cash_reserve to zero; optimizer
+configurations are rejected for this assumed-margin mode. The target
+gross is a fixed research policy, not automatically selected from the
+static leverage envelope. All candidates use the same financing policy.
+No broker margin or external order APIs are used.
+
+The ledger tracks principal, accrued interest, cumulative borrow/repay
+and interest paid. Simple ACT/365 interest accrues on the prior close's
+principal over elapsed calendar days, including weekends. Settled cash
+repays accrued interest then principal before new orders. Unsettled
+receivables are excluded from equity used to fund additional purchases.
+Conservative cost-aware gross and debt bounds cap purchase outlays.
+Opening risk breaches cancel additions and attempt sell-only execution
+at the supplied opening mark; close breaches latch a reduction for the
+following open. Partial fills may leave exposure and debt outstanding.
+Insolvency at open or close raises an explicit error; it does not model
+bankruptcy or an actual broker liquidation auction. Daily attribution
+subtracts financing interest as well as execution cost.
+
+The resulting execution model is synthetic_next_open_assumed_margin.
+A completed leveraged closed loop reports SYNTHETIC_MARGIN_CLOSED_LOOP_COMPLETE.
+Completion is not a guarantee of a positive return or broker approval.
+The fixed hypothetical long-only margin fractions, daily accrual convention,
+zero-reserve rank weighting and no portfolio-margin offsets are intentional
+research limitations. Cash optimizer constraints and the institutional OMS
+remain separate. The historical synthetic replay and new margin regressions
+are covered by the existing test_training*.py CI discovery.
