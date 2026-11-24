@@ -49,6 +49,19 @@ class ExtractTests(unittest.TestCase):
         self.assertEqual(r["observations"],[])
         self.assertEqual(r["conflicting_symbols"],["ABC"])
 
+    def test_legacy_explicit_columns_only(self):
+        x=filing()
+        header="<tr><th>Title of each class</th><th>Trading Symbol(s)</th><th>Name of each exchange on which registered</th></tr>"
+        legacy="<tr><td>Common stock</td><td>ABC</td><td>New York Stock Exchange</td></tr>"
+        r=v.extract(body(x,header+legacy),x)
+        self.assertEqual(r["observations"][0]["method"],"EXPLICIT_LEGACY_TABLE")
+        self.assertEqual(r["observations"][0]["exchange_mic_candidate"],"XNYS")
+        self.assertIsNone(r["observations"][0]["valid_from"])
+        for html in (legacy,header+legacy.replace("<td>ABC</td>",""),
+                     header+legacy.replace("<td>ABC","<td colspan='2'>ABC"),
+                     header+legacy+row(exchange_context="other")):
+            self.assertEqual(v.extract(body(x,html),x)["observations"],[])
+
     def test_header_and_exhibits(self):
         x=filing()
         b=body(x,"",extra="<DOCUMENT>\n<TYPE>EX-99\n<TEXT><table>"+row()+"</table></TEXT></DOCUMENT>")
@@ -87,6 +100,23 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(p["missing_index_quarters"],["2020-Q2","2020-Q3","2020-Q4"])
         p=v.plan(2020,max_issuers=1,after_cik=p["next_after_cik"])
         self.assertEqual(p["filings"],[self.items[2]])
+
+    def test_exit_only_issuer_and_incomplete_index(self):
+        x={**filing(cik="0000000125",number="000004"),"form":"25-NSE"}
+        cx=f._db()
+        try:
+            cx.execute("INSERT INTO filings VALUES (?,?,?,?,?,?)",
+                       [x[k] for k in ("quarter","cik","issuer","form","filed_date","source_url")])
+        finally:
+            cx.close()
+        r=v.run(2020,ciks=["125"])
+        self.assertEqual(r["selected_issuers"],["0000000125"])
+        self.assertEqual(r["issuers_without_sampled_cover_filing"],["0000000125"])
+        self.assertEqual(r["filings_selected"],0)
+        self.assertEqual(r["event_index_leads"][0]["kind"],"EXIT_FILING_LEAD")
+        self.assertIsNone(r["event_index_leads"][0]["effective_date"])
+        self.assertFalse(r["page_advance_allowed"])
+        self.assertEqual(r["certified_identities"],0)
 
     def test_budget_resume_cache_and_no_certification(self):
         with patch.object(v.ev,"download",side_effect=[body(self.items[1],row()),body(self.items[2],row("XYZ"))]) as fetch, \
