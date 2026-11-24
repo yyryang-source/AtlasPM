@@ -14,6 +14,10 @@ on:
       - 'pyproject.toml'
       - '.github/workflows/unified-portfolio.yml'
 
+concurrency:
+  group: unified-portfolio-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
