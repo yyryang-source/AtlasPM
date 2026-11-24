@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from math import isfinite
 from pathlib import Path
 import sqlite3
@@ -138,6 +139,17 @@ def _sql(spec, columns, symbols, start, end, relation):
             f" ORDER BY {','.join(spec.keys)}"), params
 
 
+def _finite_numeric(value):
+    """Accept native SQLite and DuckDB numerics without coercing Decimal."""
+    if type(value) is int:
+        return True
+    if type(value) is float:
+        return isfinite(value)
+    if isinstance(value, Decimal):
+        return value.is_finite()
+    return False
+
+
 def _batches(cursor, *, name, spec, columns, path, batch_size, version):
     previous = None
     while True:
@@ -150,10 +162,10 @@ def _batches(cursor, *, name, spec, columns, path, batch_size, version):
                 raise DataQualityError("Missing or duplicate/unordered observation key")
             previous = key
             for field, value in zip(columns, row):
-                if isinstance(value, float) and not isfinite(value):
+                if isinstance(value, (float, Decimal)) and not _finite_numeric(value):
                     raise DataQualityError(f"Non-finite value in {field}")
                 if field in {"open", "high", "low", "close", "adjusted_close"}:
-                    if not isinstance(value, (int, float)) or value <= 0:
+                    if not _finite_numeric(value) or value <= 0:
                         raise DataQualityError(f"Invalid price in {field}")
                 if field in {"volume", "volume_shares", "bid", "ask", "bid_size", "ask_size"}:
                     if value is not None and (not isinstance(value, (int, float)) or value < 0):
