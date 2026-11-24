@@ -1,0 +1,115 @@
+"""Offline historical cover observation tests; no SEC requests."""
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from unittest.mock import patch
+
+from atlaspm.data import hf_stock5m_identity_v56 as v
+from atlaspm.data import hf_stock5m_filings_v52 as f
+
+
+def filing(cik="0000000123",day="2020-01-03",number="000001"):
+    return {"quarter":"2020-Q1","cik":cik,"issuer":"Example","form":"8-K",
+            "filed_date":day,"source_url":f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/0000000123-20-{number}.txt"}
+
+
+def row(symbol="ABC",context="c1",exchange="The Nasdaq Stock Market LLC",title="Common Stock",exchange_context=None):
+    fields=[("Security12bTitle",title,context),("TradingSymbol",symbol,context),
+            ("SecurityExchangeName",exchange,exchange_context or context)]
+    return "<tr>"+"".join(f'<td><ix:nonNumeric name="dei:{k}" contextRef="{c}">{val}</ix:nonNumeric></td>'
+                            for k,val,c in fields)+"</tr>"
+
+
+def body(item,html,extra=""):
+    accession=item["source_url"].rsplit("/",1)[-1][:-4]
+    return (f'<SEC-DOCUMENT>\n<SEC-HEADER>\nACCESSION NUMBER: {accession}\n'
+            f'CENTRAL INDEX KEY: {item["cik"]}\nFILED AS OF DATE: {item["filed_date"].replace("-","")}\n'
+            f'</SEC-HEADER>\n<DOCUMENT>\n<TYPE>8-K\n<TEXT><table>{html}</table></TEXT></DOCUMENT>'
+            +extra+"</SEC-DOCUMENT>").encode()
+
+
+class ExtractTests(unittest.TestCase):
+    def test_share_classes_same_row(self):
+        x=filing()
+        r=v.extract(body(x,row()+row("ABC.B","c2","NYSE","Class B")),x)
+        self.assertEqual([(o["symbol"],o["exchange_mic_candidate"]) for o in r["observations"]],
+                         [("ABC","XNAS"),("ABC.B","XNYS")])
+        self.assertTrue(all(o["security_id"] is None and o["valid_from"] is None for o in r["observations"]))
+
+    def test_cross_context_and_unsupported_exchange_refused(self):
+        x=filing()
+        r=v.extract(body(x,row(exchange_context="other")+row("OTC","c2","OTC")),x)
+        self.assertEqual(r["observations"],[])
+        self.assertEqual(r["rejected_tagged_rows"],2)
+
+    def test_conflict_does_not_pick_one(self):
+        x=filing()
+        r=v.extract(body(x,row()+row(context="c2",exchange="NYSE")),x)
+        self.assertEqual(r["observations"],[])
+        self.assertEqual(r["conflicting_symbols"],["ABC"])
+
+    def test_header_and_exhibits(self):
+        x=filing()
+        b=body(x,"",extra="<DOCUMENT>\n<TYPE>EX-99\n<TEXT><table>"+row()+"</table></TEXT></DOCUMENT>")
+        self.assertEqual(v.extract(b,x)["status"],"NO_SUPPORTED_COVER_FACTS")
+        for altered in (b.replace(b"20200103",b"20200104"),b.replace(b"CENTRAL INDEX KEY: 0000000123",b"CENTRAL INDEX KEY: 0000000124")):
+            with self.assertRaises(ValueError):
+                v.extract(altered,x)
+
+
+class BatchTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            import duckdb
+        except ImportError:
+            self.skipTest("lake extra required")
+        self.tmp=TemporaryDirectory()
+        previous=Path.cwd()
+        os.chdir(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(os.chdir,previous)
+        Path("local_data").mkdir()
+        self.items=[filing(),filing(day="2020-02-03",number="000002"),
+                    filing(cik="0000000124",number="000003")]
+        cx=f._db()
+        try:
+            cx.execute("INSERT INTO partitions VALUES ('2020-Q1',?,'v52.1',3,0)",["a"*64])
+            cx.executemany("INSERT INTO filings VALUES (?,?,?,?,?,?)",
+                           [[x[k] for k in ("quarter","cik","issuer","form","filed_date","source_url")] for x in self.items])
+        finally:
+            cx.close()
+
+    def test_historical_pagination(self):
+        p=v.plan(2020,max_issuers=1)
+        self.assertEqual(p["filings"],[self.items[1]])
+        self.assertEqual(p["next_after_cik"],"0000000123")
+        self.assertEqual(p["missing_index_quarters"],["2020-Q2","2020-Q3","2020-Q4"])
+        p=v.plan(2020,max_issuers=1,after_cik=p["next_after_cik"])
+        self.assertEqual(p["filings"],[self.items[2]])
+
+    def test_budget_resume_cache_and_no_certification(self):
+        with patch.object(v.ev,"download",side_effect=[body(self.items[1],row()),body(self.items[2],row("XYZ"))]) as fetch, \
+             patch.object(v.time,"sleep"),patch.dict(os.environ,{"ATLASPM_SEC_USER_AGENT":"Test test@example.com"}):
+            a=v.run(2020,fetch=True,max_requests=1)
+            self.assertFalse(a["page_complete"])
+            self.assertEqual(a["cover_observations"],1)
+            b=v.run(2020,fetch=True,max_requests=1)
+            self.assertTrue(b["page_complete"])
+            self.assertEqual(b["cover_observations"],2)
+            c=v.run(2020)
+            self.assertEqual(c["cover_observations"],2)
+            self.assertEqual(c["network_downloads"],0)
+            self.assertEqual(fetch.call_count,2)
+        self.assertEqual(c["certified_identities"],0)
+        self.assertEqual(c["claims_ingested"],0)
+        self.assertFalse(c["approved_for_model_training"])
+        self.assertFalse(c["live_execution_enabled"])
+
+    def test_network_failure_stops_provider(self):
+        with patch.object(v.ev,"download",side_effect=ValueError("Provider HTTP 429")) as fetch, \
+             patch.object(v.time,"sleep"),patch.dict(os.environ,{"ATLASPM_SEC_USER_AGENT":"Test test@example.com"}):
+            r=v.run(2020,fetch=True)
+        self.assertTrue(r["network_stopped"])
+        self.assertFalse(r["page_complete"])
+        self.assertEqual(fetch.call_count,1)
