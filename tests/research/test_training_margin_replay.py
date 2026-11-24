@@ -76,6 +76,14 @@ class MarginReplayTests(unittest.TestCase):
         self.assertLessEqual(limit,1500/1.015+1e-8)
         self.assertGreater(limit,1000)
 
+    def test_existing_debt_cost_headroom_even_when_no_new_loan(self):
+        m=MarginFunding(1.5,.5,.3,.1,principal=749)
+        # Cash is intentionally present with existing debt to independently
+        # test the funding bound before the replay's normal repayment sweep.
+        limit=m.buy_budget(cash=1000,pending=0,gross=500,equity=751,adverse_cost_ratio=.01)
+        self.assertAlmostEqual(limit,200)
+        self.assertLessEqual(m.liability,751-limit*.01+1e-8)
+
     def test_prefix_invariance(self):
         p=fixture()
         a=replay(p)
