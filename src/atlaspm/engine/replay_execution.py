@@ -15,7 +15,7 @@ def execute_order(symbol, side, requested, mark, cash_limit, previous_volume, po
         raise ValueError("INVALID_EXECUTION_POLICY")
     volume = finite(previous_volume,"previous_session_volume",minimum=0)
     capacity = floor(volume*participation)
-    qty = min(requested,capacity,floor(requested*fraction),cash_limit)
+    qty = min(requested,capacity,floor(requested*fraction))
     # Conservative impact based on maximum requested feasible participation,
     # not future realized liquidity. Price is fixed for this synthetic order.
     impact = impact_bps/10000*sqrt(min(requested,capacity)/volume) if volume else 0.
@@ -23,6 +23,8 @@ def execute_order(symbol, side, requested, mark, cash_limit, previous_volume, po
     if adverse >= .1:
         raise ValueError("EXECUTION_COST_LIMIT")
     price = mark*(1+adverse if side=="BUY" else 1-adverse)
+    if side == "BUY":
+        qty = min(qty, max(0, floor(cash_limit/(price*(1+fee)))))
     events = [{"type":"SUBMIT"},{"type":"ACK"}]
     if qty:
         events.append({"type":"FILL","quantity":qty,"price":price,"fee":qty*price*fee})
