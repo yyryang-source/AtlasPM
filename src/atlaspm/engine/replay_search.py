@@ -17,6 +17,8 @@ def _apply(payload, params):
     out = deepcopy(payload)
     for key, value in params.items():
         if key.startswith("optimizer."):
+            if not isinstance(out.get("optimizer"),dict):
+                raise ValueError("OPTIMIZER_GRID_REQUIRES_BASE_CONFIG")
             out["optimizer"][key.split(".")[1]] = value
         else:
             out[key] = value
