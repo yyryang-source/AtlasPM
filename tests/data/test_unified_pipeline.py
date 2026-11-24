@@ -96,6 +96,21 @@ class UnifiedPipelineTests(unittest.TestCase):
         self.assertTrue(result["structural_preflight_passed"], result)
         self.assertFalse(result["approved_for_model_training"])
         self.assertEqual(result["months"][0]["factor_rows"], 1)
+        # Exercise the actual benchmark process on this fixture. These counters
+        # measure a synthetic test only, never production archive performance.
+        import subprocess
+        import sys
+        import json
+        script = Path(__file__).resolve().parents[2] / "scripts/maintenance/benchmark_unified_data.py"
+        proc = subprocess.run([sys.executable, str(script), "--dataset", "equity_5m",
+                               "--start", "2020-01-02", "--end", "2020-01-02",
+                               "--column", "close", "--no-tracemalloc"],
+                              capture_output=True, text=True, check=True)
+        measured = json.loads(proc.stdout)
+        self.assertEqual(measured["rows"], 1)
+        self.assertEqual(measured["emitted_source_file_bytes"], bars.stat().st_size)
+        self.assertIsNone(measured["python_peak_bytes"])
+        self.assertFalse(measured["approved_for_model_training"])
         self.assertEqual(result["evidence_id"],
                          data_admission.inspect_real_factors("2020-01", "2020-01")["evidence_id"])
         if find_spec("pandas_market_calendars"):

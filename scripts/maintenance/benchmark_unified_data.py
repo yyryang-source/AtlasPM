@@ -93,6 +93,7 @@ def main():
     parser.add_argument("--no-tracemalloc", action="store_true", help="Measure throughput without Python allocation tracing overhead")
     args = parser.parse_args()
     rows = batches = largest = 0
+    emitted_sources = {}
     rss_before = process_peak_rss_bytes()
     if not args.no_tracemalloc:
         tracemalloc.start()
@@ -108,6 +109,7 @@ def main():
                 rows += size
                 batches += 1
                 largest = max(largest, size)
+                emitted_sources[batch.origin] = batch.source_version_hint[0]
         elapsed, cpu_elapsed = perf_counter() - wall, process_time() - cpu
         io_after = process_io_counters()
         peak = tracemalloc.get_traced_memory()[1] if not args.no_tracemalloc else None
@@ -120,6 +122,8 @@ def main():
                           batch_size=args.batch_size, platform=sys.platform,
                           python_version=sys.version.split()[0], rows=rows, batches=batches,
                           largest_batch=largest, wall_seconds=elapsed,
+                          emitted_source_files=len(emitted_sources),
+                          emitted_source_file_bytes=sum(emitted_sources.values()),
                           cpu_seconds=cpu_elapsed, rows_per_second=rows / max(elapsed, 1e-9),
                           cpu_seconds_per_wall_second=cpu_elapsed / max(elapsed, 1e-9),
                           python_peak_bytes=peak, tracemalloc_enabled=not args.no_tracemalloc,

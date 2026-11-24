@@ -19,6 +19,8 @@ class QualityReviewTests(unittest.TestCase):
     def test_missing_factors_block_without_creating_database(self):
         report=q.review_month("2020-01")
         self.assertIn("FACTOR_LINEAGE_BLOCKED",report["blockers"])
+        self.assertEqual(len(report["evidence_id"]),64)
+        self.assertEqual(report,q.review_month("2020-01"))
         self.assertFalse(report["approved_for_model_training"])
         self.assertFalse(Path("local_data").exists())
 

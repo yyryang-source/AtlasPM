@@ -36,6 +36,12 @@ def _ledger_digest():
     return h.hexdigest()
 
 
+def _finish(report):
+    report["blockers"]=sorted(set(report["blockers"]))
+    report["evidence_id"]=_digest(report)
+    return report
+
+
 def review_month(month, *, reference_csv=None, reference_symbols=(),
                  memory="256MB", threads=1):
     """Check all observed factor symbol-days against prior-known ledger members.
@@ -54,12 +60,12 @@ def review_month(month, *, reference_csv=None, reference_symbols=(),
             "live_execution_enabled":False,"blockers":blockers,"days":[]}
     if not lineage["structural_preflight_passed"]:
         blockers.append("FACTOR_LINEAGE_BLOCKED")
-        return report
+        return _finish(report)
     try:
         before=_ledger_digest()
     except (OSError,ValueError):
         blockers.append("IDENTITY_ACTION_LEDGER_UNAVAILABLE_OR_CORRUPT")
-        return report
+        return _finish(report)
     path=factor_db._path(month,"hf","rth","factors")
     factor_before=fingerprint(path)["sha256"]
     if factor_before!=lineage["months"][0]["content"]["factors"]["sha256"]:
@@ -131,9 +137,7 @@ def review_month(month, *, reference_csv=None, reference_symbols=(),
             blockers.append("REFERENCE_SAMPLE_RECONCILIATION_FAILED")
     else:
         blockers.append("REFERENCE_PRICE_SAMPLE_NOT_PROVIDED")
-    report["blockers"]=sorted(set(blockers))
-    report["evidence_id"]=_digest(report)
-    return report
+    return _finish(report)
 
 
 def main():
