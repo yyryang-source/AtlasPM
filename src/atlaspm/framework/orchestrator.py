@@ -248,7 +248,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
@@ -256,6 +256,22 @@ def main():
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.action=="model-review":
+        from pathlib import Path
+        from atlaspm.data.market_db import private_path
+        from atlaspm.research.alpha_lifecycle import compare_versions
+        if not args.file:
+            parser.error("model-review requires --file")
+        path=private_path(Path(args.file),exists=True)
+        with path.open("rb") as handle:
+            raw=handle.read(65537)
+        if len(raw)>65536:
+            raise ValueError("MODEL_REVIEW_FILE_LIMIT")
+        data=json.loads(raw)
+        if set(data)!={"path","champion","challenger"}:
+            raise ValueError("MODEL_REVIEW_CONTRACT")
+        print(json.dumps(compare_versions(**data),indent=2,allow_nan=False))
+        return 0
     if args.action=="research":
         from pathlib import Path
         from atlaspm.data.market_db import private_path

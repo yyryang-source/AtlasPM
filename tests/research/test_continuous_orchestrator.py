@@ -269,3 +269,45 @@ class ContinuousTests(unittest.TestCase):
                 self.assertEqual(final["report"]["decision"],"HALT_RECONCILIATION")
             with self.assertRaisesRegex(ValueError,"PREFIX_CONFLICT"):
                 multiasset_fixture(checkpoint=path,scenario="normal")
+
+
+    def test_mixed_asset_candidate_ranking_reuses_preflight_and_blocks_missing_forecasts(self):
+        import json
+        from atlaspm.engine.autonomous_decision import rank_synthetic_baskets
+        root=Path(__file__).resolve().parents[2]/"examples"
+        ledger=json.loads((root/"institutional_batch_ledger.json").read_text())
+        plan=json.loads((root/"institutional_batch_plan.json").read_text())
+        stamp=ledger["valuation_at"]
+        rows=[]
+        for symbol,kind in (("QQQ","etf"),("91282CDE0","bond"),("QQQ-2027-01-15-P-280","option")):
+            rows.extend({**r,"asset_type":kind} for r in research(symbol,stamp,(.10,.11)))
+        out=rank_synthetic_baskets(ledger,[plan],rows=rows,as_of=stamp,weights={"m1":2,"m2":1},
+            horizon_days=1,annual_financing_rate=.06,risk_penalty=0)
+        self.assertEqual(out["research_candidate"],plan["batch_id"])
+        self.assertFalse(out["trade_authorized"])
+        out=rank_synthetic_baskets(ledger,[plan],rows=rows[:-2],as_of=stamp,weights={"m1":2,"m2":1},
+            horizon_days=1,annual_financing_rate=.06,risk_penalty=0)
+        self.assertEqual(out["decision"],"NO_TRADE")
+
+    def test_process_death_after_commit_leaves_recoverable_queue(self):
+        import subprocess,sys
+        row=fixture()["sessions"][0]["events"][0]
+        event_queue.enqueue([row])
+        code=(
+            "import os; from atlaspm.research import event_queue as q; "
+            "write=q._atomic_write; "
+            "q._atomic_write=lambda p,f:(write(p,f),os._exit(23)); "
+            "q.drain(as_of="+repr(row["received_at"])+")")
+        env=dict(os.environ)
+        env["PYTHONPATH"]=str(Path(__file__).resolve().parents[2]/"src")+os.pathsep+env.get("PYTHONPATH","")
+        child=subprocess.run([sys.executable,"-c",code],env=env,timeout=30,capture_output=True)
+        self.assertEqual(child.returncode,23,child.stderr.decode(errors="replace"))
+        lock=event_queue.PATH.with_suffix(".lock")
+        self.assertTrue(lock.exists())
+        with self.assertRaises(FileExistsError):
+            event_queue.drain(as_of=row["received_at"])
+        # We have joined the only writer process. Explicit operator cleanup,
+        # never automatic time-based lock stealing.
+        lock.unlink()
+        self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)
+        self.assertEqual(next(iter(event_queue._read_state(event_queue.PATH).values()))["state"],"completed")

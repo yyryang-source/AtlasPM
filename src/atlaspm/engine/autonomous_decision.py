@@ -182,3 +182,68 @@ def multiasset_position_review(position, *, as_of, risk_inputs):
     # No automatic plan because these marks, Greeks and credit are assumed.
     return {**FLAGS,"asset_type":kind,"metrics":metrics,"decision":"NO_TRADE",
             "block_reasons":blockers,"trade_authorized":False,"broker_margin_verified":False}
+
+
+def rank_synthetic_baskets(ledger, plans, *, rows, as_of, weights, horizon_days,
+                           annual_financing_rate, risk_penalty):
+    """Compare exact-leg synthetic candidates, not continuous asset weights.
+
+    Existing institutional preflight owns units, costs, collateral and
+    independent risk. Returns are per marked instrument (option premium,
+    dirty bond value), not underlying-stock returns. No short option,
+    unsupported maturity or unverified execution may gain authority.
+    """
+    from datetime import timedelta
+    from atlaspm.execution.institutional_batch import propose_multi_asset_batch
+    if (not isinstance(ledger,dict) or not ledger.get("_synthetic_fixture")
+        or not isinstance(plans,list) or not 1<=len(plans)<=8 or
+        any(not str(a["account_id"]).startswith("DEMO-") or any(p["mark_source"]!="synthetic"
+            for p in a["positions"]) for a in ledger["accounts"])
+        or any(not isinstance(p,dict) or not p.get("_synthetic_fixture") for p in plans)):
+        raise ValueError("SYNTHETIC_BASKET_FIXTURES_REQUIRED")
+    if any(p["account_id"]!=plans[0]["account_id"] for p in plans):
+        raise ValueError("BASKET_ACCOUNT_MISMATCH")
+    if timestamp(ledger["valuation_at"],"valuation_at")!=timestamp(as_of,"as_of"):
+        raise ValueError("BASKET_VALUATION_MISMATCH")
+    if any(r.get("synthetic_fixture") is not True for r in rows):
+        raise ValueError("SYNTHETIC_BASKET_RESEARCH_REQUIRED")
+    rate=finite(annual_financing_rate,"financing_rate",minimum=0)
+    penalty=finite(risk_penalty,"risk_penalty",minimum=0)
+    if rate>1 or penalty>10:
+        raise ValueError("BASKET_ASSUMPTION_LIMIT")
+    decision=decide(rows,as_of=as_of,weights=weights,horizon_days=horizon_days,cost_fraction=0)
+    groups={(g["security_id"],g["asset_type"]):g for g in decision["candidates"]}
+    through=(timestamp(as_of,"as_of")+timedelta(days=horizon_days)).date().isoformat()
+    results=[]
+    for plan in plans:
+        approval=propose_multi_asset_batch(ledger,plan)
+        row={"batch_id":approval["batch_id"],"plan_sha256":digest(plan),"status":"BLOCKED",
+             "reasons":list(approval["block_reasons"]),"score":None}
+        projected=approval["pro_forma_unexecuted"]
+        if approval["decision"]=="ALLOW_PAPER_INTENT":
+            expected=0.
+            for p in projected["positions"]:
+                sid="SYN:"+p["identifier"]
+                kind=p["type"]
+                types=("stock","etf") if kind=="equity" else ("option",) if kind=="option" else ("bond",)
+                matches=[groups[(sid,a)] for a in types if (sid,a) in groups]
+                if len(matches)!=1 or matches[0]["blocked_reasons"]:
+                    row["reasons"].append("MISSING_ROBUST_INSTRUMENT_FORECAST")
+                    continue
+                if kind=="option" and (p["contracts"]<0 or p["expiration_date"]<=through):
+                    row["reasons"].append("OPTION_MARGIN_OR_EXPIRY_UNSUPPORTED")
+                if kind=="treasury" and (p["maturity_date"]<=through or p["dv01_usd_per_bp"] is None):
+                    row["reasons"].append("BOND_MATURITY_OR_DURATION_UNSUPPORTED")
+                expected+=p["market_value"]*matches[0]["lower_bound"]
+            if not row["reasons"]:
+                financing=projected["margin_debt"]*rate*horizon_days/365
+                cost=projected["total_fee"]
+                stress=projected["net_liquidation"]*projected["conservative_stress_loss_fraction_without_put_credit"]
+                row.update(status="EXPERIMENTAL_REVIEW",lower_pnl=expected,
+                           financing_cost_assumption=financing,entry_fees=cost,stress_loss=stress,
+                           score=expected-financing-cost-penalty*stress)
+        results.append(row)
+    results.sort(key=lambda r:(r["score"] is None,-(r["score"] or 0),r["batch_id"]))
+    chosen=next((r["batch_id"] for r in results if r["score"] is not None and r["score"]>0),None)
+    return {**FLAGS,"candidates":results,"research_candidate":chosen,
+            "trade_authorized":False,"weights_validated":False,"decision":"REVIEW_ONLY" if chosen else "NO_TRADE"}

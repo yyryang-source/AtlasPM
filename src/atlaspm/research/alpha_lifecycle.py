@@ -121,3 +121,30 @@ def transition(path,version,target,reason):
         events=_history(con,version)
         _append(con,version,events,target,events[0]["run_id"],reason.strip())
     return history(path,version)
+
+
+def compare_versions(path, champion, challenger):
+    """Read-only comparison of already registered research versions.
+
+    No approval based on a caller-provided report. Same dataset, holdout
+    boundary and risk/evaluation configuration required. Never promotes or
+    reactivates a suspended version; rollback requires new validation.
+    """
+    if champion==challenger:
+        raise ValueError("DISTINCT_ALPHA_VERSIONS_REQUIRED")
+    records=[]
+    for version in (champion,challenger):
+        life=history(path,version)
+        evidence=load(path,life["events"][0]["run_id"])
+        report=evidence["report"]
+        records.append((life,evidence,report))
+    left,right=records
+    comparable=(left[2]["dataset_sha256"]==right[2]["dataset_sha256"]
+                and left[2]["config"]==right[2]["config"])
+    return {**FLAGS,"comparable":comparable,
+            "versions":[{"version":life["version"],"state":life["state"],
+                         "registry_run_id":ev["run_id"],"report_sha256":ev["report_sha256"],
+                         "holdout":report["holdout"] if comparable else None}
+                        for life,ev,report in records],
+            "independent_review_required":True,"rollback_requires_new_validation":True,
+            "automatic_promotion_enabled":False,"paper_eligible":False}

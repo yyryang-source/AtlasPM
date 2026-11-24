@@ -131,6 +131,9 @@ class AlphaTests(unittest.TestCase):
             self.assertEqual(a["strategy_status"],"VALIDATED")
             version=a["strategy_version"]
             self.assertEqual(history(db,version)["state"],"VALIDATED")
+            from atlaspm.research.alpha_lifecycle import compare_versions
+            with self.assertRaisesRegex(ValueError,"DISTINCT_ALPHA"):
+                compare_versions(db,version,version)
             self.assertEqual(load(db,a["registry_run_id"])["report"]["strategy_version"],version)
             with self.assertRaisesRegex(ValueError,"ALPHA_ONLY_DE_RISK"):
                 transition(db,version,"PAPER_ACTIVE","untrusted promotion")
