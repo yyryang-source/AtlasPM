@@ -171,9 +171,18 @@ def _window(month,months,calendar,horizon):
     return [m for m in months if month<=m<=last]
 
 
+def _dataset_key(config, calendar_sha, inputs, lineage_id=None):
+    payload={"config":config,"calendar_sha256":calendar_sha,"inputs":inputs}
+    if lineage_id is not None:
+        payload["lineage_id"]=lineage_id
+    return _digest(payload)
+
+
 def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
           minimum_train_sessions=60,test_sessions=20,embargo_sessions=1,
-          memory="2GB",threads=2,plan_only=False):
+          memory="2GB",threads=2,plan_only=False,verify_lineage=False):
+    if type(verify_lineage) is not bool:
+        raise ValueError("verify_lineage must be boolean")
     months,config=_config(start,end,features,horizons,minimum_train_sessions,test_sessions,embargo_sessions)
     inputs,missing=_inputs(months)
     report={"schema":VERSION,**v4.GUARDS,"mode":"real_unverified_research",
@@ -187,7 +196,19 @@ def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
         return report
     calendar=_calendar(months)
     hashes={m:{"data":_stamp(p),"meta":_stamp(p.with_suffix(".json"))} for m,p in inputs.items()}
-    key=_digest({"config":config,"calendar_sha256":_digest(calendar),"inputs":hashes})
+    lineage=None
+    if verify_lineage:
+        from atlaspm.data.unified_pipeline import factor_preflight
+        lineage=factor_preflight(start,end,memory=memory,threads=threads)
+        if not lineage["structural_preflight_passed"]:
+            raise ValueError("UNIFIED_FACTOR_LINEAGE_BLOCKED")
+        for record in lineage["months"]:
+            expected=hashes[record["month"]]
+            if (record["content"]["factors"]["sha256"]!=expected["data"]["sha256"]
+                    or record["content"]["factor_metadata"]["sha256"]!=expected["meta"]["sha256"]):
+                raise ValueError("Factor inputs changed during unified preflight")
+    lineage_id=lineage["evidence_id"] if lineage else None
+    key=_dataset_key(config,_digest(calendar),hashes,lineage_id)
     root=private_path(BASE/key[:24])
     root.mkdir(parents=True,exist_ok=True)
     manifest=root/"manifest.json"
@@ -226,6 +247,12 @@ def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
             raise ValueError("Factor input changed during build; no dataset publication")
     finally:
         cx.close()
+    if lineage:
+        current=factor_preflight(start,end,memory=memory,threads=threads)
+        if not current["structural_preflight_passed"] or current["evidence_id"]!=lineage_id:
+            raise ValueError("Unified lineage changed during dataset build")
+        report["lineage_id"]=lineage_id
+        report["factor_lineage"]=lineage
     report.update({"status":"RESEARCH_DATASET_READY_TRAINING_BLOCKED","dataset_id":key,
                    "inputs":hashes,"calendar_sha256":_digest(calendar),"sessions":len(calendar),
                    "partitions":partitions,"rows":sum(x["rows"] for x in partitions),
@@ -245,7 +272,7 @@ def inspect(dataset_id):
     m=json.loads(path.read_text(encoding="utf-8"))
     if m.get("schema")!=VERSION or m.get("dataset_id")!=dataset_id:
         raise ValueError("Invalid dataset manifest")
-    if _digest({"config":m["config"],"calendar_sha256":m["calendar_sha256"],"inputs":m["inputs"]})!=dataset_id:
+    if _dataset_key(m["config"],m["calendar_sha256"],m["inputs"],m.get("lineage_id"))!=dataset_id:
         raise ValueError("Dataset manifest identity mismatch")
     if [p["month"] for p in m["partitions"]]!=m["config"]["months"]:
         raise ValueError("Dataset partition inventory mismatch")
@@ -256,4 +283,5 @@ def inspect(dataset_id):
             raise ValueError("Dataset partition integrity failure")
     # Never propagate flags that may have been edited in a local JSON file.
     return {**m,**v4.GUARDS,"mode":"real_unverified_research","synthetic_fixture":False,
+            "approved_for_backtest":False,"point_in_time_verified":False,
             "status":"RESEARCH_DATASET_READY_TRAINING_BLOCKED"}

@@ -165,3 +165,38 @@ class RealDatasetTests(unittest.TestCase):
         with patch.object(v,"_calendar",return_value=CAL[:-1]):
             with self.assertRaisesRegex(ValueError,"Calendar has changed"):
                 pre.run(r["dataset_id"])
+
+    def test_source_revision_and_rehashed_features_block_preflight(self):
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        self.seed()
+        r=self.build()
+        p=Path(r["partitions"][0]["path"])
+        stage=p.with_suffix(".part")
+        cx=v.factor._db("512MB",1)
+        try:
+            src=v.factor._files_sql([p])
+            cx.execute(f" COPY (SELECT * REPLACE (mom_5d+0.01 AS mom_5d) FROM {src}) TO {v.factor._quoted(stage)} (FORMAT PARQUET)")
+        finally:
+            cx.close()
+        stage.replace(p)
+        r["partitions"][0]["sha256"]=v._stamp(p)["sha256"]
+        Path(r["manifest_path"]).write_text(json.dumps(r),encoding="utf-8")
+        with patch.object(v,"_calendar",return_value=CAL):
+            with self.assertRaisesRegex(ValueError,"feature/source reconciliation failed"):
+                pre.run(r["dataset_id"])
+        source=v.factor._path("2020-01","hf","rth","factors").with_suffix(".json")
+        data=json.loads(source.read_text(encoding="utf-8"))
+        data["modified"]=True
+        source.write_text(json.dumps(data),encoding="utf-8")
+        with patch.object(v,"_calendar",return_value=CAL):
+            with self.assertRaisesRegex(ValueError,"factor input revision mismatch"):
+                pre.run(r["dataset_id"])
+
+    def test_canonical_bridge_cannot_bypass_unified_lineage(self):
+        from atlaspm.research import data_admission as gate
+        self.seed()
+        with patch.object(v,"_calendar",return_value=CAL):
+            with self.assertRaisesRegex(ValueError,"UNIFIED_FACTOR_LINEAGE_BLOCKED"):
+                gate.build_research_dataset("2020-01","2020-02",features=["mom_5d"],horizons=[1])
+        with self.assertRaisesRegex(ValueError,"cannot be overridden"):
+            gate.build_research_dataset("2020-01","2020-02",verify_lineage=False)
