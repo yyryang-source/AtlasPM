@@ -12,6 +12,7 @@ from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 from atlaspm.research.training_memory import FoldArrays
+from atlaspm.research.training_compact import IndexedRows
 
 
 def _fingerprint(payload):
@@ -154,8 +155,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             continue
         with FoldArrays(array_budget_mib,spill_dir) as arrays:
             fold_predictions={m:[] for m in models}
-            train_rows=[samples[i] for i in fold["train"]]
-            test_rows=[samples[i] for i in fold["test"]]
+            train_rows=IndexedRows(samples,fold["train"])
+            test_rows=IndexedRows(samples,fold["test"])
             x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
             y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
             mean=x.mean(axis=0)
