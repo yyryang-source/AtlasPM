@@ -101,6 +101,15 @@ permissions are implied. Start with `market-db factor-catalog` and
 
 **Current evidence limits:** The expanded current-listed US dataset has about 5,830 cached symbols, but it is not a historical point-in-time universe; it is vulnerable to survivorship bias. In the first full-market LightGBM V2 experiment, held-out Rank IC was **-0.01774** versus **+0.11176** for a simple momentum baseline, and Top-10 scores tied across decision dates. This model is **not eligible for automatic trading**. The separate RiskNet/FusionNet historical results have also been examined repeatedly and require independent validation.
 
+## Complete trading lifecycle (seven-phase integration framework)
+
+The [complete trading lifecycle](docs/TRADING_LIFECYCLE.md) maps the seven
+phases from investment mandate through data, strategy, risk, execution,
+position management and exit, to attribution and model review. Inspect its
+21-step offline review contract with `python -m atlaspm.framework.trading_lifecycle`.
+The framework does not execute trades or verify declared evidence; existing
+manual Paper behavior and the eight-stage research registry are unchanged.
+
 ## Standard quantitative workflow (research specification)
 
 The target architecture is **Data & governance → Alpha research →
