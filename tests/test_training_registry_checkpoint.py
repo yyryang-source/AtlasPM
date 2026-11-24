@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,7 +33,7 @@ class RegistryTests(unittest.TestCase):
             path=Path(tmp)/"runs.sqlite3"
             report=dict(FLAGS,dataset_sha256="a"*64)
             a=register(path,{},report)
-            with sqlite3.connect(path) as con:
+            with closing(sqlite3.connect(path)) as con, con:
                 con.execute("UPDATE research_runs SET config_json=?",('{"changed":true}',))
             with self.assertRaisesRegex(ValueError,"REGISTRY_INTEGRITY_FAILURE"):
                 load(path,a)
