@@ -60,6 +60,9 @@ jobs:
       - name: Verify empty V5.3 ledger cannot authorize training
         run: python -m atlaspm.cli market-db hf-5m-security-inventory-v53
 
+      - name: Verify V5.4 anomaly discovery and evidence budget
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_discovery_v54.py" -v
+
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
 
@@ -89,3 +92,6 @@ jobs:
 
       - name: Verify V5.3 ledger and path handling on Windows
         run: python -m unittest discover -s tests -p "test_hf_stock5m_security_master_v53.py" -v
+
+      - name: Verify V5.4 anomaly discovery on Windows
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_discovery_v54.py" -v

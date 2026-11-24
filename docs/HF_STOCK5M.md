@@ -689,3 +689,52 @@ coverage, adjustment and rights requirements remain in force.
 
 Local SQLite ledger and inventory: local_data/stock_5m/huggingface/quality/certification_v5/security_master_v53/.
 Do not commit source data or reviewed claims to GitHub.
+
+
+## V5.4 targeted market anomaly investigation
+
+Start with one real archive month, with the preceding month as lookback.
+The scanner reuses V4 full-NYSE-slot projection and the factor mart's
+bounded-memory DuckDB connection, storing a separate research daily
+cache. It does not alter canonical OHLCV or factor partitions.
+Daily caches bind source size/mtime, calendar digest, parser version
+and cached Parquet SHA-256. Do not run concurrent writers.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-discover-v54 --month 2026-03 --threshold 1.5 --limit 200 --memory 2GB --threads 2
+& $py -m atlaspm.cli market-db hf-5m-investigate-v54 --month 2026-03 --max-events 10 --per-event 5
+# After reviewing the offline plan and configuring ATLASPM_SEC_USER_AGENT:
+& $py -m atlaspm.cli market-db hf-5m-investigate-v54 --month 2026-03 --max-events 10 --per-event 5 --max-requests 20 --fetch
+~~~
+
+Consecutive NYSE-session gaps compare the prior final full slot's close
+to the current first full slot's open. Default symmetric multiplicative
+threshold 1.5 means ratio >=1.5 or <=1/1.5; nearby integer or reciprocal
+ratios are only split-like hypotheses. Observation gaps of at least ten
+calendar sessions are separately flagged; missing data, halts and
+ticker reuse can cause gaps. Interior session completeness is unverified.
+First/last observations cannot establish IPO or delisting; the
+one-month lookback is censored and no disappearance date is inferred.
+The queue reports total detected and truncation; the strongest anomalies
+are not a representative sample or a training feature.
+
+Investigation searches the V5.2 local SEC filing index using candidate
+CIKs from the latest captured V5.1 current ticker snapshot, with an
+event window from 14 calendar days before to 30 after the observed date.
+This present-day mapping is explicitly a search lead, not PIT identity.
+Ambiguous and absent CIK leads stay unresolved. Eligible candidates
+are prioritized for a bounded investigation, and queue-wide lead counts
+are reported. The lookahead window is for retrospective evidence
+research only; not for signals at the event date.
+No current mapping is written to a historical ledger. The V5.2
+collector keeps original filing bodies and unverified text hints.
+A global request budget and network-failure stop apply across events.
+No automatic reviewed claim ingestion, event confirmation, split
+adjustment, certification, or training authorization. Independent
+evidence, historical ticker/share-class identity and completeness
+must still be supplied.
+
+Local output: local_data/stock_5m/huggingface/quality/certification_v5/discovery_v54/
+(daily/, queues/YYYY-MM.json, latest.json). V5.2 index must be built
+before meaningful filing selection; missing quarters are reported.
