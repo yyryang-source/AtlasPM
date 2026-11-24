@@ -1,4 +1,5 @@
 import unittest
+from importlib.util import find_spec
 from datetime import date, timedelta
 
 from atlaspm.engine.replay import replay
@@ -28,6 +29,7 @@ def rolling_fixture(method):
     return p
 
 
+@unittest.skipUnless(find_spec('numpy') and find_spec('scipy'), 'portfolio extra required; exercised in historical replay CI')
 class RollingAllocationTests(unittest.TestCase):
     def test_all_methods(self):
         for method in sorted(METHODS):
