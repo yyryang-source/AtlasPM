@@ -5,17 +5,21 @@ on:
     paths:
       - "src/atlaspm/data/factor_db.py"
       - "src/atlaspm/data/factor_eval.py"
+      - "src/atlaspm/data/factor_v3.py"
       - "src/atlaspm/data/market_db.py"
       - "tests/test_factor_db.py"
       - "tests/test_factor_eval.py"
+      - "tests/test_factor_v3.py"
       - ".github/workflows/factor-db.yml"
   pull_request:
     paths:
       - "src/atlaspm/data/factor_db.py"
       - "src/atlaspm/data/factor_eval.py"
+      - "src/atlaspm/data/factor_v3.py"
       - "src/atlaspm/data/market_db.py"
       - "tests/test_factor_db.py"
       - "tests/test_factor_eval.py"
+      - "tests/test_factor_v3.py"
       - ".github/workflows/factor-db.yml"
 
 jobs:
@@ -37,5 +41,7 @@ jobs:
         run: python -m unittest discover -s tests -p "test_factor_db.py" -v
       - name: Verify experimental factor evaluation on synthetic fixtures
         run: python -m unittest discover -s tests -p "test_factor_eval.py" -v
+      - name: Verify V3 normalization, neutralization, IC embargo and composite with synthetic data
+        run: python -m unittest discover -s tests -p "test_factor_v3.py" -v
       - name: Protect top-level CLI compatibility
         run: python -m unittest discover -s tests -p "test_cli_families.py" -v
