@@ -51,3 +51,8 @@ Further portfolio research is planned in the existing engine modules; the empty
 ## Maintenance
 
 `README.md` is the single current entry point. Topic-specific quantitative and selection methods stay in `docs/quant` and `docs/selection`; historical experiments remain in Git history or method notes. All new modules use their canonical domain paths (for example, `atlaspm.engine`, `atlaspm.research`, `atlaspm.risk`, `atlaspm.data` and `atlaspm.strategies.equity`). The former `atlaspm.quant` and `atlaspm.selection` module aliases remain compatibility paths. Legacy import shims will be removed only in a documented breaking change after tests and CLI consumers migrate.
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

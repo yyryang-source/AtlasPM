@@ -33,12 +33,16 @@ def _connect(path):
     path=Path(path)
     path.parent.mkdir(parents=True,exist_ok=True)
     con=sqlite3.connect(path,timeout=30)
-    con.execute("PRAGMA foreign_keys=ON")
-    con.execute("""CREATE TABLE IF NOT EXISTS research_runs (
-        run_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
-        kind TEXT NOT NULL, config_json TEXT NOT NULL,
-        report_json TEXT NOT NULL, report_sha256 TEXT NOT NULL
-    )""")
+    try:
+        con.execute("PRAGMA foreign_keys=ON")
+        con.execute("""CREATE TABLE IF NOT EXISTS research_runs (
+            run_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+            kind TEXT NOT NULL, config_json TEXT NOT NULL,
+            report_json TEXT NOT NULL, report_sha256 TEXT NOT NULL
+        )""")
+    except BaseException:
+        con.close()
+        raise
     return con
 
 
