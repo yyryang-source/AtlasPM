@@ -21,7 +21,7 @@ def _stats(returns: list[float], benchmark: list[float]) -> dict[str, Any]:
     vol = stdev(returns) * sqrt(annual)
     downside = sqrt(sum(min(0., r)**2 for r in returns) / n) * sqrt(annual)
     wealth, peak = 1., 1.
-    worst, duration, active, longest = 0., 0, 0, 0
+    worst, active, longest = 0., 0, 0
     for r in returns:
         wealth *= 1+r
         peak = max(peak, wealth)

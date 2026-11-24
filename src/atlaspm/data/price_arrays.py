@@ -64,9 +64,9 @@ def load_stock_price_arrays(
     for symbol in out_of_order:
         dates, prices = histories[symbol]
         ordered = sorted(zip(dates, prices), key=lambda item: item[0])
-        for previous, current in zip(ordered, ordered[1:]):
-            if previous[0] == current[0]:
-                raise ValueError(f"Duplicate price for {symbol} on {current[0]}")
+        for index in range(1,len(ordered)):
+            if ordered[index-1][0] == ordered[index][0]:
+                raise ValueError(f"Duplicate price for {symbol} on {ordered[index][0]}")
         dates[:] = (item[0] for item in ordered)
         prices[:] = (item[1] for item in ordered)
     return histories

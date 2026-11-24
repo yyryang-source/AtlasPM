@@ -10,8 +10,8 @@ from collections import defaultdict
 from math import sqrt
 from typing import Any, Mapping, Sequence
 
-from atlaspm.quant.mean_variance import _validate_covariance, optimize_mean_variance
-from atlaspm.quant.optimizer import inverse_volatility_weights
+from atlaspm.engine.mean_variance import _validate_covariance, optimize_mean_variance
+from atlaspm.engine.optimizer import inverse_volatility_weights
 from atlaspm.engine.contracts import Account, Candidate, finite
 
 METHODS = frozenset({
@@ -52,7 +52,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         raise ValueError("INFEASIBLE_NAME_CAP_OR_CASH_TARGET")
     equity = account.net_liquidation
     held = {h.symbol: h for h in account.holdings}
-    if any(h.symbol not in symbols for h in account.holdings):
+    if held.keys() - set(symbols):
         raise ValueError("UNMODELED_EXISTING_HOLDING_CANNOT_BE_DISCARDED")
     current = np.array([held[s].shares * held[s].price / equity if s in held else 0.0
                         for s in symbols], dtype=float)
@@ -108,7 +108,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
 
     def risk_loss(x: Any) -> float:
         contributions = x * (cov @ x)
-        v = max(variance(x), 1e-14)
+        v = max(float(contributions.sum()), 1e-14)
         return float(np.sum((contributions / v - b) ** 2))
 
     if method == "cvar":
@@ -127,30 +127,35 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         cost = np.zeros(dimension)
         cost[n] = 1.0
         cost[n+1:n+1+m] = 1. / ((1-confidence)*m)
-        rows, rhs = [], []
-        for row_i in range(m):
-            row = np.zeros(dimension)
-            row[:n] = -matrix[row_i]
-            row[n] = -1
-            row[n+1+row_i] = -1
-            rows.append(row)
-            rhs.append(0.)
-        for j in range(n):
-            plus = np.zeros(dimension); minus = np.zeros(dimension)
-            plus[j] = 1; plus[n+1+m+j] = -1
-            minus[j] = -1; minus[n+1+m+j] = -1
-            rows.extend([plus, minus])
-            rhs.extend([float(current[j]), float(-current[j])])
-        turnover_row = np.zeros(dimension)
-        turnover_row[n+1+m:] = 1
-        rows.append(turnover_row)
-        rhs.append(turnover_limit)
-        for sector, ids in industries.items():
-            row = np.zeros(dimension); row[ids] = 1
-            rows.append(row); rhs.append(sector_limits[sector])
-        eq = np.zeros((1, dimension)); eq[0, :n] = 1.
+        # Sparse block constraints avoid allocating O(m*m) zero coefficients.
+        from scipy.sparse import csr_matrix, eye, hstack, vstack
+        scenario_block = hstack([
+            csr_matrix(-matrix), csr_matrix(-np.ones((m, 1))),
+            -eye(m, format="csr"), csr_matrix((m, n))
+        ], format="csr")
+        ident = eye(n, format="csr")
+        empty = csr_matrix((n, m+1))
+        plus = hstack([ident, empty, -ident], format="csr")
+        minus = hstack([-ident, empty, -ident], format="csr")
+        turnover_row = hstack([csr_matrix((1, n+m+1)),
+                               csr_matrix(np.ones((1, n)))], format="csr")
+        sector_row = []
+        sector_col = []
+        for row_i, ids in enumerate(industries.values()):
+            sector_row.extend([row_i]*len(ids))
+            sector_col.extend(ids)
+        sector_matrix = csr_matrix((np.ones(len(sector_col)), (sector_row, sector_col)),
+                                   shape=(len(industries), n))
+        sector_block = hstack([sector_matrix, csr_matrix((len(industries), m+n+1))],
+                              format="csr")
+        inequalities = vstack([scenario_block, plus, minus, turnover_row, sector_block],
+                              format="csr")
+        rhs = np.concatenate([np.zeros(m), current, -current, [turnover_limit],
+                              [sector_limits[s] for s in industries]])
+        eq = hstack([csr_matrix(np.ones((1, n))),
+                     csr_matrix((1, dimension-n))], format="csr")
         lp_bounds = [(0., cap)]*n + [(None, None)] + [(0., None)]*(m+n)
-        result = linprog(cost, A_ub=np.array(rows), b_ub=np.array(rhs),
+        result = linprog(cost, A_ub=inequalities, b_ub=rhs,
                          A_eq=eq, b_eq=np.array([target_total]),
                          bounds=lp_bounds, method="highs")
         if not result.success:
@@ -182,12 +187,13 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         or any(sum(weights[ids]) > sector_limits[s]+tol for s, ids in industries.items())
         or sum(abs(weights-current)) > turnover_limit+tol):
         raise ValueError("OPTIMIZER_CONSTRAINT_RESIDUAL_FAILED")
+    modeled_variance = variance(weights)
     return {
         "method": method, "symbols": symbols,
         "weights": {s: float(w) for s, w in zip(symbols, weights)},
         "target_cash_fraction": 1-target_total, "iterations": iterations,
-        "modeled_variance": variance(weights),
-        "modeled_annual_volatility": sqrt(max(0.,variance(weights))),
+        "modeled_variance": modeled_variance,
+        "modeled_annual_volatility": sqrt(max(0.,modeled_variance)),
         "turnover_fraction_conservative": float(sum(abs(weights-current))),
         "research_only": True, "live_execution_enabled": False,
         "broker_order_submission_enabled": False,
