@@ -94,8 +94,8 @@ class InstitutionalTests(unittest.TestCase):
                     text="Rating: Hold\nTarget Price (USD, 2020-03-31, GAAP): 120\nEPS (USD, 2020-03-31, GAAP): 4")
         self.report("r3",received="2020-01-04",published="2020-01-03",
                     text="Rating: Sell\nTarget Price (USD, 2020-03-31, GAAP): 110\nEPS (USD, 2020-03-31, GAAP): 3\nRevenue (USD, 2020-03-31, GAAP): 1200")
-        self.report("r4",analyst="a3",evidence="news_relay",text="Rating: Buy")
-        self.report("r5",analyst="a4",available=False,text="Rating: Buy")
+        self.report("r4",analyst="a3",received="2020-01-04",evidence="news_relay",text="Rating: Buy")
+        self.report("r5",analyst="a4",received="2020-01-04",available=False,text="Rating: Buy")
         out=ir.factors(subject="conid:123",as_of="2020-01-05T00:00:00Z",
                        previous_as_of="2020-01-03T00:00:00Z",unit="USD",period="2020-03-31",basis="GAAP")
         self.assertEqual(out["sample_counts"]["ratings"],2)
