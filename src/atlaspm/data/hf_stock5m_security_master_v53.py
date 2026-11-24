@@ -100,6 +100,20 @@ def _payload(kind,p):
     return p
 
 
+def _primary_path(r):
+    path=private_path(Path(r["evidence_path"]),exists=True)
+    # Within our own evidence tree, only raw content-addressed bodies or
+    # collector objects can be cited. Reports, queues, hints and manifests
+    # are derived artifacts, not independent source bytes.
+    root=private_path(ROOT)
+    if path.is_relative_to(root):
+        raw_roots=(private_path(ROOT/"filings_v52"/"bodies"),
+                   private_path(ROOT/"collector"/"objects"))
+        if path.parent not in raw_roots or path.name!=r["evidence_sha256"]+".bin":
+            raise ValueError("Pipeline reports and hints are not primary source evidence")
+    return path
+
+
 def validate(row, checked):
     if not isinstance(row,dict) or set(row)!=FIELDS:
         raise ValueError("Unexpected reviewed claim fields")
@@ -113,16 +127,7 @@ def validate(row, checked):
         raise ValueError("Require HTTPS provenance URL")
     if not isinstance(r["evidence_sha256"],str) or not SHA.fullmatch(r["evidence_sha256"]):
         raise ValueError("Invalid evidence SHA-256")
-    path=private_path(Path(r["evidence_path"]),exists=True)
-    # Within our own evidence tree, only raw content-addressed bodies or
-    # collector objects can be cited. Reports, queues, hints and manifests
-    # are derived artifacts, not independent source bytes.
-    root=private_path(ROOT)
-    if path.is_relative_to(root):
-        raw_roots=(private_path(ROOT/"filings_v52"/"bodies"),
-                   private_path(ROOT/"collector"/"objects"))
-        if path.parent not in raw_roots or path.name!=r["evidence_sha256"]+".bin":
-            raise ValueError("Pipeline reports and hints are not primary source evidence")
+    path=_primary_path(r)
     key=str(path)
     if key not in checked:
         checked[key]=fingerprint(path)["sha256"]
@@ -223,7 +228,7 @@ def _resolve(rows,checked):
         return None,"CONFLICTING_VISIBLE_ASSERTIONS"
     try:
         for r in rows:
-            path=private_path(Path(r["evidence_path"]),exists=True)
+            path=_primary_path(r)
             key=str(path)
             if key not in checked:
                 checked[key]=fingerprint(path)["sha256"]
