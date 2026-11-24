@@ -6,16 +6,14 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import time
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from atlaspm.data.market_db import dt, option_id, private_path
+from atlaspm.data.api_gateway import DEFAULT_GATEWAY
 
 FISCAL = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/treasury_securities_auctions_v2"
 MASSIVE = "https://api.massive.com"
@@ -29,27 +27,9 @@ BCOLS = ("symbol", "bar", "datetime_et", "date_et", "timestamp_ms", "open", "hig
 
 
 def get_json(url: str, key: str | None = None) -> dict:
-    p = urlparse(url)
-    host = "api.massive.com" if key else "api.fiscaldata.treasury.gov"
-    if p.scheme != "https" or p.netloc != host:
-        raise ValueError("Blocked external provider URL")
-    headers = {"User-Agent": "AtlasPM/0.7.0 research", "Accept": "application/json"}
-    if key:
-        headers["Authorization"] = "Bearer " + key
-    try:
-        with urlopen(Request(url, headers=headers), timeout=45) as response:
-            data = json.load(response)
-    except HTTPError as exc:
-        if exc.code in (401, 403):
-            raise ValueError(f"{host}: HTTP {exc.code}, check API key and subscription") from exc
-        if exc.code == 429:
-            raise ValueError(f"{host}: HTTP 429 rate limited; stop and retry later") from exc
-        raise ValueError(f"{host}: HTTP {exc.code}") from exc
-    except (URLError, TimeoutError) as exc:
-        raise ValueError(f"{host}: network unavailable ({type(exc).__name__})") from exc
-    if not isinstance(data, dict):
-        raise ValueError("Provider response is not a JSON object")
-    return data
+    """Existing CSV downloaders share provider transport and limits."""
+    provider = "massive" if key else "treasury"
+    return DEFAULT_GATEWAY.fetch(provider, url, key=key).data()
 
 
 def save_csv(path: Path, columns: tuple[str, ...], rows: list[dict]) -> None:
