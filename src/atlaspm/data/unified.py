@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from atlaspm.data import factor_db, hf_stock5m, hf_stock5m_batch
 from atlaspm.data import hf_stock5m_filings_v52 as filings
 from atlaspm.data import hf_stock5m_security_master_v53 as security_master
+from atlaspm.data import hf_stock5m_session_v4 as sessions
 from atlaspm.data.market_db import DB_PATH, private_path
 from atlaspm.data.hf_stock5m_certification_v5 import fingerprint
 from atlaspm.data.stock_fundamentals_import import _PROVENANCE_COLUMNS
@@ -174,6 +175,30 @@ def _raw_minute_relation(con, path):
         volume AS volume_shares FROM {relation}
         WHERE CAST(timezone('America/New_York', timestamp) AS TIME) >= TIME '09:30:00'
           AND CAST(timezone('America/New_York', timestamp) AS TIME) < TIME '16:00:00')"""
+
+
+def _decision_ms(value):
+    if not isinstance(value, str):
+        raise ValueError("Decision time must be ISO datetime with UTC offset")
+    stamp = datetime.fromisoformat(value)
+    if stamp.utcoffset() is None:
+        raise ValueError("Decision time must include UTC offset")
+    return stamp, int(stamp.timestamp() * 1000)
+
+
+def _session_relation(con, spec, path, relation, cutoff):
+    """Exchange-calendar candidate bars, not actual vendor publication times."""
+    month = path.stem.removeprefix("ohlcv_")
+    if spec.relation == "hf":
+        view = sessions.install_research_view(con, month)
+        # The V4 field denotes nominal bucket end, not independent availability.
+        return f"(SELECT *, bar_available_at_ms AS bar_end_ms FROM {view} WHERE bar_available_at_ms <= {cutoff})"
+    sessions.install_calendar(con, sessions.calendar_rows(month))
+    return f"""(SELECT a.*, a.timestamp_ms + 60000 AS bar_end_ms
+        FROM {relation} a JOIN v4_nyse s ON a.trade_date_et=s.trade_date
+        WHERE a.timestamp_ms >= s.open_ms
+          AND a.timestamp_ms + 60000 <= s.close_ms
+          AND a.timestamp_ms + 60000 <= {cutoff})"""
 
 
 def _finite_numeric(value):
@@ -455,9 +480,11 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
     Date ranges are inclusive. Daily/5m date fields retain their source calendar;
     timestamp-only feeds use UTC dates. Keys and source (SQLite) are mandatory.
     A size/mtime hint is not a content hash or an immutable snapshot ID.
-    No rows is not proof of completeness. No as-of filtering is simulated.
+    No rows is not proof of completeness. An intraday as_of is a nominal
+    exchange-session and bucket-end cutoff, not vendor publication verification.
     """
-    if purpose != "exploratory" or (as_of is not None and dataset != "sec_filings"):
+    if purpose != "exploratory" or (as_of is not None and dataset not in
+                                      {"sec_filings", "equity_1m", "equity_5m"}):
         raise AdmissionDenied("Certified point-in-time access is not available")
     if dataset not in CATALOG:
         raise DataUnavailable(f"No connected adapter: {dataset}")
@@ -473,6 +500,12 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
     if len(fields) != len(set(fields)) or any(f not in spec.fields for f in fields):
         raise ValueError("Unknown, repeated, or non-projectable field")
     selected = spec.keys + (fields or spec.fields) + (("source",) if spec.store == "sqlite" else ())
+    cutoff = None
+    if as_of is not None and dataset in {"equity_1m", "equity_5m"}:
+        decision, cutoff = _decision_ms(as_of)
+        if last > decision.astimezone(ZoneInfo("America/New_York")).date():
+            raise AdmissionDenied("Requested market date is after decision time")
+        selected += ("bar_end_ms",)
     ids = tuple(symbols)
     if len(ids) > 128 or any(not isinstance(s, str) or not s or len(s) > 128 for s in ids):
         raise ValueError("At most 128 nonempty provider identifiers")
@@ -506,6 +539,8 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
                         WHERE strftime(trade_date_et, '%Y-%m') <> ? LIMIT 1""",
                                    [month]).fetchone():
                         raise DataQualityError("Raw RTH date outside declared partition")
+                if cutoff is not None:
+                    relation = _session_relation(con, spec, path, relation, cutoff)
                 sql, params = _sql(spec, selected, ids, first, last, relation)
                 yield from _batches(con.execute(sql, params), name=dataset, spec=spec,
                                     columns=selected, path=path, batch_size=batch_size,

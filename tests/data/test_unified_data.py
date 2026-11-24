@@ -313,3 +313,32 @@ class UnifiedTests(unittest.TestCase):
         self.assertFalse(result["approved_for_model_training"])
         with self.assertRaises(ValueError):
             unified.review_broker_capture(Path("outside.json"), mapping)
+
+    @unittest.skipUnless(find_spec("duckdb") and find_spec("pandas_market_calendars"),
+                         "lake and calendar extras required")
+    def test_intraday_asof_uses_actual_session_and_bar_end(self):
+        import duckdb
+        path = hf_stock5m.raw_path("2020-11")
+        path.parent.mkdir(parents=True)
+        quoted = str(path).replace("\\", "/").replace("'", "''")
+        with closing(duckdb.connect()) as con:
+            con.execute(f"""COPY (SELECT * FROM (VALUES
+                ('A',TIMESTAMPTZ '2020-11-27 17:58:00+00',10,11,9,10,1),
+                ('A',TIMESTAMPTZ '2020-11-27 17:59:00+00',10,11,9,10,1),
+                ('A',TIMESTAMPTZ '2020-11-27 18:00:00+00',10,11,9,10,1),
+                ('A',TIMESTAMPTZ '2020-11-28 15:00:00+00',10,11,9,10,1))
+                AS t(ticker,timestamp,open,high,low,close,volume))
+                TO '{quoted}' (FORMAT PARQUET)""")
+        args = dict(start="2020-11-27", end="2020-11-27", columns=("close",))
+        batches = list(self.query("equity_1m", as_of="2020-11-27T17:59:00Z", **args))
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0].columns[-1], "bar_end_ms")
+        self.assertEqual(batches[0].rows[0][-1] - batches[0].rows[0][2], 60000)
+        self.assertFalse(batches[0].point_in_time_verified)
+        batches = list(self.query("equity_1m", as_of="2020-11-29T00:00:00Z",
+                                  **{**args, "end":"2020-11-28"}))
+        self.assertEqual(len(batches), 2)  # early-close and Saturday bars excluded
+        with self.assertRaises(unified.AdmissionDenied):
+            list(self.query("equity_1m", as_of="2020-11-26T23:59:00Z", **args))
+        with self.assertRaises(ValueError):
+            list(self.query("equity_1m", as_of="2020-11-27T17:59:00", **args))
