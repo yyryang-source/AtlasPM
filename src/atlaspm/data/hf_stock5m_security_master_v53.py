@@ -132,8 +132,10 @@ def validate(row, checked):
     return r
 
 
-def _db():
+def _db(*, read_only=False):
     path=private_path(BASE/"ledger.sqlite3")
+    if read_only:
+        return sqlite3.connect(path.as_uri()+"?mode=ro", uri=True)
     path.parent.mkdir(parents=True,exist_ok=True)
     cx=sqlite3.connect(path)
     cx.execute("""CREATE TABLE IF NOT EXISTS claims(
@@ -210,7 +212,7 @@ def _resolve(rows,checked):
             "sources":[{k:x[k] for k in ("source_family","source_url","evidence_sha256","reviewer","known_date")} for x in rows]},None
 
 
-def snapshot(as_of,trade_date=None):
+def snapshot(as_of,trade_date=None,*,read_only=False):
     """Research-only PIT projection using latest visible revision per family."""
     as_of=_date(as_of)
     trade_date=_date(trade_date or as_of)
@@ -219,7 +221,10 @@ def snapshot(as_of,trade_date=None):
     identities,actions,unresolved=[],[],[]
     checked={}
     retracted=0
-    with closing(_db()) as cx:
+    with closing(_db(read_only=read_only)) as cx:
+        if read_only:
+            cx.execute('PRAGMA query_only=ON')
+            cx.execute('BEGIN')
         for (kind,key),rows in _groups(cx,as_of):
             result,reason=_resolve(rows,checked)
             if reason=="RETRACTED":

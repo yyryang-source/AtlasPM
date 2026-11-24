@@ -19,8 +19,8 @@ exploratory batch as a permission token. Existing CLI and raw data are unchanged
 | factors_hf / factors_sqlite | factor_db source-isolated monthly Parquet |
 
 Unconnected catalog entries deliberately raise DataUnavailable:
-equity_realtime, company_fundamentals, sec_filings, macro, security_identity,
-corporate_actions, ibkr_accounts, ibkr_positions, option_contracts, bond_terms.
+equity_realtime, company_fundamentals, macro, ibkr_accounts, ibkr_positions,
+option_contracts, bond_terms.
 Several have existing domain modules or raw storage, but adapters are not
 implemented here. This is not a claim of provider availability. Never fill
 these gaps with synthetic data or conflate two sources.
@@ -97,3 +97,7 @@ process RSS are not measured by tracemalloc. Repeat with the same source and
 projection before comparing results.
 
 Raw minute scans reuse the existing raw QC, reject any invalid source rows, misaligned timestamps, and RTH rows outside the declared month. Duplicate selected normalized symbol/minute keys fail during iteration. No raw repair or new data file. RTH clock filtering is not exchange-calendar certification. The full raw QC requires additional scans; benchmark before repeated research use.
+
+### SEC and security evidence
+
+`iter_batches("sec_filings", start="2020-01-01", end="2020-01-02", symbols=("123",), as_of="2020-01-03", purpose="exploratory")` reads the existing V5.2 candidate filing index without creating or rebuilding it. Explicit CIKs, complete requested index-quarter inventory and strictly prior filing dates are required. Index digest and parser version are included by default, but are recorded provenance, not proof of current source authenticity, complete filings or acceptance timestamps. Same-day filings are blocked. The separate `review_security(as_of=..., trade_date=...)` facade reuses the existing read-only evidence snapshot for historical memberships, listing intervals, corporate actions, conflicts and unresolved records. Its existing algorithm materializes the visible ledger; it is not a bounded market-bar stream. It is still a research-only projection, not production PIT certification.

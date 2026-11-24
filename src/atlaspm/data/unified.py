@@ -13,9 +13,12 @@ from decimal import Decimal
 from math import isfinite
 from pathlib import Path
 import sqlite3
+import re
 from types import MappingProxyType
 
 from atlaspm.data import factor_db, hf_stock5m
+from atlaspm.data import hf_stock5m_filings_v52 as filings
+from atlaspm.data import hf_stock5m_security_master_v53 as security_master
 from atlaspm.data.market_db import DB_PATH, private_path
 
 
@@ -65,6 +68,8 @@ CATALOG = MappingProxyType({
                                  ("security_term", "coupon_rate_pct", "high_yield_pct", "offering_amount")),
     "bond_quotes": Dataset("sqlite", "bond_quotes", ("cusip", "quote_date"),
                            ("bid_price", "ask_price", "yield_to_maturity_pct")),
+    "sec_filings": Dataset("sec_index", "filings", ("cik", "filed_date", "form", "source_url", "quarter"),
+                           ("issuer", "index_sha256", "parser_version")),
     **{f"factors_{source}": Dataset("parquet", "factors", ("symbol", "trade_date"),
                                   ("close", "volume_shares", "observed_5m_bars",
                                    "observed_1m_bars", "last_observed_bar_ms") + factor_db.FEATURES,
@@ -73,8 +78,8 @@ CATALOG = MappingProxyType({
 
 # Explicitly unavailable through this API, not fabricated empty tables.
 UNCONNECTED = frozenset({
-    "equity_realtime", "company_fundamentals", "sec_filings",
-    "macro", "security_identity", "corporate_actions", "ibkr_accounts",
+    "equity_realtime", "company_fundamentals",
+    "macro", "ibkr_accounts",
     "ibkr_positions", "option_contracts", "bond_terms",
 })
 
@@ -211,6 +216,56 @@ def _batches(cursor, *, name, spec, columns, path, batch_size, version):
         yield Batch(name, columns, tuple(rows), str(path.relative_to(Path.cwd().resolve())), version)
 
 
+def _sec_batches(*, spec, fields, ids, first, last, batch_size, memory, threads):
+    """Read the existing candidate filing index, not a complete EDGAR universe."""
+    if not ids or any(not re.fullmatch(r"[0-9]{1,10}", cik) for cik in ids):
+        raise ValueError("Explicit SEC issuer CIKs required")
+    ids = tuple(sorted({cik.zfill(10) for cik in ids}))
+    path = private_path(filings.BASE / "index.duckdb")
+    if not path.is_file():
+        raise DataUnavailable("SEC filing index is missing")
+    import duckdb
+    if not re.fullmatch(r"[1-9][0-9]*(MB|GB)", memory) or type(threads) is not int or not 1 <= threads <= 32:
+        raise ValueError("Invalid DuckDB resource limits")
+    expected = {f"{y:04d}-Q{q}" for y in range(first.year, last.year + 1)
+                for q in range(1, 5) if (first.year, (first.month - 1)//3 + 1)
+                <= (y, q) <= (last.year, (last.month - 1)//3 + 1)}
+    version = _version(path)
+    with closing(duckdb.connect(str(path), read_only=True)) as con:
+        con.execute(f"SET memory_limit = '{memory}'")
+        con.execute(f"SET threads = {threads}")
+        con.execute("BEGIN TRANSACTION")
+        available = {row[0] for row in con.execute("SELECT quarter FROM partitions").fetchall()}
+        missing = expected - available
+        if missing:
+            raise DataUnavailable("Missing SEC index quarters: " + ", ".join(sorted(missing)))
+        relation = """(SELECT f.cik,f.filed_date,f.form,f.source_url,f.quarter,f.issuer,
+            p.digest AS index_sha256,p.parser_version FROM filings f
+            JOIN partitions p ON f.quarter=p.quarter)"""
+        selected = spec.keys + (fields or spec.fields)
+        sql, params = _sql(spec, selected, ids, first, last, relation)
+        yield from _batches(con.execute(sql, params), name="sec_filings", spec=spec,
+                            columns=selected, path=path, batch_size=batch_size, version=version)
+
+
+def review_security(*, as_of: str, trade_date: str | None = None):
+    """Reuse the evidence ledger's date-precision PIT resolution, read-only.
+
+    Includes conflicts and blockers; never certifies universe completeness.
+    Unlike price batches this existing snapshot materializes the visible ledger.
+    """
+    decision = _day(as_of)
+    observed = _day(trade_date) if trade_date is not None else decision
+    if observed > decision:
+        raise AdmissionDenied("Cannot review a future observation")
+    path = private_path(security_master.BASE / "ledger.sqlite3")
+    if not path.is_file():
+        raise DataUnavailable("Reviewed security evidence ledger is missing")
+    report = security_master.snapshot(decision.isoformat(), observed.isoformat(), read_only=True)
+    return {**report, "point_in_time_verified": False, "approved_for_model_training": False,
+            "approved_for_backtest": False, "live_execution_enabled": False}
+
+
 def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
                  purpose: str, as_of=None, batch_size: int = 2048,
                  database: Path = DB_PATH, memory: str = "256MB", threads: int = 1):
@@ -221,7 +276,7 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
     A size/mtime hint is not a content hash or an immutable snapshot ID.
     No rows is not proof of completeness. No as-of filtering is simulated.
     """
-    if purpose != "exploratory" or as_of is not None:
+    if purpose != "exploratory" or (as_of is not None and dataset != "sec_filings"):
         raise AdmissionDenied("Certified point-in-time access is not available")
     if dataset not in CATALOG:
         raise DataUnavailable(f"No connected adapter: {dataset}")
@@ -240,7 +295,12 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
     ids = tuple(symbols)
     if len(ids) > 128 or any(not isinstance(s, str) or not s or len(s) > 128 for s in ids):
         raise ValueError("At most 128 nonempty provider identifiers")
-    if spec.store == "sqlite":
+    if spec.store == "sec_index":
+        if as_of is None or last >= _day(as_of):
+            raise AdmissionDenied("SEC filing dates must precede the explicit decision date")
+        yield from _sec_batches(spec=spec, fields=fields, ids=ids, first=first, last=last,
+                                batch_size=batch_size, memory=memory, threads=threads)
+    elif spec.store == "sqlite":
         path = private_path(database)
         if not path.is_file():
             raise DataUnavailable("Market database is missing")

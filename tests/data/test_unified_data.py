@@ -204,3 +204,45 @@ class UnifiedTests(unittest.TestCase):
                 write(bad)
                 with self.assertRaises(unified.DataQualityError):
                     list(self.query("equity_1m", columns=("close",)))
+
+    @unittest.skipUnless(find_spec("duckdb"), "lake extra required")
+    def test_sec_candidate_index_cutoff_and_coverage(self):
+        from atlaspm.data import hf_stock5m_filings_v52 as filings
+        path = unified.private_path(filings.BASE / "index.duckdb")
+        with self.assertRaises(unified.DataUnavailable):
+            list(self.query("sec_filings", symbols=("123",), as_of="2020-02-01"))
+        self.assertFalse(path.exists())
+        with closing(filings._db()) as con:
+            con.execute("INSERT INTO partitions VALUES ('2020-Q1', ?, 'fixture', 2, 0)", ["a"*64])
+            con.execute("""INSERT INTO filings VALUES
+                ('2020-Q1','0000000123','Issuer','8-K','2020-01-02','https://example.org/1'),
+                ('2020-Q1','0000000123','Issuer','8-K','2020-01-03','https://example.org/2')""")
+        args = dict(symbols=("123",), as_of="2020-01-03", end="2020-01-02")
+        batch, = list(self.query("sec_filings", **args))
+        self.assertEqual(batch.rows[0][0:2], ("0000000123", date(2020, 1, 2)))
+        self.assertEqual(batch.rows[0][-2], "a"*64)
+        self.assertFalse(batch.point_in_time_verified)
+        with self.assertRaises(unified.AdmissionDenied):
+            list(self.query("sec_filings", symbols=("123",), as_of="2020-01-31"))
+        with self.assertRaises(unified.DataUnavailable):
+            list(self.query("sec_filings", symbols=("123",), end="2020-04-01", as_of="2020-04-02"))
+        with self.assertRaises(ValueError):
+            list(self.query("sec_filings", symbols=("AAPL",), **{"end":"2020-01-02","as_of":"2020-01-03"}))
+
+    def test_security_review_missing_ledger_and_no_approval(self):
+        from atlaspm.data import hf_stock5m_security_master_v53 as master
+        with self.assertRaises(unified.DataUnavailable):
+            unified.review_security(as_of="2020-01-03")
+        path = unified.private_path(master.BASE / "ledger.sqlite3")
+        self.assertFalse(path.exists())
+        with closing(master._db()):
+            pass
+        before = path.read_bytes()
+        report = unified.review_security(as_of="2020-01-03")
+        self.assertEqual(report["members"], [])
+        self.assertEqual(report["actions"], [])
+        self.assertFalse(report["approved_for_model_training"])
+        self.assertFalse(report["approved_for_backtest"])
+        self.assertEqual(path.read_bytes(), before)
+        with self.assertRaises(unified.AdmissionDenied):
+            unified.review_security(as_of="2020-01-03", trade_date="2020-01-04")
