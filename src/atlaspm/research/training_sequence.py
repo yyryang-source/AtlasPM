@@ -20,11 +20,26 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
         raise ValueError("MIXED_PRECISION_REQUIRES_CUDA")
     if train.ndim!=3 or test.ndim!=3 or train.shape[1:]!=test.shape[1:]:
         raise ValueError("INVALID_SEQUENCE_SHAPE")
-    if not np.isfinite(train).all() or not np.isfinite(test).all():
-        raise ValueError("INVALID_SEQUENCE_VALUES")
-    # Every sequence ends at its own signal date. Fit scaling on training only.
-    mean=train.mean(axis=(0,1))
-    scale=np.maximum(train.std(axis=(0,1)),1e-8)
+    # Stable batch-combined population moments; no full-size centered array.
+    count=0
+    mean=np.zeros(train.shape[2],dtype=np.float64)
+    m2=np.zeros_like(mean)
+    for start in range(0,len(train),batch_size):
+        block=np.asarray(train[start:start+batch_size],dtype=np.float64).reshape(-1,train.shape[2])
+        if not np.isfinite(block).all():
+            raise ValueError("INVALID_SEQUENCE_VALUES")
+        n=len(block)
+        bm=block.mean(axis=0)
+        delta=bm-mean
+        m2+=((block-bm)**2).sum(axis=0)+delta**2*count*n/(count+n)
+        mean+=delta*n/(count+n)
+        count+=n
+    if not count:
+        raise ValueError("EMPTY_SEQUENCE_TRAIN")
+    for start in range(0,len(test),batch_size):
+        if not np.isfinite(test[start:start+batch_size]).all():
+            raise ValueError("INVALID_SEQUENCE_VALUES")
+    scale=np.maximum(np.sqrt(m2/count),1e-8)
     ymean=float(y.mean())
     yscale=max(float(y.std()),1e-8)
     features=train.shape[2]
@@ -64,9 +79,8 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
             optimizer=torch.optim.AdamW(model.parameters(),lr=.003)
             loss_fn=nn.MSELoss()
             # Keep full fold arrays on host; transfer only bounded batches.
-            x=torch.as_tensor(train,dtype=torch.float32,device="cpu")
+            # Convert only the selected batch, retaining memmap backing on host.
             target=torch.as_tensor(y,dtype=torch.float32,device="cpu")
-            xt=torch.as_tensor(test,dtype=torch.float32,device="cpu")
             mu=torch.as_tensor(mean,dtype=torch.float32,device=device)
             sigma=torch.as_tensor(scale,dtype=torch.float32,device=device)
             scaler=torch.amp.GradScaler("cuda",enabled=mixed_precision)
@@ -77,8 +91,8 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
             model.train()
             for _ in range(epochs):
                 epoch_loss=0.
-                for ids in torch.randperm(len(x),generator=generator).split(batch_size):
-                    xb=(x[ids].to(device)-mu)/sigma
+                for ids in torch.randperm(len(train),generator=generator).split(batch_size):
+                    xb=(torch.as_tensor(train[ids.numpy()],dtype=torch.float32,device=device)-mu)/sigma
                     yb=(target[ids].to(device)-ymean)/yscale
                     optimizer.zero_grad(set_to_none=True)
                     with torch.autocast(device_type=device,dtype=torch.float16,enabled=mixed_precision):
@@ -91,12 +105,13 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                     scaler.step(optimizer)
                     scaler.update()
                     epoch_loss+=float(loss.detach().cpu())*len(ids)
-                losses.append(epoch_loss/len(x))
+                losses.append(epoch_loss/len(train))
             model.eval()
             with torch.no_grad():
-                chunks=[model((batch.to(device)-mu)/sigma).cpu().numpy().astype(float)
-                        for batch in xt.split(batch_size)]
-                result=np.concatenate(chunks)*yscale+ymean
+                result=np.empty(len(test),dtype=np.float64)
+                for start in range(0,len(test),batch_size):
+                    batch=torch.as_tensor(test[start:start+batch_size],dtype=torch.float32,device=device)
+                    result[start:start+len(batch)]=model((batch-mu)/sigma).cpu().numpy().astype(float)*yscale+ymean
             peak_device_bytes=torch.cuda.max_memory_allocated() if device=="cuda" else None
     finally:
         torch.set_num_threads(previous_threads)
