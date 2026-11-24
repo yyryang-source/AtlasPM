@@ -239,3 +239,35 @@ authenticity, historical identity, independent action completeness,
 data-use rights or actual publication delays. Price-path labels remain
 unadjusted-semantics-unverified research observations. Model promotion
 must remain blocked until external certification is complete.
+
+
+## V6.2 unified synthetic model tournament
+
+The existing model zoo already contains ridge, historical mean, ElasticNet,
+random forest, LightGBM, XGBoost, CatBoost, MLP, LSTM, GRU and Transformer.
+The tournament reuses their existing implementations instead of adding
+duplicate estimators. Run:
+
+~~~powershell
+& $py -m atlaspm.research.training_tournament --file local_data/tournament.json
+~~~
+
+The JSON request has payload (existing synthetic panel contract), config
+(shared horizon, fold settings, sequence length, seed and resource options),
+candidates (2–32 objects with model and optional ridge_alpha or
+sequence_epochs), holdout_start (zero-based session index on a refit
+boundary) and optional selection_metric (mae, rmse, mean_daily_rank_ic
+or mean_daily_ic). Use identical shared horizon, sequence length and
+fold settings for every candidate. Missing optional model dependencies
+fail explicitly rather than silently changing the candidate set.
+
+Candidates are trained on only the pre-holdout prefix, with identical
+validation prediction keys and actuals checked by SHA-256. Undefined
+metrics are ineligible; ties use input order. Only the winner is run
+on the complete panel; its holdout uses rolling refits with matured
+past labels. Holdout scores are not used to select a model. Candidate
+predictions are discarded after scoring; per-trial metrics and dependency
+versions are retained. This is synthetic research only and does not
+demonstrate actual market alpha or authorize real model training.
+The existing fixed-model experiment, model artifact registry and
+ensemble implementations remain intact.
