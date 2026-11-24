@@ -88,7 +88,15 @@ class MarginFunding:
             cap=min(cap,finite(gross_limit,"gross_limit",minimum=1.))
         e=max(0.,equity-pending)
         gross_bound=(cap*e-gross)/(1+cap*k)
-        debt_bound=(cash+(cap-1)*e-self.liability)/(1+(cap-1)*k)
+        headroom=(cap-1)*e-self.liability
+        if headroom<0:
+            return 0.
+        cost_multiplier=(cap-1)*k
+        debt_bound=(cash+headroom)/(1+cost_multiplier)
+        # Paying entirely in cash still reduces equity by execution costs.
+        # Enforce the existing-loan limit even in that no-new-borrowing case.
+        if cost_multiplier>0:
+            debt_bound=min(debt_bound,headroom/cost_multiplier)
         return max(0.,min(gross_bound,debt_bound))
 
     def snapshot(self,gross,equity):
