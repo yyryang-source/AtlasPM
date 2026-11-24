@@ -207,3 +207,18 @@ def from_credit(report):
             "first_available_at":None,"effective_at":None,"evidence_sha256":digest,
             "delivery":"poll","expiry_seconds":86400},received_at=stamp))
     return result
+
+
+def main():
+    from argparse import ArgumentParser
+    parser=ArgumentParser(description=__doc__)
+    parser.add_argument("--input",required=True)
+    parser.add_argument("--holding",action="append",default=[])
+    args=parser.parse_args()
+    rows=import_events(args.input)
+    report=review(rows,as_of=datetime.now(UTC).isoformat(),holdings=args.holding)
+    print(json.dumps({k:v for k,v in report.items() if k!="events"},indent=2))
+
+
+if __name__=="__main__":
+    main()

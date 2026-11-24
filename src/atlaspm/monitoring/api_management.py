@@ -10,7 +10,7 @@ from atlaspm.data.api_gateway import DEFAULT_GATEWAY, PROVIDERS, MODEL_ENDPOINTS
 from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, require_enabled
 
 _BLOCKED = {"yahoo_finance","bloomberg","sp_ratings","moodys","fitch","dbrs","kbra",
-            "investment_banks","sp_dji","msci","ftse_russell","finra","msrb","federal_reserve"}
+            "investment_banks","sp_dji","msci","ftse_russell","finra","msrb"}
 
 
 def inventory(gateway=DEFAULT_GATEWAY):

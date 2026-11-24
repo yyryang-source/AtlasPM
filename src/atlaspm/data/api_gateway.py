@@ -38,6 +38,7 @@ class Provider:
 
 
 PROVIDERS = MappingProxyType({
+    "federal_reserve": Provider("www.federalreserve.gov", 5.0, None, "public_source_review_required"),
     "treasury": Provider("api.fiscaldata.treasury.gov", 0.5, None, "public_government_data", True),
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
@@ -153,7 +154,9 @@ class Gateway:
                     re.fullmatch(r"/api/stock/[A-Z0-9.]+/(greek-exposure|net-prem-ticks|option-contracts|iv-rank|volatility/term-structure)", p.path) or
                     re.fullmatch(r"/api/darkpool/[A-Z0-9.]+", p.path)):
                 raise GatewayError("Endpoint outside designated options feed scope")
-        headers = {"User-Agent": "AtlasPM research gateway", "Accept": "application/json",
+        if provider == "federal_reserve" and (p.path not in {"/feeds/press_monetary.xml", "/feeds/press_all.xml"} or p.query):
+            raise GatewayError("Only official Federal Reserve press RSS routes are enabled")
+        headers = {"User-Agent": "AtlasPM research gateway", "Accept": "application/xml" if provider == "federal_reserve" else "application/json",
                    "Accept-Encoding": "identity"}
         if spec.key_env:
             token = key if key is not None else os.environ.get(spec.key_env, "").strip()
@@ -244,12 +247,25 @@ class Gateway:
                 started = self._clock()
                 retry_delay = 0.0
                 try:
+                    cap = min(self._max_bytes, 1024*1024) if provider == "federal_reserve" else self._max_bytes
                     with self._open(request, timeout=45) as response:
-                        raw = response.read(self._max_bytes + 1)
+                        raw = response.read(cap + 1)
                     state.received_bytes += len(raw)
-                    if len(raw) > self._max_bytes:
+                    if len(raw) > cap:
                         raise GatewayError("Provider response exceeds configured byte limit")
-                    _strict_json(raw)
+                    if provider == "federal_reserve":
+                        from xml.etree.ElementTree import fromstring, ParseError
+                        xml = raw.decode("utf-8-sig")
+                        if "<!DOCTYPE" in xml.upper() or "<!ENTITY" in xml.upper():
+                            raise GatewayError("RSS declarations are forbidden")
+                        try:
+                            root = fromstring(xml)
+                        except ParseError:
+                            raise GatewayError("Invalid RSS XML") from None
+                        if root.tag != "rss" or root.find("channel") is None:
+                            raise GatewayError("Invalid RSS structure")
+                    else:
+                        _strict_json(raw)
                     result = Response(provider, request_id, datetime.now(UTC).isoformat(), raw)
                 except HTTPError as exc:
                     status = exc.code

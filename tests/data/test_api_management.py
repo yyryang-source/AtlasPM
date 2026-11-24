@@ -36,4 +36,17 @@ class APIManagementTests(unittest.TestCase):
             result=recent_events("320193",gateway=g)
         self.assertEqual(result["events"][0]["kind"],"sec_disclosure")
         self.assertIsNone(result["events"][0]["first_available_at"])
+        self.assertIsNone(result["events"][0]["published_at"])
+        self.assertEqual(result["filings"][0]["accepted_utc"],"2020-01-02T15:00:00+00:00")
         self.assertFalse(result["coverage_complete"])
+
+    def test_fed_rss_uses_shared_transport_and_rejects_dtd(self):
+        from atlaspm.data.fed_disclosures import recent_events as fed_events
+        payload=b'<rss><channel><item><title>FOMC statement</title><link>https://www.federalreserve.gov/news.htm</link><pubDate>Thu, 02 Jan 2020 15:00:00 GMT</pubDate></item></channel></rss>'
+        g=Gateway(opener=lambda *a,**kw:BytesIO(payload))
+        out=fed_events(gateway=g)
+        self.assertEqual(out["events"][0]["kind"],"rate_decision")
+        self.assertIsNone(out["events"][0]["first_available_at"])
+        bad=Gateway(opener=lambda *a,**kw:BytesIO(b'<!DOCTYPE rss><rss><channel/></rss>'))
+        with self.assertRaises(ValueError):
+            fed_events(gateway=bad)

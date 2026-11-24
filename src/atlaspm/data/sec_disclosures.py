@@ -27,6 +27,7 @@ def recent_events(cik, *, gateway=DEFAULT_GATEWAY):
     if any(not isinstance(c,list) or len(c)>5000 for c in cols) or len({len(c) for c in cols})!=1:
         raise GatewayError("SEC filing columns mismatch")
     events=[]
+    filings=[]
     for accession,form,accepted,filing in zip(*cols):
         if form not in FORMS:
             continue
@@ -37,14 +38,16 @@ def recent_events(cik, *, gateway=DEFAULT_GATEWAY):
         except (TypeError,ValueError):
             raise GatewayError("Invalid SEC acceptance timestamp") from None
         # A naive acceptance timestamp is not guessed to be UTC.
-        published=stamp.astimezone(UTC).isoformat() if stamp.utcoffset() is not None else None
-        digest=_digest({"cik":cik,"accession":accession,"form":form,"accepted":accepted,
-                        "filing":filing,"response":response.evidence()["sha256"]})
+        accepted_utc=stamp.astimezone(UTC).isoformat() if stamp.utcoffset() is not None else None
+        filing_meta={"cik":cik,"accession":accession,"form":form,"accepted_raw":accepted,
+                     "accepted_utc":accepted_utc,"filing_date":filing}
+        digest=_digest(filing_meta)
+        filings.append({**filing_meta,"evidence_sha256":digest})
         events.append(normalize({"provider":"sec","source_id":accession,"kind":"sec_disclosure",
-            "subjects":["CIK:"+cik],"published_at":published,"first_available_at":None,
+            "subjects":["CIK:"+cik],"published_at":None,"first_available_at":None,
             "effective_at":None,"evidence_sha256":digest,"delivery":"poll",
             "expiry_seconds":86400},received_at=response.fetched_at))
         if len(events)>=1000:
             break
-    return {"events":events,"transport":response.evidence(),"coverage_complete":False,
+    return {"events":events,"filings":filings,"transport":response.evidence(),"coverage_complete":False,
             "acceptance_is_not_verified_publication":True,"external_ai_allowed":False}
