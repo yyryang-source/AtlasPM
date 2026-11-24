@@ -7,6 +7,17 @@ from .test_training_engine import fixture
 
 
 class SequencePanelTests(unittest.TestCase):
+    def test_regime_uses_observed_closes_only(self):
+        p=fixture()
+        a=build_panel(p,5,regime_config={'lookback':3})['market_regimes']
+        for row in p['sessions'][25:]:
+            for asset in row['assets']:
+                asset['close']*=.1
+        b=build_panel(p,5,regime_config={'lookback':3})['market_regimes']
+        for row in p['sessions'][:25]:
+            self.assertEqual(a[row['date']],b[row['date']])
+        self.assertNotEqual(a,b)
+
     def test_trailing_sequence(self):
         p=build_panel(fixture(),5,3)
         row=p["prediction_samples"][0]
@@ -46,6 +57,15 @@ class EnsembleTests(unittest.TestCase):
             rows[5]["actual"]=-.3
         b=adaptive_ensemble(p,minimum_dates=1)
         self.assertEqual(a["weight_history"][:8],b["weight_history"][:8])
+
+    def test_regime_weights_use_matured_same_state_only(self):
+        p=self.forecasts()
+        regimes={row["date"]:("uptrend" if i%2 else "downtrend")
+                 for i,row in enumerate(p["good"])}
+        out=adaptive_ensemble(p,minimum_dates=1,regimes=regimes)
+        self.assertEqual(out["weight_history"][3]["weighting_scope"],"global_fallback")
+        self.assertEqual(out["weight_history"][4]["weighting_scope"],"regime")
+        self.assertEqual(out["weight_history"][4]["regime_matured_dates"],1)
 
     def test_alignment_refused(self):
         p=self.forecasts()

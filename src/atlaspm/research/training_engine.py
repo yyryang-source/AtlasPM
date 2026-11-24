@@ -103,12 +103,12 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
         length=kwargs.get('sequence_length',1)
         observations=stack.enter_context(closing(DiskObservations(column.path.parent/'observations.sqlite3'))) if length>1 else None
         sessions=iter_sessions(root,manifest,batch_rows=batch_rows,max_assets_per_session=max_assets_per_session)
-        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations)
+        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations,regime_config=kwargs.get('regime_ensemble',{}).get('market',{}) if kwargs.get('regime_ensemble') is not None else None)
         return _train(manifest,feature_column=column,prepared_panel=panel,**kwargs)
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -127,7 +127,9 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         if set(models)-set(ARTIFACT_MODELS):
             raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
         artifact_store=ModelArtifacts(model_artifact_path)
-    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
+    if regime_ensemble is not None and (not isinstance(regime_ensemble,dict) or set(regime_ensemble)-{'market','weights'} or not all(isinstance(v,dict) for v in regime_ensemble.values())):
+        raise ValueError('INVALID_REGIME_ENSEMBLE_CONFIG')
+    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
@@ -304,6 +306,19 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 predictions["adaptive_ensemble"].extend(rows)
             else:
                 archive.append("adaptive_ensemble",rows)
+    regime_audit=None
+    if regime_ensemble is not None:
+        from atlaspm.research.training_ensemble import iter_ensemble
+        regime_audit=[]
+        streams={m:archive.rows(m) if archive is not None else predictions[m] for m in models}
+        predictions["regime_ensemble"]=[]
+        for rows,weights in iter_ensemble(streams,regimes=panel["market_regimes"],
+                                           **regime_ensemble.get("weights",{})):
+            regime_audit.append(weights)
+            if archive is None:
+                predictions["regime_ensemble"].extend(rows)
+            else:
+                archive.append("regime_ensemble",rows)
     metrics={m:_metrics(archive.rows(m) if archive is not None else rows) for m,rows in predictions.items()}
     monitoring_report=None
     if monitoring is not None:
@@ -323,7 +338,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 compact_sample_numeric_bytes=samples.numeric_bytes,
                 prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
-                monitoring=monitoring_report,
+                monitoring=monitoring_report,regime_weight_history=regime_audit,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
                 model_artifact_storage=str(artifact_store.path) if artifact_store is not None else None,

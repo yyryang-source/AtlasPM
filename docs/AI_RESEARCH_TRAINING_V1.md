@@ -127,3 +127,7 @@ completed epoch. CPU replay is tested; CUDA reproducibility is not guaranteed.
 ### Maturity-aware monitoring
 
 Set `"monitoring": {"window_dates": 30, "minimum_dates": 10, "coverage": 0.9, "baseline": "historical_mean"}` to produce chronological rolling MAE, reference-window drift alerts, residual-based interval half-widths and a research-only champion comparison. Only label blocks whose final maturity is strictly before the prediction date enter calibration and selection. The baseline must be included among predictions. Daily maximum absolute residuals calibrate a cross-sectional band; coverage is descriptive and is not guaranteed under dependence or regime changes. No automatic model admission or execution is enabled.
+
+### Market-state-conditioned experts
+
+Opt in with `"regime_ensemble": {"market": {"lookback": 20, "trend_threshold": 0.02, "volatility_threshold": 0.25}, "weights": {"minimum_dates": 5, "window_dates": 20}}`. A synthetic equal-weight shared-security close proxy classifies warmup, uptrend, downtrend, sideways and high volatility. The ensemble reuses existing model experts, calibrates each state's mixture from matured errors in that state, and falls back to global weights until sufficient history exists. No future prices enter the regime classifier. This is a regime-conditioned mixture, not independently fitted regime-specific models or a validated market index.
