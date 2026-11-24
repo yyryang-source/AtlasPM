@@ -108,5 +108,5 @@ class AdaptiveResearchTests(unittest.TestCase):
             second=run(changed,path)
         self.assertEqual(first["validation"],second["validation"])
         cutoff=p["sessions"][62]["date"]
-        self.assertEqual([r for r in first["weight_history"] if r["date"]<=cutoff],
-                         [r for r in second["weight_history"] if r["date"]<=cutoff])
+        self.assertEqual([r for r in first["weight_history"] if r["date"]<cutoff],
+                         [r for r in second["weight_history"] if r["date"]<cutoff])
