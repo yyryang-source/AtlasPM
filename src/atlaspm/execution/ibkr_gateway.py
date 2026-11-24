@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
 from typing import Any
+from collections.abc import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import (

@@ -13,7 +13,6 @@ from atlaspm.engine.mean_variance import optimize_mean_variance
 
 def _sample_estimates(window: list[list[float]], symbols: list[str]) -> tuple[dict[str, float], list[list[float]]]:
     """Annualized arithmetic means and unbiased sample covariance, past only."""
-    n = len(window)
     size = len(symbols)
     means = [fmean(row[i] for row in window) for i in range(size)]
     cov = annualized_sample_covariance(window, means)

@@ -99,7 +99,6 @@ def _risk_gate(candidates: list[Candidate], account: Account,
                     raise ValueError("INVALID_MARGIN_REQUIREMENT")
                 fractions[s] = maintenance
             after_value = sum(weights[s]*account.net_liquidation for s in symbols)
-            stressed_value = after_value*(1-shock)
             stressed_equity = account.net_liquidation - after_value*shock
             stressed_maintenance = sum(weights[s]*account.net_liquidation*(1-shock)*fractions[s]
                                        for s in symbols)

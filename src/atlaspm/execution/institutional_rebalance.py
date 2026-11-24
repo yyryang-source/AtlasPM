@@ -50,7 +50,8 @@ def plan_equity_trade(
         raise ValueError("Trade plan account_id must select exactly one ledger account")
     account = candidates[0]
     raw_accounts = _obj(ledger_payload, "ledger_payload")["accounts"]
-    raw_account = next(a for a in raw_accounts if a["account_id"] == account_id)
+    if not any(a["account_id"] == account_id for a in raw_accounts):
+        raise ValueError("Trade plan account_id must select exactly one raw ledger account")
     trade = _obj(p.get("trade"), "trade")
     side = trade.get("side")
     if side not in {"BUY", "SELL"}:

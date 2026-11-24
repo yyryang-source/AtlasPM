@@ -55,6 +55,7 @@ def replay(payload):
         optimizer["min_cash_fraction"] = reserve
     prior_day = prior_close = None
     prior_prices = {}
+    prior_holdings = {}
     prior_equity = peak = initial
     total_cost = 0.
     for i, row in enumerate(sessions):

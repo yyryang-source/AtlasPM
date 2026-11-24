@@ -19,7 +19,7 @@ from statistics import fmean
 from typing import Any
 
 from atlaspm.historical import load_adjusted_prices
-from atlaspm.selection.price_arrays import load_stock_price_arrays
+from atlaspm.selection.price_arrays import load_stock_price_arrays as load_stock_price_arrays  # explicit compatibility re-export
 from atlaspm.selection.recent_prices import load_recent_stock_price_arrays
 from atlaspm.ai_stock_ranker import (
     FEATURE_NAMES, _RISK_DISCLOSURES, _candidate_rows,
