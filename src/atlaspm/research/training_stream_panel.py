@@ -8,7 +8,7 @@ from array import array
 from collections import deque
 import sqlite3
 from atlaspm.research.training_compact import CompactSamples,IndexedRows
-from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions
+from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions,MarketRegimes
 
 
 class DiskObservations:
@@ -44,10 +44,11 @@ class DiskObservations:
         self.con.close()
 
 
-def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None):
+def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None,regime_config=None):
     features=validate_panel_metadata(metadata,horizon,sequence_length)
     if feature_column is None or (sequence_length>1 and observation_store is None):
         raise ValueError("STREAMING_REQUIRES_DISK_WORKSPACE")
+    tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates=[]
     samples=CompactSamples(dates,horizon,len(features),feature_column)
     valid=array("Q")
@@ -55,6 +56,8 @@ def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,
     missing=incomplete=peak=0
     for k,(day,marks) in enumerate(validated_sessions(sessions,features)):
         dates.append(day)
+        if tracker is not None:
+            tracker.observe(day,marks)
         if observation_store is not None:
             observation_store.append(k,marks)
         window.append(marks)
@@ -84,6 +87,7 @@ def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,
     return dict(feature_names=features,dates=dates,horizon=horizon,sequence_length=sequence_length,
                 prediction_samples=samples,samples=IndexedRows(samples,valid),
                 observation_store=observation_store,
+                market_regimes=tracker.states if tracker is not None else None,
                 incomplete_sequences=incomplete,missing_label_paths=missing,
                 unmatured_final_sessions=min(horizon,len(dates)),peak_buffered_sessions=peak,
                 research_only=True,approved_for_model_training=False,

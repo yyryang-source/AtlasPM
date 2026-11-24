@@ -7,6 +7,17 @@ from .test_training_engine import fixture
 
 
 class SequencePanelTests(unittest.TestCase):
+    def test_regime_uses_observed_closes_only(self):
+        p=fixture()
+        a=build_panel(p,5,regime_config={'lookback':3})['market_regimes']
+        for row in p['sessions'][25:]:
+            for asset in row['assets']:
+                asset['close']*=.1
+        b=build_panel(p,5,regime_config={'lookback':3})['market_regimes']
+        for row in p['sessions'][:25]:
+            self.assertEqual(a[row['date']],b[row['date']])
+        self.assertNotEqual(a,b)
+
     def test_trailing_sequence(self):
         p=build_panel(fixture(),5,3)
         row=p["prediction_samples"][0]
@@ -47,6 +58,15 @@ class EnsembleTests(unittest.TestCase):
         b=adaptive_ensemble(p,minimum_dates=1)
         self.assertEqual(a["weight_history"][:8],b["weight_history"][:8])
 
+    def test_regime_weights_use_matured_same_state_only(self):
+        p=self.forecasts()
+        regimes={row["date"]:("uptrend" if i%2 else "downtrend")
+                 for i,row in enumerate(p["good"])}
+        out=adaptive_ensemble(p,minimum_dates=1,regimes=regimes)
+        self.assertEqual(out["weight_history"][3]["weighting_scope"],"global_fallback")
+        self.assertEqual(out["weight_history"][4]["weighting_scope"],"regime")
+        self.assertEqual(out["weight_history"][4]["regime_matured_dates"],1)
+
     def test_alignment_refused(self):
         p=self.forecasts()
         p["good"].pop()
@@ -76,3 +96,35 @@ class DeepTests(unittest.TestCase):
         y=next(r for r in b["predictions"]["gru"] if key(r))
         self.assertIsNone(y["actual"])
         self.assertAlmostEqual(x["prediction"],y["prediction"],places=6)
+
+
+    def test_epoch_resume_after_interruption(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from atlaspm.research.training_checkpoint import EpochStore
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                p=fixture()
+                config=dict(minimum_train_sessions=10,test_sessions=30,models=["gru"],
+                            sequence_length=3,sequence_epochs=3,batch_size=8)
+                reference=train(p,**config)
+                save=EpochStore.save
+                def stop_after_save(self,state):
+                    save(self,state)
+                    if state["completed_epochs"]==1:
+                        raise InterruptedError("synthetic interruption")
+                options=dict(checkpoint_path="local_data/checkpoint.sqlite3",epoch_checkpoint=True)
+                with patch.object(EpochStore,"save",stop_after_save):
+                    with self.assertRaises(InterruptedError):
+                        train(p,**config,**options)
+                resumed=train(p,**config,**options)
+                self.assertEqual(reference["predictions"],resumed["predictions"])
+                self.assertEqual(reference["model_settings"]["gru"]["epoch_losses"],
+                                 resumed["model_settings"]["gru"]["epoch_losses"])
+                self.assertEqual(resumed["model_settings"]["gru"]["resumed_epochs"],1)
+            finally:
+                os.chdir(cwd)

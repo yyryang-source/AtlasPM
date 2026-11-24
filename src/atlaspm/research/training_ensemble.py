@@ -7,7 +7,7 @@ from statistics import fmean
 from atlaspm.engine.contracts import finite
 
 
-def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01):
+def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01, regimes=None):
     """Input streams must be ordered by (date, security_id); yield daily rows."""
     if type(window_dates) is not int or type(minimum_dates) is not int or not 1<=minimum_dates<=window_dates:
         raise ValueError("INVALID_ENSEMBLE_WINDOW")
@@ -38,15 +38,21 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
             yield rows
     pending=deque()
     matured=deque(maxlen=window_dates)
+    conditioned={}
     seen=False
     for day,group in groupby(aligned(),key=lambda rows:rows[0]["date"]):
         seen=True
         while pending and pending[0][0]<day:
-            _,errors=pending.popleft()
+            _,state,errors=pending.popleft()
             if errors is not None:
                 matured.append(errors)
-        if len(matured)>=minimum_dates:
-            loss={n:fmean(d[n] for d in matured) for n in names}
+                if regimes is not None and state!="warmup":
+                    conditioned.setdefault(state,deque(maxlen=window_dates)).append(errors)
+        state=regimes[day] if regimes is not None else None
+        local=conditioned.get(state,())
+        selected=local if len(local)>=minimum_dates else matured
+        if len(selected)>=minimum_dates:
+            loss={n:fmean(d[n] for d in selected) for n in names}
             best=min(loss.values())
             raw={n:exp(-(loss[n]-best)/temp) for n in names}
             weights={n:raw[n]/sum(raw.values()) for n in names}
@@ -65,8 +71,12 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
         if pending and maturity<pending[-1][0]:
             raise ValueError("NONMONOTONIC_LABEL_MATURITY")
         # Only scalar daily loss summaries are queued until label maturity.
-        pending.append((maturity,{n:fmean(v) for n,v in errors.items()} if errors[names[0]] else None))
-        yield output,dict(date=day,matured_dates=len(matured),weights=weights)
+        pending.append((maturity,state,{n:fmean(v) for n,v in errors.items()} if errors[names[0]] else None))
+        audit=dict(date=day,matured_dates=len(matured),weights=weights)
+        if regimes is not None:
+            audit.update(regime=state,regime_matured_dates=len(local),
+                         weighting_scope='regime' if len(local)>=minimum_dates else 'global_fallback')
+        yield output,audit
     if not seen:
         raise ValueError("EMPTY_ENSEMBLE_FORECASTS")
 

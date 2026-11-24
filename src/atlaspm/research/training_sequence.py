@@ -4,7 +4,40 @@ from __future__ import annotations
 SEQUENCE_MODELS = ("lstm","gru","transformer")
 
 
-def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False):
+def build_sequence_model(name,features,length):
+    from torch import nn
+    import torch
+    if name not in SEQUENCE_MODELS:
+        raise ValueError("UNKNOWN_SEQUENCE_MODEL")
+    hidden=16
+    class Recurrent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            cls=nn.LSTM if name=="lstm" else nn.GRU
+            self.encoder=cls(features,hidden,batch_first=True)
+            self.head=nn.Linear(hidden,1)
+        def forward(self,x):
+            states,_=self.encoder(x)
+            return self.head(states[:,-1]).squeeze(-1)
+
+    class Attention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed=nn.Linear(features,hidden)
+            self.position=nn.Parameter(torch.zeros(1,length,hidden))
+            block=nn.TransformerEncoderLayer(hidden,4,32,dropout=0.,batch_first=True)
+            self.encoder=nn.TransformerEncoder(block,1)
+            self.head=nn.Linear(hidden,1)
+        def forward(self,x):
+            # Full attention is permitted inside the observed trailing window;
+            # no token after the signal date exists in the input.
+            states=self.encoder(self.embed(x)+self.position)
+            return self.head(states[:,-1]).squeeze(-1)
+
+    return Attention() if name=="transformer" else Recurrent()
+
+
+def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False, capture_weights=None, epoch_store=None):
     import numpy as np
     import torch
     from torch import nn
@@ -46,36 +79,12 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
     length=train.shape[1]
     hidden=16
 
-    class Recurrent(nn.Module):
-        def __init__(self):
-            super().__init__()
-            cls=nn.LSTM if name=="lstm" else nn.GRU
-            self.encoder=cls(features,hidden,batch_first=True)
-            self.head=nn.Linear(hidden,1)
-        def forward(self,x):
-            states,_=self.encoder(x)
-            return self.head(states[:,-1]).squeeze(-1)
-
-    class Attention(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.embed=nn.Linear(features,hidden)
-            self.position=nn.Parameter(torch.zeros(1,length,hidden))
-            block=nn.TransformerEncoderLayer(hidden,4,32,dropout=0.,batch_first=True)
-            self.encoder=nn.TransformerEncoder(block,1)
-            self.head=nn.Linear(hidden,1)
-        def forward(self,x):
-            # Full attention is permitted inside the observed trailing window;
-            # no token after the signal date exists in the input.
-            states=self.encoder(self.embed(x)+self.position)
-            return self.head(states[:,-1]).squeeze(-1)
-
     previous_threads=torch.get_num_threads()
     try:
         torch.set_num_threads(1)
         with torch.random.fork_rng(devices=[] if device=="cpu" else [torch.cuda.current_device()]):
             torch.manual_seed(seed)
-            model=(Attention() if name=="transformer" else Recurrent()).to(device)
+            model=build_sequence_model(name,features,length).to(device)
             optimizer=torch.optim.AdamW(model.parameters(),lr=.003)
             loss_fn=nn.MSELoss()
             # Keep full fold arrays on host; transfer only bounded batches.
@@ -88,8 +97,24 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                 torch.cuda.reset_peak_memory_stats()
             losses=[]
             generator=torch.Generator().manual_seed(seed)
+            start_epoch=0
+            if epoch_store is not None:
+                previous=epoch_store.load()
+                if previous is not None:
+                    start_epoch=previous["completed_epochs"]
+                    losses=list(previous["losses"])
+                    if not 1<=start_epoch<=epochs or len(losses)!=start_epoch or not np.isfinite(losses).all():
+                        raise ValueError("INVALID_EPOCH_CHECKPOINT")
+                    model.load_state_dict(previous["model"],strict=True)
+                    optimizer.load_state_dict(previous["optimizer"])
+                    scaler.load_state_dict(previous["scaler"])
+                    generator.set_state(previous["generator"])
+                    torch.set_rng_state(previous["cpu_rng"])
+                    if device=="cuda":
+                        torch.cuda.set_rng_state(previous["cuda_rng"])
+                    del previous
             model.train()
-            for _ in range(epochs):
+            for epoch in range(start_epoch,epochs):
                 epoch_loss=0.
                 for ids in torch.randperm(len(train),generator=generator).split(batch_size):
                     xb=(torch.as_tensor(train[ids.numpy()],dtype=torch.float32,device=device)-mu)/sigma
@@ -106,6 +131,12 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                     scaler.update()
                     epoch_loss+=float(loss.detach().cpu())*len(ids)
                 losses.append(epoch_loss/len(train))
+                if epoch_store is not None:
+                    epoch_store.save(dict(completed_epochs=epoch+1,losses=losses,
+                        model=model.state_dict(),optimizer=optimizer.state_dict(),
+                        scaler=scaler.state_dict(),generator=generator.get_state(),
+                        cpu_rng=torch.get_rng_state(),
+                        cuda_rng=torch.cuda.get_rng_state() if device=='cuda' else None))
             model.eval()
             with torch.no_grad():
                 result=np.empty(len(test),dtype=np.float64)
@@ -113,6 +144,8 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                     batch=torch.as_tensor(test[start:start+batch_size],dtype=torch.float32,device=device)
                     result[start:start+len(batch)]=model((batch-mu)/sigma).cpu().numpy().astype(float)*yscale+ymean
             peak_device_bytes=torch.cuda.max_memory_allocated() if device=="cuda" else None
+            if capture_weights is not None:
+                capture_weights({key:value.detach().cpu().tolist() for key,value in model.state_dict().items()})
     finally:
         torch.set_num_threads(previous_threads)
     if result.shape!=(len(test),) or not np.isfinite(result).all():
@@ -123,4 +156,5 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                        peak_cuda_allocated_bytes=peak_device_bytes,host_resident_fold=True,
                        feature_mean=mean.tolist(),feature_scale=scale.tolist(),
                        target_mean=ymean,target_scale=yscale,
-                       deterministic_gpu_guaranteed=False)
+                       deterministic_gpu_guaranteed=False,
+                       resumed_epochs=start_epoch)

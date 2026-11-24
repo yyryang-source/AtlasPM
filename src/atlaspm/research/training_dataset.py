@@ -55,14 +55,54 @@ def validated_sessions(sessions,features):
         yield str(day),marks
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None):
+class MarketRegimes:
+    """Close-observed equal-weight shared-security proxy; synthetic only."""
+    def __init__(self, *, lookback=20, trend_threshold=.02, volatility_threshold=.25):
+        from collections import deque
+        if type(lookback) is not int or not 2<=lookback<=252:
+            raise ValueError("INVALID_REGIME_LOOKBACK")
+        self.trend=finite(trend_threshold,"trend_threshold",minimum=0)
+        self.volatility=finite(volatility_threshold,"volatility_threshold",minimum=.000001)
+        self.returns=deque(maxlen=lookback)
+        self.previous={}
+        self.states={}
+
+    def observe(self,day,marks):
+        from statistics import fmean,stdev
+        from math import prod,sqrt
+        current={sid:v[0] for sid,v in marks.items()}
+        shared=sorted(current.keys() & self.previous.keys())
+        if not shared:
+            self.returns.clear()
+        else:
+            self.returns.append(fmean(current[s]/self.previous[s]-1 for s in shared))
+        self.previous=current
+        state="warmup"
+        if len(self.returns)==self.returns.maxlen:
+            growth=prod(1+r for r in self.returns)-1
+            volatility=stdev(self.returns)*sqrt(252)
+            if volatility>=self.volatility:
+                state="high_volatility"
+            elif growth>self.trend:
+                state="uptrend"
+            elif growth<-self.trend:
+                state="downtrend"
+            else:
+                state="sideways"
+        self.states[day]=state
+
+
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
+    tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates,observations=[],[]
     for day,marks in validated_sessions(payload["sessions"],features):
         dates.append(day)
         observations.append(marks)
+        if tracker is not None:
+            tracker.observe(day,marks)
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
     if compact:
         prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
@@ -99,6 +139,7 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
     return dict(feature_names=features,dates=dates,samples=samples,horizon=horizon,
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
                 **({'observations':observations} if compact and sequence_length>1 else {}),
+                market_regimes=tracker.states if tracker is not None else None,
                 incomplete_sequences=incomplete_sequences,
                 missing_label_paths=missing,unmatured_final_sessions=min(horizon,len(dates)),
                 research_only=True,approved_for_model_training=False,

@@ -99,3 +99,45 @@ The benchmark starts isolated processes, measures OS-reported peak working
 set/RSS and elapsed time including fixture generation and imports, and compares
 metrics. This is a synthetic benchmark, not a market backtest or throughput
 guarantee. No external data is downloaded.
+
+## Numeric model snapshots
+
+Opt in to `"model_artifact_path": "local_data/models.sqlite3"` in a training config. All eleven model adapters save fold-specific weights and training-only normalization, content-addressed by SHA-256. Scikit-learn linear, MLP and forest models use explicit numeric representations; LightGBM, XGBoost and CatBoost use their native model formats. This does not use pickle or load executable objects. The same checkpoint and artifact database paths are required when resuming an artifact-enabled run. Snapshots from an interrupted run may exist; only a completed report establishes successful training. They do not authorize real-data inference or deployment.
+
+```powershell
+python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 list
+python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 show ARTIFACT_ID
+python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 predict ARTIFACT_ID --file local_data/synthetic_window.json
+```
+
+Inference accepts only a validated synthetic window of exactly the saved sequence length, with the original feature order and no earlier date than the artifact's first test session. CPU replay of GPU-trained weights may differ within numerical precision; dependency versions must match. Epoch resume is independent of model snapshots.
+
+
+### Epoch-level recovery
+
+For LSTM/GRU/Transformer, set `"epoch_checkpoint": true` and
+`"checkpoint_path": "local_data/checkpoints.sqlite3"`. The latest completed
+epoch is saved atomically per fold and model, including optimizer, scaler,
+batch generator and RNG state. The same dataset, code, dependency versions,
+device and training configuration must be used. The loader uses PyTorch's
+restricted weights-only deserialization for local checkpoints; do not import
+untrusted databases. Interrupted partial epochs restart from the preceding
+completed epoch. CPU replay is tested; CUDA reproducibility is not guaranteed.
+
+### Maturity-aware monitoring
+
+Set `"monitoring": {"window_dates": 30, "minimum_dates": 10, "coverage": 0.9, "baseline": "historical_mean"}` to produce chronological rolling MAE, reference-window drift alerts, residual-based interval half-widths and a research-only champion comparison. Only label blocks whose final maturity is strictly before the prediction date enter calibration and selection. The baseline must be included among predictions. Daily maximum absolute residuals calibrate a cross-sectional band; coverage is descriptive and is not guaranteed under dependence or regime changes. No automatic model admission or execution is enabled.
+
+### Market-state-conditioned experts
+
+Opt in with `"regime_ensemble": {"market": {"lookback": 20, "trend_threshold": 0.02, "volatility_threshold": 0.25}, "weights": {"minimum_dates": 5, "window_dates": 20}}`. A synthetic equal-weight shared-security close proxy classifies warmup, uptrend, downtrend, sideways and high volatility. The ensemble reuses existing model experts, calibrates each state's mixture from matured errors in that state, and falls back to global weights until sufficient history exists. No future prices enter the regime classifier. This is a regime-conditioned mixture, not independently fitted regime-specific models or a validated market index.
+
+### Incremental expanding-window Ridge
+
+Use `"incremental_ridge": true` with `"models": ["ridge", "historical_mean"]`. The training engine updates centered covariance and target cross-moments only for newly admitted matured rows, then solves the same fold-local standardized Ridge objective without retaining a full training matrix. This is an expanding-window sufficient-statistics update, not incremental neural/tree fitting. Replaying completed fold checkpoints reconstructs the moments in chronological order. Floating-point differences from full refits are tested within numerical tolerance. The feature matrix and label availability rules are unchanged.
+
+### Research lifecycle review
+
+Monitoring emits model_review statuses: REFERENCE_BASELINE, INSUFFICIENT_EVIDENCE, CANDIDATE_FOR_INDEPENDENT_REVIEW, RETAIN_AS_CHALLENGER and REVIEW_FOR_DEGRADATION. These are review-queue classifications, not actual deployment or destructive model retirement. Independent point-in-time data and holdout admission gates remain mandatory. Archived model snapshots remain immutable for reproducibility.
+
+All lifecycle options may be combined for ridge/historical mean, including disk prediction archives, model snapshots, incremental refits, regime ensembles and monitoring. Deep estimators use epoch_checkpoint instead of incremental_ridge. Real data and broker permissions remain disabled.

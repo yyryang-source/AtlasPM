@@ -103,12 +103,12 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
         length=kwargs.get('sequence_length',1)
         observations=stack.enter_context(closing(DiskObservations(column.path.parent/'observations.sqlite3'))) if length>1 else None
         sessions=iter_sessions(root,manifest,batch_rows=batch_rows,max_assets_per_session=max_assets_per_session)
-        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations)
+        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations,regime_config=kwargs.get('regime_ensemble',{}).get('market',{}) if kwargs.get('regime_ensemble') is not None else None)
         return _train(manifest,feature_column=column,prepared_panel=panel,**kwargs)
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -117,7 +117,22 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
-    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
+    if type(epoch_checkpoint) is not bool or (epoch_checkpoint and checkpoint_path is None):
+        raise ValueError('EPOCH_CHECKPOINT_REQUIRES_FOLD_STORE')
+    if epoch_checkpoint and not any(m in SEQUENCE_MODELS for m in models):
+        raise ValueError('EPOCH_CHECKPOINT_REQUIRES_SEQUENCE_MODEL')
+    if type(incremental_ridge) is not bool or (incremental_ridge and set(models)-{'ridge','historical_mean'}):
+        raise ValueError('INCREMENTAL_RIDGE_REQUIRES_LINEAR_BASELINES')
+    artifact_store=None
+    if model_artifact_path is not None:
+        from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
+        if set(models)-set(ARTIFACT_MODELS):
+            raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
+    if regime_ensemble is not None and (not isinstance(regime_ensemble,dict) or set(regime_ensemble)-{'market','weights'} or not all(isinstance(v,dict) for v in regime_ensemble.values())):
+        raise ValueError('INVALID_REGIME_ENSEMBLE_CONFIG')
+    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None)
+    if model_artifact_path is not None:
+        artifact_store=ModelArtifacts(model_artifact_path)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
@@ -144,6 +159,16 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if incremental_ridge:
+        config['incremental_ridge']=True
+    if regime_ensemble is not None:
+        config['regime_ensemble']=regime_ensemble
+    if monitoring is not None:
+        config['monitoring']=monitoring
+    if epoch_checkpoint:
+        config['epoch_checkpoint']=True
+    if artifact_store is not None:
+        config['model_artifact_storage']=str(artifact_store.path)
     store=None
     if checkpoint_path is not None:
         from atlaspm.research.training_checkpoint import FoldStore
@@ -153,10 +178,17 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         store=FoldStore(checkpoint_path,dict(dataset=fingerprint,config=config,
                        dependencies=dependency_versions,source_hashes=source_hashes,
                        runtime=platform.python_version(),platform=platform.platform()))
+    incremental=None
+    if incremental_ridge:
+        from atlaspm.research.training_models import ExpandingRidge
+        incremental=ExpandingRidge(len(panel['feature_names']))
     resumed=0
     # Validate resource settings even when every fold is cached.
     FoldArrays(array_budget_mib,spill_dir)
     for fold_index,fold in enumerate(folds):
+        added=None
+        if incremental is not None:
+            added=incremental.update_prefix(IndexedRows(samples,fold['train']))
         cached=store.load(fold_index) if store is not None else None
         if cached is not None:
             if set(cached["predictions"])!=set(models):
@@ -171,6 +203,14 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     predictions[name].extend(rows)
                 else:
                     archive.append(name,rows)
+            if artifact_store is not None:
+                ids=cached["audit"].get("model_artifact_ids",{})
+                if set(ids)!=set(models):
+                    raise ValueError("CHECKPOINT_ARTIFACT_MISMATCH")
+                for name,key in ids.items():
+                    record=artifact_store.load(key)
+                    if record["model"]!=name or record["dataset_sha256"]!=fingerprint or record["fold_index"]!=fold_index:
+                        raise ValueError("CHECKPOINT_ARTIFACT_MISMATCH")
             audit.append(cached["audit"])
             model_settings=dict(cached["audit"]["model_settings"])
             resumed+=1
@@ -179,27 +219,33 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             fold_predictions={m:[] for m in models}
             train_rows=IndexedRows(samples,fold["train"])
             test_rows=IndexedRows(samples,fold["test"])
-            x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
-            y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
-            mean=x.mean(axis=0)
-            x-=mean
-            # Compute variance on centered data in bounded blocks, not a full-size temporary.
-            squared=np.zeros(x.shape[1],dtype=np.float64)
-            for start in range(0,len(x),4096):
-                block=x[start:start+4096]
-                squared+=np.einsum("ij,ij->j",block,block)
-            scale=np.sqrt(squared/len(x))
-            scale=np.where(scale>1e-12,scale,1.)
-            x/=scale
-            z=x
-            intercept=float(y.mean())
-            coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
+            x=y=z=block=None
+            if incremental is not None:
+                mean,scale,coef,intercept=incremental.solve(alpha)
+            else:
+                x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
+                y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
+                mean=x.mean(axis=0)
+                x-=mean
+                # Compute variance on centered data in bounded blocks, not a full-size temporary.
+                squared=np.zeros(x.shape[1],dtype=np.float64)
+                for start in range(0,len(x),4096):
+                    block=x[start:start+4096]
+                    squared+=np.einsum("ij,ij->j",block,block)
+                scale=np.sqrt(squared/len(x))
+                scale=np.where(scale>1e-12,scale,1.)
+                x/=scale
+                z=x
+                intercept=float(y.mean())
+                coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
             test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
             test-=mean
             test/=scale
             ridge=test@coef+intercept
             sequence_train=sequence_test=None
+            artifact_ids={}
             for name in models:
+                saved_weights={}
                 if name=="ridge":
                     values=ridge
                     settings={"alpha":alpha}
@@ -212,11 +258,37 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                             return arrays.rows(rows,(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
                         sequence_train=materialize(train_rows)
                         sequence_test=materialize(test_rows)
+                    epoch_store=None
+                    if epoch_checkpoint:
+                        from atlaspm.research.training_checkpoint import EpochStore
+                        epoch_store=EpochStore(store,fold_index,name)
                     values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
                                                  epochs=sequence_epochs,device=device,batch_size=batch_size,
-                                                 mixed_precision=mixed_precision)
+                                                 mixed_precision=mixed_precision,
+                                                 capture_weights=saved_weights.update if artifact_store is not None else None,
+                                                 epoch_store=epoch_store)
                 else:
-                    values,settings=fit_predict(name,z,y,test,seed)
+                    values,settings=fit_predict(name,z,y,test,seed,
+                                                capture_weights=saved_weights.update if artifact_store is not None else None)
+                if artifact_store is not None:
+                    if name in SEQUENCE_MODELS:
+                        weights=saved_weights
+                        snapshot_settings=settings
+                        length=sequence_length
+                    else:
+                        weights=({'coefficients':coef.tolist() if name=='ridge' else [0.]*len(mean)}
+                                 if name in ('ridge','historical_mean') else saved_weights)
+                        snapshot_settings=dict(feature_mean=mean.tolist(),feature_scale=scale.tolist(),intercept=intercept)
+                        length=1
+                    artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,
+                        dataset_sha256=fingerprint,fold_index=fold_index,feature_names=panel['feature_names'],
+                        horizon=horizon,sequence_length=length,dependencies=dependency_versions,
+                        test_start=panel['dates'][fold['test_start_index']],
+                        test_end=panel['dates'][fold['test_end_index']],
+                        latest_train_label=panel['dates'][fold['latest_training_label_end']],
+                        settings=snapshot_settings,weights=weights,**FLAGS))
+                if len(values)!=len(test_rows):
+                    raise ValueError('MODEL_OUTPUT_ROW_COUNT_MISMATCH:'+name)
                 model_settings[name]=settings
                 for row,value in zip(test_rows,values):
                     base={k:row[k] for k in ("security_id","date","label_end_date")}
@@ -230,6 +302,11 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                               coefficients=coef.tolist(),intercept=intercept,
                               model_settings=dict(model_settings),
                               array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
+            if incremental is not None:
+                audit[-1]["incremental_training_rows_added"]=added
+                audit[-1]["incremental_training_rows_total"]=incremental.count
+            if artifact_store is not None:
+                audit[-1]["model_artifact_ids"]=artifact_ids
             if store is not None:
                 store.save(fold_index,dict(audit=audit[-1],
                            predictions=fold_predictions))
@@ -254,7 +331,28 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 predictions["adaptive_ensemble"].extend(rows)
             else:
                 archive.append("adaptive_ensemble",rows)
+    regime_audit=None
+    if regime_ensemble is not None:
+        from atlaspm.research.training_ensemble import iter_ensemble
+        regime_audit=[]
+        streams={m:archive.rows(m) if archive is not None else predictions[m] for m in models}
+        predictions["regime_ensemble"]=[]
+        for rows,weights in iter_ensemble(streams,regimes=panel["market_regimes"],
+                                           **regime_ensemble.get("weights",{})):
+            regime_audit.append(weights)
+            if archive is None:
+                predictions["regime_ensemble"].extend(rows)
+            else:
+                archive.append("regime_ensemble",rows)
     metrics={m:_metrics(archive.rows(m) if archive is not None else rows) for m,rows in predictions.items()}
+    monitoring_report=None
+    if monitoring is not None:
+        if not isinstance(monitoring,dict):
+            raise ValueError("INVALID_MONITOR_CONFIG")
+        from atlaspm.research.training_monitor import monitor_predictions
+        monitoring_report=monitor_predictions(
+            {m:archive.rows(m) if archive is not None else rows for m,rows in predictions.items()},
+            **monitoring)
     if archive is not None:
         archive.finalize()
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
@@ -265,8 +363,10 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 compact_sample_numeric_bytes=samples.numeric_bytes,
                 prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
+                monitoring=monitoring_report,regime_weight_history=regime_audit,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
+                model_artifact_storage=str(artifact_store.path) if artifact_store is not None else None,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,

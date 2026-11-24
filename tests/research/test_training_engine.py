@@ -69,3 +69,22 @@ class TrainTests(unittest.TestCase):
         b=train(p,minimum_train_sessions=10)
         self.assertEqual(a["folds"][0],b["folds"][0])
         self.assertEqual(a["predictions"]["ridge"][:20],b["predictions"]["ridge"][:20])
+
+
+    def test_incremental_ridge_matches_full_refit(self):
+        p=fixture()
+        options=dict(minimum_train_sessions=10,test_sessions=5)
+        a=train(p,**options)
+        b=train(p,incremental_ridge=True,**options)
+        for model in a["predictions"]:
+            for x,y in zip(a["predictions"][model],b["predictions"][model]):
+                self.assertEqual((x["date"],x["security_id"],x["actual"]),
+                                 (y["date"],y["security_id"],y["actual"]))
+                self.assertAlmostEqual(x["prediction"],y["prediction"],places=11)
+        self.assertEqual(sum(f["incremental_training_rows_added"] for f in b["folds"]),
+                         b["folds"][-1]["training_rows"])
+        self.assertLess(b["folds"][-1]["array_resident_bytes"],a["folds"][-1]["array_resident_bytes"])
+
+    def test_incremental_ridge_rejects_unsupported_estimators(self):
+        with self.assertRaisesRegex(ValueError,"INCREMENTAL_RIDGE_REQUIRES_LINEAR_BASELINES"):
+            train(fixture(),models=["random_forest"],incremental_ridge=True)
