@@ -73,7 +73,9 @@ def project_features(payload, names):
                             for asset in session["assets"]]} for session in payload["sessions"]]}
 
 
-def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae"):
+def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae",selection_only=False):
+    if type(selection_only) is not bool:
+        raise ValueError("INVALID_SELECTION_ONLY")
     if not isinstance(config,dict) or set(config)-COMMON:
         raise ValueError("INVALID_TOURNAMENT_CONFIG")
     if not isinstance(candidates,list) or not 2<=len(candidates)<=CAP:
@@ -131,25 +133,28 @@ def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae")
     selected=options[best["index"]]
     winner=selected["models"][0]
     selected_features=subsets[best["index"]]
-    final=train(project_features(payload,selected_features),**selected)
     day=sessions[holdout_start]["date"]
+    report={"schema":"atlaspm_synthetic_model_tournament_v62",
+            "experiment_sha256":_sha({"config":config,"candidates":candidates,
+                                      "holdout_start":holdout_start,"selection_metric":selection_metric}),
+            "validation_identity_sha256":reference,
+            "selection_metric":selection_metric,"trial_count":len(trials),"trials":trials,
+            "selected_model":winner,"selected_config":selected,"selected_features":selected_features,"selected_trial_index":best["index"],
+            "validation_end":sessions[holdout_start-1]["date"],"holdout_start":day,
+            "research_only":True,"approved_for_model_training":False,
+            "historical_security_identity_verified":False,"model_registry_admission":False,
+            "live_execution_enabled":False,"broker_order_submission_enabled":False}
+    if selection_only:
+        return {**report,"holdout_evaluated":False}
+    final=train(project_features(payload,selected_features),**selected)
     if day not in {f["test_start"] for f in final["folds"]}:
         raise ValueError("HOLDOUT_MUST_START_ON_REFIT_BOUNDARY")
     holdout=[r for r in final["predictions"][winner] if r["date"]>=day]
     if not holdout:
         raise ValueError("NO_HOLDOUT_PREDICTIONS")
-    return {"schema":"atlaspm_synthetic_model_tournament_v62",
-            "experiment_sha256":_sha({"config":config,"candidates":candidates,
-                                      "holdout_start":holdout_start,"selection_metric":selection_metric}),
-            "dataset_sha256":final["dataset_sha256"],"validation_identity_sha256":reference,
-            "selection_metric":selection_metric,"trial_count":len(trials),"trials":trials,
-            "selected_model":winner,"selected_config":selected,"selected_features":selected_features,"selected_trial_index":best["index"],
-            "validation_end":sessions[holdout_start-1]["date"],"holdout_start":day,
-            "holdout":_metrics(holdout),"holdout_predictions":holdout,
-            "holdout_mode":"winner_only_walk_forward_refits_on_matured_past_labels",
-            "research_only":True,"approved_for_model_training":False,
-            "historical_security_identity_verified":False,"model_registry_admission":False,
-            "live_execution_enabled":False,"broker_order_submission_enabled":False}
+    return {**report,"dataset_sha256":final["dataset_sha256"],
+            "holdout":_metrics(holdout),"holdout_predictions":holdout,"holdout_evaluated":True,
+            "holdout_mode":"winner_only_walk_forward_refits_on_matured_past_labels"}
 
 
 def main():
