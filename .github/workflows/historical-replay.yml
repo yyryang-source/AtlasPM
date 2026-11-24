@@ -20,3 +20,4 @@ jobs:
       - run: python -m pip install -e ".[portfolio]"
       - run: python -m unittest discover -s tests -p "test_historical_replay*.py" -v
       - run: python -m atlaspm.engine.replay --file examples/historical_replay_synthetic.json
+      - run: python -m atlaspm.engine.replay_performance --file examples/historical_replay_comparison.json
