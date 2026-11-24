@@ -9,6 +9,7 @@ from statistics import fmean
 from atlaspm.research.training_dataset import build_panel, purged_folds
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
+from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 
 
 def _correlation(a,b):
@@ -33,6 +34,10 @@ def _ranks(values):
 
 
 def _metrics(rows):
+    total=len(rows)
+    rows=[r for r in rows if r['actual'] is not None]
+    if not rows:
+        return dict(samples=0,prediction_count=total,missing_actual_count=total,dates=0,mae=None,rmse=None,mean_daily_ic=None,mean_daily_rank_ic=None,valid_ic_dates=0,valid_rank_ic_dates=0)
     dates={}
     for row in rows:
         dates.setdefault(row["date"],[]).append(row)
@@ -46,7 +51,7 @@ def _metrics(rows):
             ics.append(ic)
         if ric is not None:
             rank_ics.append(ric)
-    return dict(samples=len(rows),dates=len(dates),
+    return dict(samples=len(rows),prediction_count=total,missing_actual_count=total-len(rows),dates=len(dates),
                 mae=fmean(abs(r["prediction"]-r["actual"]) for r in rows),
                 rmse=sqrt(fmean((r["prediction"]-r["actual"])**2 for r in rows)),
                 mean_daily_ic=fmean(ics) if ics else None,
@@ -55,22 +60,30 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu'):
     models = ['ridge','historical_mean'] if models is None else models
-    if not isinstance(models,list) or not models or any(m not in MODELS for m in models) or len(set(models))!=len(models):
+    if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError('INVALID_MODEL_SEED')
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
-    panel=build_panel(payload,horizon)
+    if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
+        raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
+    panel=build_panel(payload,horizon,sequence_length)
     folds=purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
         import numpy as np
     except ImportError as exc:
         raise ValueError("TRAINING_REQUIRES_PORTFOLIO_EXTRA") from exc
-    samples=panel["samples"]
+    samples=panel["prediction_samples"]
     dependency_versions=versions(models)
+    if any(m in SEQUENCE_MODELS for m in models):
+        from importlib.metadata import version, PackageNotFoundError
+        try:
+            dependency_versions['torch']=version('torch')
+        except PackageNotFoundError as exc:
+            raise ValueError('SEQUENCE_MODEL_REQUIRES_PYTORCH') from exc
     predictions={m:[] for m in models}
     model_settings={}
     audit=[]
@@ -94,6 +107,10 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             elif name=="historical_mean":
                 values=np.full(len(test_rows),intercept)
                 settings={}
+            elif name in SEQUENCE_MODELS:
+                values,settings=fit_sequence(name,np.asarray([r["sequence"] for r in train_rows]),y,
+                                             np.asarray([r["sequence"] for r in test_rows]),seed,
+                                             epochs=sequence_epochs,device=device)
             else:
                 values,settings=fit_predict(name,z,y,(test-mean)/scale,seed)
             model_settings[name]=settings
@@ -106,11 +123,13 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                           latest_train_label=panel["dates"][fold["latest_training_label_end"]],
                           training_rows=len(train_rows),test_rows=len(test_rows),
                           feature_mean=mean.tolist(),feature_scale=scale.tolist(),
-                          coefficients=coef.tolist(),intercept=intercept))
+                          coefficients=coef.tolist(),intercept=intercept,
+                          model_settings=dict(model_settings)))
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
-    return dict(version="synthetic_return_research_v2",dataset_sha256=fingerprint,
+    return dict(version="synthetic_return_research_v3",dataset_sha256=fingerprint,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
+                sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
                 metrics={k:_metrics(v) for k,v in predictions.items()},predictions=predictions,
                 research_only=True,approved_for_model_training=False,
