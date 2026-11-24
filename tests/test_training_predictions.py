@@ -40,10 +40,11 @@ class ArchiveTrainingTests(unittest.TestCase):
             try:
                 os.chdir(tmp)
                 p=fixture()
-                a=train(p,minimum_train_sessions=10)
+                a=train(p,minimum_train_sessions=10,ensemble={"minimum_dates":1})
                 b=train(p,minimum_train_sessions=10,
-                        prediction_archive_path="local_data/predictions.sqlite3")
+                        prediction_archive_path="local_data/predictions.sqlite3",ensemble={"minimum_dates":1})
                 self.assertEqual(a["metrics"],b["metrics"])
+                self.assertEqual(a["ensemble_weight_history"],b["ensemble_weight_history"])
                 self.assertIsNone(b["predictions"])
                 self.assertEqual(b["prediction_storage"],"sqlite")
                 with closing(sqlite3.connect(b["prediction_archive_path"])) as con:
