@@ -209,3 +209,33 @@ validation rejects V6 manifests. Do not relabel the data to bypass
 the guard. Future certified sample adapters must enforce the actual
 evidence and time-aware security identity rather than trusting boolean
 flags in a user-editable manifest.
+
+
+## V6.1 real research preflight
+
+Run after a successful V6 materialization:
+
+~~~powershell
+$m = Get-Content local_data/training/v6/latest.json -Raw | ConvertFrom-Json
+& $py -m atlaspm.cli market-db training-preflight-v61 --dataset-id $m.dataset_id --minimum-train-rows 1000 --minimum-test-rows 100
+~~~
+
+Preflight verifies registry and partition hashes, recomputes the calendar,
+validates keys, price and feature completeness flags, observed bar timing,
+label end offsets and independently recalculates labels using exact
+calendar-range row counts and terminal prices. Monthly windows are
+bounded to the relevant future months. It then counts actual
+feature-complete labeled training and test rows in each purged fold,
+and retains prediction candidates with unavailable labels in the test
+coverage statistics. Empty dates and insufficient folds are reported.
+It rebuilds the fold plan from configuration rather than trusting stored
+fold counts. The default minimum row counts are diagnostic thresholds,
+not statistical validity claims.
+
+Output: preflight.json beside the dataset manifest. No model fitting,
+automated model selection, training approval or trade permission occurs.
+The checks detect local structural inconsistencies, not true source
+authenticity, historical identity, independent action completeness,
+data-use rights or actual publication delays. Price-path labels remain
+unadjusted-semantics-unverified research observations. Model promotion
+must remain blocked until external certification is complete.
