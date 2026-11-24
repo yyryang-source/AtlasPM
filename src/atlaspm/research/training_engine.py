@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, next_session=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -130,7 +130,9 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
     if regime_ensemble is not None and (not isinstance(regime_ensemble,dict) or set(regime_ensemble)-{'market','weights'} or not all(isinstance(v,dict) for v in regime_ensemble.values())):
         raise ValueError('INVALID_REGIME_ENSEMBLE_CONFIG')
-    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None)
+    if next_session is not None and prepared_panel is not None:
+        raise ValueError('AS_OF_FORECAST_REQUIRES_OBSERVED_JSON_PANEL')
+    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None,next_session=next_session)
     if model_artifact_path is not None:
         artifact_store=ModelArtifacts(model_artifact_path)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
@@ -154,11 +156,13 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         archive=PredictionArchive(prediction_archive_path)
     model_settings={}
     audit=[]
-    fingerprint=_fingerprint(payload)
+    fingerprint=_fingerprint(payload if next_session is None else {'observed':payload,'next_session':next_session})
     config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if next_session is not None:
+        config['next_session']=next_session
     if incremental_ridge:
         config['incremental_ridge']=True
     if regime_ensemble is not None:

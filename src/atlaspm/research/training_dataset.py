@@ -92,7 +92,7 @@ class MarketRegimes:
         self.states[day]=state
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None):
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None, next_session=None):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
@@ -103,6 +103,13 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
         observations.append(marks)
         if tracker is not None:
             tracker.observe(day,marks)
+    # A known next-session calendar date is not a future market observation.
+    # Include the latest observed cross-section with explicitly unknown labels.
+    if next_session is not None:
+        if horizon!=1 or not dates or not isinstance(next_session,str) or date.fromisoformat(next_session).isoformat()!=next_session or next_session<=dates[-1]:
+            raise ValueError("INVALID_AS_OF_NEXT_SESSION")
+        dates.append(next_session)
+        observations.append({})
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
     if compact:
         prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)

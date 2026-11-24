@@ -14,6 +14,7 @@ from itertools import groupby
 from atlaspm.research.training_engine import train, _fingerprint
 from atlaspm.research.training_registry import FLAGS, digest, register, local_path, _connect
 from atlaspm.research.training_strategy_metrics import evaluate, paired_lower
+from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
 
 def _code_version():
@@ -48,12 +49,16 @@ def _candidates(features, budget, optional_models):
     return configs[:budget]
 
 
+def _project(payload, features):
+    if features==payload["feature_names"]:
+        return payload
+    return {**payload,"feature_names":features,"sessions":[
+        {**s,"assets":[{**a,"features":{f:a["features"][f] for f in features}}
+                        for a in s["assets"]]} for s in payload["sessions"]]}
+
+
 def _fit(payload, candidate, settings):
-    features=candidate["features"]
-    if features!=payload["feature_names"]:
-        payload={**payload,"feature_names":features,"sessions":[
-            {**s,"assets":[{**a,"features":{f:a["features"][f] for f in features}}
-                            for a in s["assets"]]} for s in payload["sessions"]]}
+    payload=_project(payload,candidate["features"])
     model=candidate["model"]
     options={**settings,"models":[model],"ridge_alpha":candidate["ridge_alpha"]}
     if model in ("ridge","historical_mean"):
@@ -86,14 +91,15 @@ def research(payload, *, registry_path, holdout_start, momentum_feature,
              budget=6, seed=42, minimum_train_sessions=20, test_sessions=5,
              embargo_sessions=1, cost_bps=10., top_fraction=.25,
              minimum_validation_periods=20, bootstrap_draws=2000,
-             bootstrap_block=5, optional_models=()):
+             bootstrap_block=5, optional_models=(), sequence_length=1,
+             sequence_epochs=12, device='cpu', batch_size=64):
     if payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True:
         raise ValueError("REAL_TRAINING_DATA_NOT_APPROVED")
     if any(k in payload and payload[k] is not v for k,v in FLAGS.items()):
         raise ValueError("RESEARCH_PERMISSION_OVERRIDE_DENIED")
     if type(budget) is not int or not 1<=budget<=8 or type(seed) is not int or not 0<=seed<2**31:
         raise ValueError("INVALID_AUTONOMOUS_BUDGET_OR_SEED")
-    if not isinstance(optional_models,(tuple,list)) or len(set(optional_models))!=len(optional_models) or set(optional_models)-{"elastic_net","random_forest","lightgbm","xgboost","catboost","mlp"}:
+    if not isinstance(optional_models,(tuple,list)) or len(set(optional_models))!=len(optional_models) or set(optional_models)-({"elastic_net","random_forest","lightgbm","xgboost","catboost","mlp"}|set(SEQUENCE_MODELS)):
         raise ValueError("INVALID_OPTIONAL_RESEARCH_MODELS")
     if type(minimum_validation_periods) is not int or minimum_validation_periods<20:
         raise ValueError("INSUFFICIENT_MINIMUM_VALIDATION_PERIODS")
@@ -104,17 +110,30 @@ def research(payload, *, registry_path, holdout_start, momentum_feature,
     for n,lo in ((minimum_train_sessions,1),(test_sessions,1),(embargo_sessions,0)):
         if type(n) is not int or n<lo:
             raise ValueError("INVALID_FOLD_CONFIG")
+    if type(sequence_length) is not int or not 1<=sequence_length<=252 or (set(optional_models)&set(SEQUENCE_MODELS) and sequence_length<2):
+        raise ValueError("INVALID_AUTONOMOUS_SEQUENCE_LENGTH")
+    if type(sequence_epochs) is not int or not 1<=sequence_epochs<=200 or type(batch_size) is not int or not 1<=batch_size<=8192:
+        raise ValueError("INVALID_AUTONOMOUS_SEQUENCE_BUDGET")
+    if device not in ("cpu","cuda","auto"):
+        raise ValueError("INVALID_AUTONOMOUS_DEVICE")
+    if device=="auto":
+        try:
+            import torch
+            device="cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device="cpu"
     features=payload["feature_names"]
     if momentum_feature not in features:
         raise ValueError("MOMENTUM_BASELINE_FEATURE_REQUIRED")
     sessions=payload["sessions"]
-    first=minimum_train_sessions+1+embargo_sessions
+    first=minimum_train_sessions+1+embargo_sessions+sequence_length-1
     if type(holdout_start) is not int or holdout_start-first<minimum_validation_periods+2 or (holdout_start-first)%test_sessions or len(sessions)-holdout_start<minimum_validation_periods+2:
         raise ValueError("INVALID_OR_INSUFFICIENT_FROZEN_HOLDOUT")
     path=local_path(registry_path)
     prefix={**payload,"sessions":sessions[:holdout_start]}
     settings=dict(horizon=1,minimum_train_sessions=minimum_train_sessions,
-                  test_sessions=test_sessions,embargo_sessions=embargo_sessions,seed=seed)
+                  test_sessions=test_sessions,embargo_sessions=embargo_sessions,seed=seed,
+                  sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,batch_size=batch_size)
     evaluation=dict(top_fraction=top_fraction,cost_bps=cost_bps)
     candidates=_candidates(features,budget,optional_models)
     config=dict(settings=settings,evaluation=evaluation,candidates=candidates,seed=seed,

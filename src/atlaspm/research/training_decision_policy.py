@@ -19,7 +19,8 @@ from atlaspm.research.training_paper_feedback import matured_feedback, record_pa
 
 
 def paper_decision(payload, streams, *, registry_path, run_id,
-                   minimum_dates=10, window_dates=30, max_interval_width=.05):
+                   minimum_dates=10, window_dates=30, max_interval_width=.05,
+                   forecast_day=None, execution_maturity_date=None):
     def no_trade(reason, **extra):
         return dict(decision="NO_TRADE",reason=reason,**extra,**FLAGS)
     if payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True:
@@ -39,7 +40,17 @@ def paper_decision(payload, streams, *, registry_path, run_id,
             return no_trade("SYNTHETIC_ACCOUNT_ID_REQUIRED")
         model=selected["model"]
         as_of=timestamp(payload["as_of"],"as_of")
-        day=as_of.date().isoformat()
+        execution_day=as_of.date().isoformat()
+        day=execution_day if forecast_day is None else forecast_day
+        if forecast_day is not None:
+            from datetime import date
+            if (date.fromisoformat(day).isoformat()!=day or
+                not isinstance(execution_maturity_date,str) or
+                date.fromisoformat(execution_maturity_date).isoformat()!=execution_maturity_date or
+                not day<execution_day<execution_maturity_date):
+                return no_trade("INVALID_LAGGED_EXECUTION_CALENDAR")
+        elif execution_maturity_date is not None:
+            return no_trade("UNEXPECTED_EXECUTION_MATURITY")
         if day<=config["holdout_end"]:
             return no_trade("DECISION_MUST_FOLLOW_FROZEN_HOLDOUT")
         for field in ("market_data_available_at","history_available_at"):
@@ -69,6 +80,9 @@ def paper_decision(payload, streams, *, registry_path, run_id,
             return no_trade("UNCERTAINTY_OR_DRIFT_LIMIT",monitor=latest)
         forecasts={r["security_id"]:r["prediction"] for r in clean[model] if r["date"]==day}
         signals=payload["signals"]
+        if forecast_day is not None and any(timestamp(s["generated_at"],"generated_at").date().isoformat()!=day or
+                timestamp(s["data_available_at"],"data_available_at").date().isoformat()>day for s in signals):
+            return no_trade("LAGGED_SIGNAL_TIMESTAMP_MISMATCH")
         if len(signals)!=len(forecasts) or {s["security_id"] for s in signals}!=set(forecasts):
             return no_trade("FORECAST_SIGNAL_UNIVERSE_MISMATCH")
         robust={s:finite(v,"prediction")-radius for s,v in forecasts.items()}
@@ -99,7 +113,7 @@ def paper_decision(payload, streams, *, registry_path, run_id,
         adapted["market"]["expected_returns"]={s["symbol"]:252*robust[s["security_id"]]
                                                 for s in adapted["signals"]}
         maturity={r["label_end_date"] for r in clean[model] if r["date"]==day}
-        if len(maturity)!=1:
+        if len(maturity)!=1 or (forecast_day is not None and maturity!={execution_day}):
             return no_trade("INCONSISTENT_PAPER_MATURITY")
         result=run_unified_portfolio(adapted)
         if result["decision"]=="BLOCK":
@@ -110,7 +124,7 @@ def paper_decision(payload, streams, *, registry_path, run_id,
                     forecast_provenance="caller_supplied_synthetic_streams",
                     **FLAGS)
         if result["decision"]=="SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE":
-            paper_config=dict(as_of=as_of.isoformat(),maturity_date=next(iter(maturity)),
+            paper_config=dict(as_of=as_of.isoformat(),maturity_date=execution_maturity_date or next(iter(maturity)),
                 research_run_id=run_id,account_id=payload["account"]["account_id"],
                 annual_margin_rate=finite(constraints.get("annual_margin_rate",.065),"annual_margin_rate",minimum=0))
             decision_report={**output,"dataset_sha256":report["dataset_sha256"],
