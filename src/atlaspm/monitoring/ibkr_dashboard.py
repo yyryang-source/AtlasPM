@@ -11,10 +11,10 @@ from datetime import datetime, timezone
 from html import escape
 from typing import Any, Mapping
 
-from atlaspm.ibkr_risk_chain_audit import (
+from atlaspm.monitoring.ibkr_risk_chain_audit import (
     STAGE_METHODS, audit_ibkr_risk_chain,
 )
-from atlaspm.ibkr_risk_audit_diff import compare_ibkr_risk_audits
+from atlaspm.monitoring.ibkr_risk_audit_diff import compare_ibkr_risk_audits
 
 STAGE_LABELS = {
     "monitor": ("01", "保证金监控", "IBKR read-only monitor"),

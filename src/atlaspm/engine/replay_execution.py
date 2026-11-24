@@ -1,7 +1,7 @@
 """Synthetic opening execution policy; not a broker or actual Paper OMS."""
 from math import floor, sqrt
 from atlaspm.engine.contracts import finite
-from atlaspm.oms_controls import chain_audit_events, verify_audit_chain
+from atlaspm.execution.oms_controls import chain_audit_events, verify_audit_chain
 
 
 def execute_order(symbol, side, requested, mark, cash_limit, previous_volume, policy, fee, slip, order_id, day):

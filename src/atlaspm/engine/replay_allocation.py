@@ -1,7 +1,7 @@
 """Synthetic rolling allocation adapter; no fitted AI or real data approval."""
 from atlaspm.engine.allocation import METHODS, optimize_target
 from atlaspm.engine.contracts import Account, Holding
-from atlaspm.quant.backtest import _sample_estimates
+from atlaspm.engine.backtest import _sample_estimates
 
 
 def rolling_target(candidates, history, holdings, cash, unsettled, config):

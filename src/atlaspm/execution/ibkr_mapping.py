@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Mapping
 
-from atlaspm.institutional_ledger import _timestamp
+from atlaspm.execution.institutional_ledger import _timestamp
 
 
 ASSET_CLASSES = {"STK": "equity", "BOND": "treasury", "OPT": "option"}

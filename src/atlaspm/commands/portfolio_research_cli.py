@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from atlaspm.quant.optimizer import inverse_volatility_weights
+from atlaspm.engine.optimizer import inverse_volatility_weights
 from atlaspm.data.historical import estimate_from_prices
-from atlaspm.quant.mean_variance import optimize_mean_variance
-from atlaspm.quant.portfolio import analyze_accounts, parse_accounts
+from atlaspm.engine.mean_variance import optimize_mean_variance
+from atlaspm.engine.portfolio import analyze_accounts, parse_accounts
 
 COMMANDS = frozenset(["analyze","allocate","optimize","download-prices","estimate"])
 

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from atlaspm.quant.mean_variance import optimize_mean_variance
-from atlaspm.quant.backtest import backtest_walk_forward
+from atlaspm.engine.mean_variance import optimize_mean_variance
+from atlaspm.engine.backtest import backtest_walk_forward
 from atlaspm.monitoring.audit import audit_backtests
-from atlaspm.quant.benchmark import compare_spy
+from atlaspm.monitoring.benchmark import compare_spy
 from atlaspm.risk.risk_budget import check_risk_budget
 from atlaspm.risk.risk_backtest import backtest_risk_budget
 

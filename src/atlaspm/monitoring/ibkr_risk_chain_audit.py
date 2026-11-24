@@ -12,9 +12,9 @@ import json
 from math import isfinite
 from typing import Any, Mapping
 
-from atlaspm.ibkr_margin_stress import FIELD_PAIR
-from atlaspm.ibkr_multiasset_budget import _correlation_matrix, _one_day_var
-from atlaspm.ibkr_reverse_stress import _boundary
+from atlaspm.risk.ibkr_margin_stress import FIELD_PAIR
+from atlaspm.risk.ibkr_multiasset_budget import _correlation_matrix, _one_day_var
+from atlaspm.risk.ibkr_reverse_stress import _boundary
 
 STAGE_METHODS = {
     "monitor": "ibkr_gateway_portfolio_summary_margin_monitor",

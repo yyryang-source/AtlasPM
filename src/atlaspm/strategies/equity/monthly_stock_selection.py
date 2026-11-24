@@ -18,8 +18,8 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from atlaspm.ai_stock_ranker_v2 import rank_stocks_v2
-from atlaspm.us_market_universe import read_market_universe
+from atlaspm.research.ai_stock_ranker_v2 import rank_stocks_v2
+from atlaspm.data.us_market_universe import read_market_universe
 
 _MARKET_TZ = ZoneInfo("America/New_York")
 _MONTH_PATTERN = re.compile(r"^(20\d{2})-(0[1-9]|1[0-2])$")

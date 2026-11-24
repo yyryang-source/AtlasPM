@@ -14,9 +14,9 @@ from pathlib import Path
 from statistics import fmean, median
 from typing import Any
 
-from atlaspm.ai_stock_ranker import create_training_rows, chronological_splits
-from atlaspm.ai_stock_ranker_v2 import _rank_scores
-from atlaspm.historical import load_adjusted_prices
+from atlaspm.research.ai_stock_ranker import create_training_rows, chronological_splits
+from atlaspm.research.ai_stock_ranker_v2 import _rank_scores
+from atlaspm.data.historical import load_adjusted_prices
 
 
 def _review_momentum_cohorts(

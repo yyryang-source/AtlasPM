@@ -20,13 +20,13 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any
 
-from atlaspm.backtest import _metrics
-from atlaspm.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
-from atlaspm.ml_dynamic_rebalance import (
+from atlaspm.engine.backtest import _metrics
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.research.ml_dynamic_rebalance import (
     SIGMA_CEILING, SIGMA_FLOOR, _integer, _real, _rms, _select_allocation,
 )
-from atlaspm.risk_backtest import _trade_to_risk_budget
-from atlaspm.atlas_execution_policy import assess_native_no_trade
+from atlaspm.risk.risk_backtest import _trade_to_risk_budget
+from atlaspm.execution.atlas_execution_policy import assess_native_no_trade
 
 MODEL_NAME = "atlaspm_original_regimenet_v1_dual_head"
 REGIMES = 3
@@ -379,15 +379,15 @@ def backtest_atlas_native(
             "Risk-only Atlas model has no return head: --return-head-strength must be 0"
         )
     if architecture == "risknet":
-        from atlaspm.atlas_risknet import (
+        from atlaspm.risk.atlas_risknet import (
             RISKNET_NAME, fit_atlas_risknet, predict_atlas_risknet,
         )
     if architecture == "fusion":
-        from atlaspm.atlas_fusionnet import (
+        from atlaspm.risk.atlas_fusionnet import (
             FUSION_NAME, _downside_rms, fit_atlas_fusionnet,
             fusion_feature_vector, predict_atlas_fusionnet,
         )
-        from atlaspm.atlas_fusion_allocator import allocate_fusion_sleeve
+        from atlaspm.engine.atlas_fusion_allocator import allocate_fusion_sleeve
 
     _numpy()
     prices = load_adjusted_prices(path)

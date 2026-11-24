@@ -12,10 +12,10 @@ from __future__ import annotations
 from math import exp, isfinite, log, sqrt
 from typing import Any
 
-from atlaspm.ml_dynamic_rebalance import (
+from atlaspm.research.ml_dynamic_rebalance import (
     SIGMA_CEILING, SIGMA_FLOOR, _integer, _rms,
 )
-from atlaspm.atlas_regimenet import (
+from atlaspm.research.atlas_regimenet import (
     BASE_FEATURES, REGIMES, _numpy, _softmax, native_feature_vector,
 )
 

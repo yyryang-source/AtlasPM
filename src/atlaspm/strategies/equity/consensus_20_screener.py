@@ -238,7 +238,7 @@ def run_20_signal_research(
 
     symbols_allowed = None
     if universe_path is not None:
-        from atlaspm.us_market_universe import read_market_universe
+        from atlaspm.data.us_market_universe import read_market_universe
         manifest = read_market_universe(universe_path)
         symbols_allowed = {r["provider_symbol"].strip().upper() for r in manifest}
         if len(symbols_allowed) != len(manifest):
