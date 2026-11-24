@@ -170,6 +170,8 @@ class V3DuckDB(V3Contracts):
         pair = next(p for p in res["factor_pair_correlations"]
                     if p["a"]=="mom_5d" and p["b"]=="intraday_range")
         self.assertAlmostEqual(-1, pair["mean_signed_spearman"], places=8)
+        self.assertEqual(1.0, res["correlation_matrix_signed_spearman"]["mom_5d"]["mom_5d"])
+        self.assertIsNone(res["correlation_matrix_signed_spearman"]["mom_63d"]["mom_63d"])
         selected = res["redundancy_selection"]
         self.assertIn("mom_5d", selected["selected_factors"])
         self.assertNotIn("intraday_range", selected["selected_factors"])
