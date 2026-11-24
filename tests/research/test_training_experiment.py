@@ -27,3 +27,14 @@ class ExperimentTests(unittest.TestCase):
     def test_invalid_grid(self):
         with self.assertRaises(ValueError):
             experiment(fixture(),config={},grid={"horizon":[1,5]},holdout_start=31)
+
+    def test_invalid_holdout_rejected_before_training(self):
+        from unittest.mock import patch
+        with patch("atlaspm.research.training_experiment.train") as training:
+            with self.assertRaisesRegex(ValueError,"HOLDOUT_MUST_START_ON_REFIT_BOUNDARY"):
+                experiment(fixture(),config={"minimum_train_sessions":10},grid={"ridge_alpha":[1.]},holdout_start=32)
+            training.assert_not_called()
+
+    def test_archive_config_rejected(self):
+        with self.assertRaisesRegex(ValueError,"EXPERIMENT_REQUIRES_MEMORY_PREDICTIONS"):
+            experiment(fixture(),config={"prediction_archive_path":"local_data/p.sqlite3"},grid={"ridge_alpha":[1.]},holdout_start=31)

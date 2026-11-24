@@ -41,6 +41,22 @@ def load_adjusted_prices(path: Path) -> dict[str, dict[date, float]]:
     return dict(prices)
 
 
+def annualized_sample_covariance(rows, means):
+    """Sample covariance of aligned daily returns, computed once per pair."""
+    n = len(rows)
+    size = len(means)
+    if n < 2 or size < 1:
+        raise ValueError("Sample covariance requires two observations and one asset")
+    covariance = [[0.0] * size for _ in range(size)]
+    for i in range(size):
+        for j in range(i, size):
+            value = TRADING_DAYS_PER_YEAR * sum(
+                (row[i] - means[i]) * (row[j] - means[j]) for row in rows
+            ) / (n - 1)
+            covariance[i][j] = covariance[j][i] = value
+    return covariance
+
+
 def estimate_from_prices(path: Path, min_observations: int = 60) -> dict[str, Any]:
     """Compute aligned daily simple returns and sample annualized covariance.
 
@@ -51,7 +67,10 @@ def estimate_from_prices(path: Path, min_observations: int = 60) -> dict[str, An
         raise ValueError("min_observations must be an integer >= 3")
     prices = load_adjusted_prices(path)
     symbols = sorted(prices)
-    dates = sorted(set.intersection(*(set(prices[s]) for s in symbols)))
+    shared = set(prices[symbols[0]])
+    for symbol in symbols[1:]:
+        shared.intersection_update(prices[symbol])
+    dates = sorted(shared)
     if len(dates) < min_observations + 1:
         raise ValueError(
             f"Need at least {min_observations + 1} shared close dates; got {len(dates)}"
@@ -63,16 +82,7 @@ def estimate_from_prices(path: Path, min_observations: int = 60) -> dict[str, An
     means = [fmean(row[i] for row in daily) for i in range(len(symbols))]
     if any(not isfinite(mu) for mu in means):
         raise ValueError("Non-finite sample return")
-    cov = [
-        [
-            TRADING_DAYS_PER_YEAR * sum(
-                (row[i] - means[i]) * (row[j] - means[j])
-                for row in daily
-            ) / (observations - 1)
-            for j in range(len(symbols))
-        ]
-        for i in range(len(symbols))
-    ]
+    cov = annualized_sample_covariance(daily, means)
     if any(not isfinite(cov[i][i]) or cov[i][i] <= 0 for i in range(len(symbols))):
         raise ValueError("One or more symbols have zero or invalid return volatility")
     expected_returns = {

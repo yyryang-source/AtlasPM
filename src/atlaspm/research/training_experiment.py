@@ -21,12 +21,23 @@ def experiment(payload, *, config, grid, holdout_start, selection_model="ridge")
         raise ValueError("INVALID_EXPERIMENT_GRID_VALUES")
     if prod(len(v) for v in grid.values())>32:
         raise ValueError("EXPERIMENT_TRIAL_LIMIT")
+    if config.get("prediction_archive_path") is not None:
+        raise ValueError("EXPERIMENT_REQUIRES_MEMORY_PREDICTIONS")
     sessions=payload["sessions"]
     horizon=config.get("horizon",5)
     if type(horizon) is not int or horizon not in HORIZONS:
         raise ValueError("INVALID_LABEL_HORIZON")
     if type(holdout_start) is not int or not 1<holdout_start<len(sessions)-horizon:
         raise ValueError("INVALID_HOLDOUT_SPLIT")
+    minimum=config.get("minimum_train_sessions",20)
+    test=config.get("test_sessions",5)
+    embargo=config.get("embargo_sessions",1)
+    length=config.get("sequence_length",1)
+    if any(type(v) is not int or v<lo for v,lo in ((minimum,1),(test,1),(embargo,0),(length,1))):
+        raise ValueError("INVALID_FOLD_CONFIG")
+    first=minimum+horizon+embargo+length-1
+    if holdout_start<=first+horizon or (holdout_start-first)%test:
+        raise ValueError("HOLDOUT_MUST_START_ON_REFIT_BOUNDARY")
     # Never send holdout prices or labels to the tuning trials.
     # train treats the input as read-only; slice references rather than copying every row.
     prefix={**payload,"sessions":sessions[:holdout_start]}
@@ -81,7 +92,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file",required=True,type=Path)
     args=parser.parse_args()
-    print(json.dumps(experiment(**json.loads(args.file.read_text(encoding="utf-8"))),indent=2,allow_nan=False))
+    import sys
+    json.dump(experiment(**json.loads(args.file.read_text(encoding="utf-8"))),sys.stdout,indent=2,allow_nan=False)
+    print()
 
 
 if __name__=="__main__":

@@ -10,10 +10,18 @@ class PredictionArchive:
     def __init__(self,path):
         self.path=local_path(path)
         self.path.parent.mkdir(parents=True,exist_ok=True)
-        # Refuse overwrite; an incomplete run remains explicitly incomplete.
+        # Reserve the filename exclusively before opening SQLite. Never attach
+        # prediction tables to an unrelated existing database.
+        try:
+            with self.path.open('xb'):
+                pass
+        except FileExistsError as exc:
+            raise sqlite3.OperationalError('PREDICTION_ARCHIVE_ALREADY_EXISTS') from exc
+        # An incomplete run remains explicitly incomplete.
         with closing(sqlite3.connect(self.path,timeout=30)) as con,con:
             if con.execute("PRAGMA journal_mode=WAL").fetchone()[0].lower()!="wal":
                 raise ValueError("PREDICTION_ARCHIVE_REQUIRES_WAL")
+            con.execute("BEGIN IMMEDIATE")
             con.execute("CREATE TABLE prediction_state (status TEXT NOT NULL)")
             con.execute("INSERT INTO prediction_state VALUES ('INCOMPLETE')")
             con.execute("""CREATE TABLE forecasts (
@@ -28,6 +36,7 @@ class PredictionArchive:
                        None if r["actual"] is None else finite(r["actual"],"actual"),
                        finite(r["prediction"],"prediction"))
         with closing(sqlite3.connect(self.path,timeout=30)) as con,con:
+            con.execute("BEGIN IMMEDIATE")
             if con.execute("SELECT status FROM prediction_state").fetchone()!=("INCOMPLETE",):
                 raise ValueError("PREDICTION_ARCHIVE_FINALIZED")
             con.executemany("INSERT INTO forecasts VALUES (?,?,?,?,?,?)",values())

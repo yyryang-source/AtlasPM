@@ -47,6 +47,9 @@ STAGES: tuple[WorkflowStage, ...] = (
         existing_modules=(
             "atlaspm.data.us_market_universe",
             "atlaspm.data.us_market_quality",
+            "atlaspm.data.factor_db",
+            "atlaspm.data.factor_eval",
+            "atlaspm.data.factor_v3",
             "atlaspm.data.corporate_action_reconciliation",
         ),
         deliverables=("data_quality_report", "point_in_time_universe"),
@@ -59,6 +62,7 @@ STAGES: tuple[WorkflowStage, ...] = (
         existing_modules=(
             "atlaspm.strategies.equity.consensus_20_screener",
             "atlaspm.research.ai_stock_ranker_v2",
+            "atlaspm.research.training_engine",
         ),
         deliverables=("factor_diagnostics", "dated_research_signals"),
         limitations=("现有美股大池 V2 测试尚未证明有效 Alpha",),
@@ -69,6 +73,8 @@ STAGES: tuple[WorkflowStage, ...] = (
         "partial_research", ("alpha",),
         existing_modules=(
             "atlaspm.research.stock_walkforward",
+            "atlaspm.engine.replay",
+            "atlaspm.research.training_experiment",
             "atlaspm.research.v2_momentum_diagnostics",
             "atlaspm.strategies.equity.alpha_eligibility",
             "atlaspm.research.atlas_robustness_audit",
@@ -92,7 +98,8 @@ STAGES: tuple[WorkflowStage, ...] = (
         "联合考虑收益风险、相关性、成本、仓位与对冲敞口",
         "partial_research", ("sleeves",),
         existing_modules=(
-            "atlaspm.quant.mean_variance",
+            "atlaspm.engine.mean_variance",
+            "atlaspm.engine.unified",
             "atlaspm.risk.risk_budget",
             "atlaspm.risk.ibkr_multiasset_budget",
             "atlaspm.risk.atlas_risknet",

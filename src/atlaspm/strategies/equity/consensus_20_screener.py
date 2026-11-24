@@ -75,9 +75,10 @@ def _signals(closes: list[float]) -> dict[str, float]:
     if len(closes) != 253 or any(p <= 0 or not isfinite(p) for p in closes):
         raise ValueError("Screening needs 253 finite positive adjusted closes")
     p = closes
-    rs63 = [b / a - 1 for a, b in zip(p[-64:-1], p[-63:])]
-    rs21 = rs63[-21:]
     rs126 = [b / a - 1 for a, b in zip(p[-127:-1], p[-126:])]
+    rs63 = rs126[-63:]
+    rs21 = rs63[-21:]
+    sma200, sma100, sma50 = (fmean(p[-length:]) for length in (200, 100, 50))
     high = p[0]
     dd = 0.0
     for close in p[1:]:
@@ -91,11 +92,11 @@ def _signals(closes: list[float]) -> dict[str, float]:
         "momentum_6_1": p[-22] / p[-127] - 1,
         "momentum_3_1": p[-22] / p[-64] - 1,
         "momentum_63": p[-1] / p[-64] - 1,
-        "price_vs_sma200": p[-1] / fmean(p[-200:]) - 1,
-        "price_vs_sma100": p[-1] / fmean(p[-100:]) - 1,
-        "price_vs_sma50": p[-1] / fmean(p[-50:]) - 1,
-        "sma50_vs_sma200": fmean(p[-50:]) / fmean(p[-200:]) - 1,
-        "near_52w_high": p[-1] / max(p),
+        "price_vs_sma200": p[-1] / sma200 - 1,
+        "price_vs_sma100": p[-1] / sma100 - 1,
+        "price_vs_sma50": p[-1] / sma50 - 1,
+        "sma50_vs_sma200": sma50 / sma200 - 1,
+        "near_52w_high": p[-1] / high,
         "low_volatility_63": -stdev(rs63) * sqrt(252),
         "low_volatility_21": -stdev(rs21) * sqrt(252),
         "low_downside_vol_63": -sqrt(fmean(min(r, 0.0) ** 2 for r in rs63) * 252),

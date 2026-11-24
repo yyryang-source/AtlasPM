@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Any
 
-from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices
+from atlaspm.data.historical import TRADING_DAYS_PER_YEAR, load_adjusted_prices, annualized_sample_covariance
 from atlaspm.engine.mean_variance import optimize_mean_variance
 
 
@@ -16,16 +16,7 @@ def _sample_estimates(window: list[list[float]], symbols: list[str]) -> tuple[di
     n = len(window)
     size = len(symbols)
     means = [fmean(row[i] for row in window) for i in range(size)]
-    cov = [
-        [
-            TRADING_DAYS_PER_YEAR * sum(
-                (row[i] - means[i]) * (row[j] - means[j])
-                for row in window
-            ) / (n - 1)
-            for j in range(size)
-        ]
-        for i in range(size)
-    ]
+    cov = annualized_sample_covariance(window, means)
     return ({s: means[i] * TRADING_DAYS_PER_YEAR for i, s in enumerate(symbols)}, cov)
 
 

@@ -11,6 +11,22 @@ from .test_training_engine import fixture
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_unrelated_database_is_not_modified(self):
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                path=Path('local_data/existing.sqlite3')
+                path.parent.mkdir()
+                with closing(sqlite3.connect(path)) as con,con:
+                    con.execute('CREATE TABLE unrelated (value TEXT)')
+                before=path.read_bytes()
+                with self.assertRaisesRegex(sqlite3.OperationalError,'ALREADY_EXISTS'):
+                    PredictionArchive(path)
+                self.assertEqual(path.read_bytes(),before)
+            finally:
+                os.chdir(cwd)
+
     def test_lifecycle(self):
         cwd=Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:
