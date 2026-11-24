@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 import re
 from statistics import fmean, stdev
-from typing import Any
 
 from atlaspm.data import factor_db, factor_eval
 

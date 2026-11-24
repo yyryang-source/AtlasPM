@@ -187,6 +187,13 @@ class InstitutionalRebalanceTests(unittest.TestCase):
         blocked = plan_equity_trade(self.ledger, self.plan)
         self.assertIn("BROKER_PREVIEW_DEBT_MISMATCH", blocked["block_reasons"])
 
+    def test_normalized_account_without_exact_raw_match_raises_value_error(self):
+        # The ledger strips account IDs; the separate raw account lookup must
+        # fail with the documented validation exception, never StopIteration.
+        self.ledger["accounts"][0]["account_id"] = " DEMO-CASH "
+        with self.assertRaisesRegex(ValueError, "raw ledger account"):
+            plan_equity_trade(self.ledger, self.plan)
+
     def test_sell_above_holdings_is_rejected(self):
         self.plan["trade"]["side"] = "SELL"
         self.plan["trade"]["shares"] = 200

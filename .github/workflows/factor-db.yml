@@ -1,5 +1,8 @@
 name: factor-db
 
+permissions:
+  contents: read
+
 on:
   push:
     paths:

@@ -10,7 +10,6 @@ more weight to *understating* future risk. Research only; no alpha prediction.
 from __future__ import annotations
 
 from math import exp, isfinite, log, sqrt
-from statistics import fmean
 from typing import Any
 
 from atlaspm.ml_dynamic_rebalance import (

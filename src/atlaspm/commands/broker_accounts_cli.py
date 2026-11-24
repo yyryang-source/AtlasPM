@@ -57,7 +57,7 @@ def run(args) -> dict:
             diagnostic = reconcile_ibkr_financing_margin(
                 capture_payload, mapping_payload, margin_payload
             )
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError):
             # Never include raw identifiers, amounts or malformed input in stderr.
             raise ValueError("Private financing data failed validation; inspect local inputs") from None
         destination.parent.mkdir(parents=True, exist_ok=True)

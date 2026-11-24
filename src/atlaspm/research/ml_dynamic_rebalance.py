@@ -11,7 +11,6 @@ market impact and the inability to guarantee a closing auction fill.
 
 from __future__ import annotations
 
-from datetime import date
 from math import ceil, exp, isfinite, log, sqrt
 from pathlib import Path
 from statistics import fmean
