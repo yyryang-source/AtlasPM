@@ -852,3 +852,47 @@ page_advance_allowed is false for missing index quarters, truncated
 event leads, missing bodies or collection/cache errors. Use this flag
 rather than page_complete alone before advancing a cursor. Reuse the
 same historical SEC index and raw body cache; no index rebuild needed.
+
+
+### V5.9 reviewed evidence integrity and visible-action return reconciliation
+
+The reviewed V5.3 ledger now validates canonical claim JSON, claim SHA-256
+and indexed metadata before applying the as-of filter, including before
+append. This detects accidental edits, not a malicious rewrite of every
+digest. Inside the pipeline evidence tree only original content-addressed
+collector objects or filing bodies can be cited; generated hints, reports,
+queues and manifests cannot be primary evidence. Visible evidence bytes
+are rehashed. Two declared source families and distinct bytes are still
+only declared corroboration, not independently authenticated sources.
+
+With reviewed V5.3 claims and explicit local endpoint marks, use:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_visible_returns_v59 --file local_data/marks.jsonl --as-of 2020-04-01 --raw-unadjusted
+~~~
+
+Each JSONL object contains exactly security_id, start_date, end_date,
+start_symbol, end_symbol, start_close, end_close. Prices are positive
+decimal strings. For example (illustrative only):
+
+~~~json
+{"security_id":"ID1","start_date":"2020-02-01","end_date":"2020-03-31","start_symbol":"ABC","end_symbol":"ABC","start_close":"100","end_close":"55"}
+~~~
+
+The snapshot is retrospective at the given as-of date, strictly after
+the return endpoint; it is not a per-decision training feature snapshot.
+Intervals must continuously cover the requested dates, and ticker changes
+must reconcile with explicit reviewed actions. Exchange transitions,
+identity gaps, unresolved visible claims, mergers, delistings, cash exits
+and same-day split/dividend share-basis ambiguity block calculation.
+Visible splits change shares and cash dividends accrue per then-current
+share count; no reinvestment, tax, payment timing or execution costs are
+modeled. Outputs are split-adjusted price return and visible economic
+entitlement return. Raw marks are caller-declared and hashed, not
+independently verified; no calendar/session coverage or adjustment
+completeness is proven. Limit: 1,000 rows and 4 MiB input, one snapshot per
+run. Output is returns_v59/latest.json under certification_v5.
+No source market parquet is modified, no formal label is published and no
+real training or execution permission is granted. The missing independent
+historical sources, full corporate-action coverage, vendor price semantics
+and rights remain external blockers.
