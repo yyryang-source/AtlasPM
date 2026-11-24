@@ -128,10 +128,11 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
         if set(models)-set(ARTIFACT_MODELS):
             raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
-        artifact_store=ModelArtifacts(model_artifact_path)
     if regime_ensemble is not None and (not isinstance(regime_ensemble,dict) or set(regime_ensemble)-{'market','weights'} or not all(isinstance(v,dict) for v in regime_ensemble.values())):
         raise ValueError('INVALID_REGIME_ENSEMBLE_CONFIG')
     panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None)
+    if model_artifact_path is not None:
+        artifact_store=ModelArtifacts(model_artifact_path)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
@@ -286,6 +287,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                         test_end=panel['dates'][fold['test_end_index']],
                         latest_train_label=panel['dates'][fold['latest_training_label_end']],
                         settings=snapshot_settings,weights=weights,**FLAGS))
+                if len(values)!=len(test_rows):
+                    raise ValueError('MODEL_OUTPUT_ROW_COUNT_MISMATCH:'+name)
                 model_settings[name]=settings
                 for row,value in zip(test_rows,values):
                     base={k:row[k] for k in ("security_id","date","label_end_date")}

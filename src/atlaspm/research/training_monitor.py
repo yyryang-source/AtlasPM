@@ -117,7 +117,26 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
         pending.append(dict(maturity=maturity,count=count,intervals=intervals,hits=matches,
             mae={m:fmean(losses[m]) for m in models} if count else {},
             max_error={m:max(losses[m]) for m in models} if count else {}))
+    if not audit:
+        raise ValueError("EMPTY_MONITOR_PREDICTIONS")
+    latest=audit[-1]
+    review={}
+    for model in models:
+        data=latest["models"][model]
+        if model==baseline:
+            status="REFERENCE_BASELINE"
+        elif latest["matured_calibration_dates"]<minimum_dates:
+            status="INSUFFICIENT_EVIDENCE"
+        elif data["drift_alert"] is True:
+            status="REVIEW_FOR_DEGRADATION"
+        elif latest["champion"]==model:
+            status="CANDIDATE_FOR_INDEPENDENT_REVIEW"
+        else:
+            status="RETAIN_AS_CHALLENGER"
+        review[model]=dict(status=status,as_of=latest["date"],
+                           independent_review_required=True,automatic_retirement=False)
     return dict(daily=audit,baseline=baseline,nominal_coverage=coverage,
+                model_review=review,
                 coverage_as_of_last_prediction={m:dict(
                     sample_count=total[m],empirical_row_coverage=hits[m]/total[m] if total[m] else None,
                     assessed_dates=assessed_dates[m],all_rows_covered_fraction=covered_dates[m]/assessed_dates[m] if assessed_dates[m] else None)

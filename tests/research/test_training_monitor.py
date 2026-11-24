@@ -23,6 +23,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(result["daily"][5]["champion"],"ridge")
         self.assertEqual(result["daily"][5]["models"]["ridge"]["interval_half_width"],0)
         self.assertFalse(result["automatic_promotion_enabled"])
+        self.assertEqual(result["model_review"]["ridge"]["status"],"CANDIDATE_FOR_INDEPENDENT_REVIEW")
         self.assertFalse(result["live_execution_enabled"])
 
     def test_future_labels_do_not_change_earlier_monitor(self):
@@ -32,6 +33,14 @@ class MonitoringTests(unittest.TestCase):
             rows[30]["actual"]=-.5
         b=monitor_predictions(p,minimum_dates=3,window_dates=10,coverage=.75)
         self.assertEqual(a["daily"][:13],b["daily"][:13])
+
+    def test_degradation_is_review_not_automatic_retirement(self):
+        p=streams()
+        for row in p["ridge"][-30:]:
+            row["prediction"]=-.5
+        result=monitor_predictions(p,minimum_dates=3,window_dates=10,coverage=.75)
+        self.assertEqual(result["model_review"]["ridge"]["status"],"REVIEW_FOR_DEGRADATION")
+        self.assertFalse(result["model_review"]["ridge"]["automatic_retirement"])
 
     def test_missing_and_alignment(self):
         p=streams()
