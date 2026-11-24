@@ -152,3 +152,22 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(report["pairs"][0]["matured_dates"],3)
         self.assertAlmostEqual(report["pairs"][0]["correlation"],1.)
         self.assertFalse(report["weights_promoted"])
+
+
+    def test_joint_research_keeps_missing_specialists_explicit(self):
+        from atlaspm.research.intelligence import joint_local_review
+        stamp="2020-01-02T21:00:00Z"
+        out=joint_local_review(security_id="SYN:AAA",asset_type="stock",as_of=stamp,
+                               events=[],research_rows=research("AAA",stamp,(.1,.11)),
+                               weights={"m1":1,"m2":1})
+        self.assertEqual(out["coverage"]["factor"],"available")
+        self.assertEqual(out["coverage"]["credit"],"missing")
+        self.assertFalse(out["external_ai_allowed"])
+        self.assertFalse(out["trade_authorized"])
+
+    def test_old_availability_cannot_be_refreshed_by_recent_receipt(self):
+        from atlaspm.research.research_contract import contract
+        stamp="2020-01-02T21:00:00Z"
+        row=research("AAA",stamp,(.1,.11))[0]
+        row["evidence"][0]["available_at"]="2019-12-01T00:00:00Z"
+        self.assertFalse(contract(row,as_of=stamp)["numeric_eligible"])

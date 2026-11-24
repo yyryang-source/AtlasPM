@@ -69,7 +69,8 @@ def contract(raw, *, as_of, max_age_seconds=86400):
     if len({e["sha256"] for e in evidence})!=len(evidence):
         raise ValueError("DUPLICATE_RESEARCH_EVIDENCE")
     quality=len(known)==len(evidence)
-    fresh=quality and all((cutoff-t).total_seconds()<=age for t in known)
+    fresh=quality and all((cutoff-t).total_seconds()<=age for t in known) and all(
+        (cutoff-_utc(e["available_at"])).total_seconds()<=age for e in evidence)
     ret,radius=raw["expected_return"],raw["uncertainty_radius"]
     if raw["kind"]!="quantitative_prediction":
         if ret is not None or radius is not None:

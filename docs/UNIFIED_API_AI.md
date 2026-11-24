@@ -493,3 +493,60 @@ if ($LASTEXITCODE -ne 0) { throw "Synthetic event-to-flat validation failed" }
 No real API or order call in fixture. CLI prints only fixture status and
 attribution, not a production return. Actual full-suite CI and local
 performance not yet measured.
+
+
+## Autonomous orchestrator and continuous lifecycle batch
+
+Base c4bb1c2. The existing financial event queue now holds a reserved
+system-control record, atomically committed with the local review tick.
+NYSE calendar via existing pandas_market_calendars, phase classification
+(pre-market/market/post-market/closed), minute tick id, monotonic cutoff,
+single writer, pause/takeover/resume. The local foreground worker is bounded
+(100 cycles), external network, model training, order tasks remain disabled.
+Stop is a local event-worker latch, not a real broker cancel or global kill
+switch. A running atomic review must finish before control can acquire the
+lock. Crash recovery reads the last committed state; stale exclusive locks
+require operator review/removal after verifying no writer remains.
+
+Continuous synthetic simulation accepts at most 60 chronological sessions,
+20 symbols, 128 research rows/day. Each close uses existing decide/fuse and
+requires full positive stock/ETF research coverage before passing candidate
+signals to existing engine.replay. Missing/stale/conflicting input holds
+rather than implicitly liquidating. Existing next-open fills, prior volume,
+cash, settlement, trade costs and attribution are reused; no new OMS. Optional
+existing rolling optimizer can be supplied. Added opt-in cash opening-gap and
+target gross/stress checks, stop/take-profit/time limit from first acquisition
+mark. Conservative account-wide sell-only latch retries residual positions
+under original liquidity rules; not individualized dynamic stops or a broker
+risk approval. Checkpoint uses existing atomic writer under local_data with
+.continuous.json suffix, policy and ordered input prefix hashes. Recomputes
+bounded prefix; rejects changed history and duplicate input. No real trades
+or production account state. Final flat/settled flag is computed, not assumed.
+No real market data, real model predictions or actual AI API call in fixtures.
+
+Fusion supports optional experimental freshness half-life, and residual
+correlations on matured aligned synthetic date blocks. Freshness checks both
+source availability and local receipt; envelope not calibrated. Joint local
+research accepts normalized events and research contracts, exact subject and
+event evidence hash/receipt/availability checks, explicit missing specialist
+coverage. No automatic specialist data retrieval or trained model inference.
+Learning review masks unmatured labels, reuses existing monitor and ensemble,
+reports correlation and review requirement; no training, registry promotion
+or rollback action. Workbench overview reuses existing navigation and adds
+local scheduler state and controls; no new dashboard. Actual API usage,
+performance telemetry, continuous ingest, verified identity and real-time
+research, option/bond execution, full task scheduler and model approval remain
+pending. No real connection tested, no resource benchmark measured.
+
+New tests cover continuous buy/stop/exit/settlement, partial/rejected orders,
+research conflict/missing, risk budget, restart prefix, exclusive writer,
+control/tick idempotency, decay/correlation, joint local context and stale
+availability. Expected count 1099 (1090 + 9), not measured. Run existing
+Windows release gate with --minimum-passed 1099, then:
+```powershell
+& $py -m atlaspm.framework.orchestrator status
+& $py -m atlaspm.framework.continuous_simulation --help
+& $py -m unittest discover -s tests/research -p test_continuous_orchestrator.py -v
+```
+No paid credentials required. Keep #94 frozen, formal training/backtest and
+automatic live disabled. Do not treat earlier CI as current acceptance.

@@ -285,6 +285,54 @@ def dispatch_tasks(tasks, *, external_output_budget=0, allow_external=False, gat
             "automatic_fallback":False,"actual_cost_usd":None}
 
 
+def joint_local_review(*, security_id, asset_type, as_of, events, research_rows, weights):
+    """One local research request for existing normalized specialist evidence.
+
+    Event identity matching is exact: no ticker-to-conid guess. Objective
+    reports/LLM text are context, never synthesized into numeric forecasts.
+    All evidence stays local. Missing specialist coverage remains explicit.
+    """
+    from atlaspm.research.financial_events import review
+    from atlaspm.research.research_contract import contract,CATEGORIES
+    from atlaspm.research.signal_fusion import fuse
+    from atlaspm.research.training_registry import digest
+    if not isinstance(research_rows,list) or len(research_rows)>128:
+        raise ValueError("JOINT_RESEARCH_CAPACITY")
+    event_report=review(events,as_of=as_of,holdings=[security_id])
+    relevant=[e for e in event_report["events"] if security_id in e["subjects"] and not e["expired"]]
+    by_hash={e["evidence_sha256"]:e for e in relevant}
+    checked=[]
+    rejected=0
+    for row in research_rows:
+        item=contract(row,as_of=as_of)
+        body=item["contract"]
+        if body["security_id"]!=security_id or body["asset_type"]!=asset_type:
+            raise ValueError("JOINT_RESEARCH_IDENTITY_MISMATCH")
+        # Event-derived evidence requires matching visible source and receipt.
+        # Independent numerical artifacts require their own admission; the
+        # synthetic fixture path is the only numerical route in this phase.
+        if not body["synthetic_fixture"]:
+            for ev in body["evidence"]:
+                match=by_hash.get(ev["sha256"])
+                if (match is None or match["provider"]!=ev["source"] or
+                    match["received_at"]!=ev["received_at"] or
+                    match["first_available_at"]!=ev["available_at"]):
+                    rejected+=1
+                    break
+            else:
+                checked.append(item)
+        else:
+            checked.append(item)
+    present={r["contract"]["category"] for r in checked}
+    fusion=fuse([r["contract"] for r in checked],as_of=as_of,weights=weights) if checked else None
+    return {**_FLAGS,"security_id":security_id,"asset_type":asset_type,"as_of":as_of,
+            "coverage":{name:("available" if name in present else "missing") for name in sorted(CATEGORIES)},
+            "event_revisions":[e["revision"] for e in relevant],
+            "event_review_sha256":digest(event_report),"research_ids":[r["research_id"] for r in checked],
+            "unmatched_evidence_rows":rejected,"fusion":fusion,"external_ai_allowed":False,
+            "trade_authorized":False,"identity_independently_verified":False}
+
+
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")

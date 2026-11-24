@@ -71,6 +71,29 @@ def tick(*, as_of, holdings=(),limit=20,path=event_queue.PATH):
             "broker_side_effects":False}
 
 
+def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
+    """Local evaluation only: existing chronological ensemble and monitor.
+
+    No training job is started and no registry champion is modified.
+    Outcome labels at/after the cutoff are masked before model evaluation.
+    """
+    from datetime import date
+    from atlaspm.research.signal_fusion import historical_diagnostics,matured_correlations
+    cutoff=date.fromisoformat(as_of_date)
+    if (not isinstance(streams,dict) or not 2<=len(streams)<=8 or
+        any(not isinstance(rows,list) or len(rows)>10000 for rows in streams.values())):
+        raise ValueError("BOUNDED_LEARNING_REVIEW_REQUIRED")
+    clean={}
+    for name,rows in streams.items():
+        clean[name]=[{**r,"actual":r["actual"] if date.fromisoformat(r["label_end_date"])<cutoff else None}
+                     for r in rows if date.fromisoformat(r["date"])<=cutoff]
+    result=historical_diagnostics(clean,window_dates=window_dates,minimum_dates=minimum_dates)
+    correlations=matured_correlations(clean,as_of_date=as_of_date,minimum_dates=minimum_dates)
+    return {**FLAGS,"as_of_date":as_of_date,"diagnostics":result,"correlations":correlations,
+            "retrain_task":"INDEPENDENT_SYNTHETIC_RESEARCH_REVIEW_REQUIRED",
+            "training_started":False,"model_promoted":False}
+
+
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
