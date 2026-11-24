@@ -151,10 +151,16 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             })
         quarantine, audit_metadata = hf_stock5m.quality_paths(source)
         exclusion = None
+        total_excluded = None
+        invalid_source_buckets = 0
+        invalid_source_rows = 0
         if audit_metadata.is_file():
             with audit_metadata.open("r",encoding="utf-8") as f:
                 metadata = json.load(f)
             exclusion = int(metadata["excluded_ambiguous_5m_buckets"])
+            total_excluded = int(metadata.get("excluded_total_5m_buckets", exclusion))
+            invalid_source_buckets = int(metadata.get("excluded_invalid_source_5m_buckets", 0))
+            invalid_source_rows = int(metadata.get("invalid_source_rows", 0))
         problems = []
         if not bars:
             problems.append("NO_BARS")
@@ -168,7 +174,7 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             problems.append("UNEXPECTED_TRADING_DATES")
         if exclusion is None:
             problems.append("NO_CONVERSION_QC_METADATA")
-        if exclusion and not quarantine.is_file():
+        if total_excluded and not quarantine.is_file():
             problems.append("MISSING_QUARANTINE_FILE")
         # Missing whole NYSE days or benchmarks are review issues, not invalid
         # OHLC records. An absence might be a data/vendor or market-halt issue.
@@ -179,6 +185,10 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             review.append("MISSING_BENCHMARK_SYMBOLS")
         if exclusion:
             review.append("QUARANTINED_AMBIGUOUS_5M_BUCKETS")
+        if invalid_source_buckets:
+            review.append("QUARANTINED_INVALID_SOURCE_5M_BUCKETS")
+        if invalid_source_rows:
+            review.append("RAW_SOURCE_OHLCV_ANOMALIES")
         if session == "all":
             review.append("EXTENDED_HOURS_NOT_VERIFIED_AGAINST_EXCHANGE_SCHEDULE")
         status = ("STRUCTURAL_QC_FAILED" if problems else "REVIEW_REQUIRED")
@@ -206,6 +216,9 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             "daily_summary": daily,
             "benchmark_coverage": b_report,
             "ambiguous_buckets_quarantined": exclusion,
+            "invalid_source_5m_buckets_quarantined": invalid_source_buckets,
+            "total_5m_buckets_quarantined": total_excluded,
+            "invalid_raw_source_rows": invalid_source_rows,
             "structural_issues": problems,
             "review_reasons": review,
             "quality_status": status,

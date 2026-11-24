@@ -106,7 +106,7 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
                 FROM range(?) t(i)
             """,[extra_symbols])
         if duplicate: cx.execute("INSERT INTO bars SELECT * FROM bars WHERE ticker='AAPL' LIMIT 1")
-        if invalid: cx.execute("UPDATE bars SET low=999 WHERE ticker='MSFT'")
+        if invalid: cx.execute("UPDATE bars SET low=200.75 WHERE ticker='MSFT'")
         cx.execute(f"COPY bars TO '{mod._quote(self.raw)}' (FORMAT PARQUET)")
         cx.close()
 
@@ -169,6 +169,68 @@ class DuckDbHuggingFaceConversionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"Source QC failed"):
             mod.convert(self.raw,self.out)
         self.assertFalse(self.out.exists())
+
+    def test_one_invalid_low_quarantines_entire_five_minute_bucket(self):
+        # Simulates a rare KMB-like bad source record in a large archive.
+        # 1/20006 raw rows and 1/20002 5m buckets are below strict caps.
+        self.seed(invalid=True,extra_symbols=20000)
+        before=self.raw.read_bytes()
+        result=mod.convert(self.raw,self.out)
+        self.assertEqual(20006,result["source_rows"])
+        self.assertEqual(1,result["invalid_source_rows"])
+        self.assertEqual(1,result["excluded_invalid_source_5m_buckets"])
+        self.assertEqual(0,result["excluded_ambiguous_5m_buckets"])
+        self.assertEqual(1,result["excluded_total_5m_buckets"])
+        self.assertEqual(20001,result["bars_5m"])
+        self.assertEqual("REVIEW_REQUIRED",result["quality_status"])
+        self.assertFalse(result["approved_for_model_training"])
+        self.assertFalse(result["live_execution_enabled"])
+        self.assertEqual(before,self.raw.read_bytes())
+        quarantine, audit=mod.quality_paths(self.out)
+        self.assertTrue(quarantine.is_file())
+        self.assertTrue(audit.is_file())
+        cx=duckdb.connect()
+        try:
+            self.assertEqual(0,cx.execute(
+                "SELECT count(*) FROM read_parquet(?) WHERE symbol='MSFT'",
+                [str(self.out)]).fetchone()[0])
+            self.assertEqual(1,cx.execute(
+                "SELECT count(*) FROM read_parquet(?) WHERE symbol='AAPL'",
+                [str(self.out)]).fetchone()[0])
+            excluded=cx.execute(
+                "SELECT symbol, invalid_source_minutes FROM read_parquet(?)",
+                [str(quarantine)]).fetchall()
+        finally:
+            cx.close()
+        self.assertEqual([("MSFT",1)],excluded)
+        self.assertEqual(1,mod.status()["quarantined_5m_buckets"])
+
+    def test_duplicate_and_invalid_same_bucket_counted_once(self):
+        self.seed(duplicate=True,extra_symbols=20000)
+        cx=duckdb.connect()
+        cx.execute("CREATE TABLE bars AS SELECT * FROM read_parquet(?)",[str(self.raw)])
+        cx.execute("UPDATE bars SET low=101 WHERE ticker='AAPL' AND open=100")
+        self.raw.unlink()
+        cx.execute(f"COPY bars TO '{mod._quote(self.raw)}' (FORMAT PARQUET)")
+        cx.close()
+        result=mod.convert(self.raw,self.out)
+        self.assertEqual(1,result["excluded_ambiguous_5m_buckets"])
+        self.assertEqual(1,result["excluded_invalid_source_5m_buckets"])
+        self.assertEqual(1,result["excluded_total_5m_buckets"])
+        self.assertEqual(result["candidate_bars_5m"]-1,result["bars_5m"])
+
+    def test_invalid_identity_still_fails_closed_without_output(self):
+        self.seed(extra_symbols=20000)
+        cx=duckdb.connect()
+        cx.execute("CREATE TABLE bars AS SELECT * FROM read_parquet(?)",[str(self.raw)])
+        cx.execute("UPDATE bars SET ticker=NULL WHERE ticker='MSFT'")
+        self.raw.unlink()
+        cx.execute(f"COPY bars TO '{mod._quote(self.raw)}' (FORMAT PARQUET)")
+        cx.close()
+        with self.assertRaisesRegex(ValueError,"not safely quarantinable"):
+            mod.convert(self.raw,self.out)
+        self.assertFalse(self.out.exists())
+
 
 
 if __name__=="__main__":

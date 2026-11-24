@@ -69,8 +69,14 @@ print(rows)
   America/New_York; --session all preserves off-hour source bars.
 - Every five-minute bucket gets earliest open, latest close, maximum
   high, minimum low, summed volume. Missing minute bars are never filled.
-- Source Parquet requires timezone-aware timestamps and complete OHLCV.
-  Malformed or nonfinite source rows reject that whole month (fail closed).
+- Source Parquet requires timezone-aware timestamps and structurally valid OHLCV.
+  Missing or invalid ticker/timestamp, missing columns, or large-scale bad source
+  data still reject the whole month (fail closed). When invalid OHLCV rows are
+  **at most 100 rows AND at most 0.01%** of the original source and their
+  ticker/timestamp are identifiable, the entire affected ticker/5m bucket is
+  quarantined instead of fabricating a five-minute bar from the remaining
+  minute records. Source records are never edited; all excluded five-minute
+  bucket identifiers and counts are recorded under `quality/`.
 - A 5m ticker/time bucket with more than five source rows or repeated
   minute timestamps is **ambiguous**. It is *excluded completely* from
   usable prices; the pipeline never arbitrarily chooses a duplicate or
@@ -92,6 +98,31 @@ print(rows)
   trading systems; no order execution, trading permission, or risk-gate
   bypass is enabled.
 - No market datasets or personal secrets should enter GitHub.
+
+## Recovering from "Source QC failed: ... invalid OHLCV rows"
+
+A damaged network download is not the only reason for a QC failure. For
+example, a source minute can have its low price above its opening price,
+violating `low <= min(open,close)`. The system must **not** silently adjust
+prices because the true trading range is unknown. Affected whole five-minute
+buckets are quarantined and omitted from usable prices.
+The source is retained. No automatic certification for model training follows.
+
+After updating your local clone, retry the already-downloaded source without
+`--refresh` (only if you have verified legal data-use rights):
+
+~~~powershell
+& .\.venv\Scripts\python.exe -m atlaspm.cli market-db hf-5m-backfill --start-month 2000-01 --end-month 2000-01 --max-months 1 --session rth --acknowledge-rights
+& .\.venv\Scripts\python.exe -m atlaspm.cli market-db hf-5m-audit --month 2000-01 --session rth
+~~~
+
+Review the private conversion QC JSON: `invalid_source_rows`,
+`excluded_invalid_source_5m_buckets`, `excluded_total_5m_buckets`,
+`quality_status`, and `quarantine`. The offline audit also exposes
+`invalid_raw_source_rows` and `invalid_source_5m_buckets_quarantined`.
+All months containing source anomalies remain `REVIEW_REQUIRED`.
+If a month is still rejected, inspect the actual message before retrying or
+downloading anything; thresholds must not be raised to make it pass.
 
 ## Recovering from "5m QC failed: duplicated-minute buckets"
 
@@ -138,8 +169,11 @@ Key fields:
 - benchmark_coverage has SPY, QQQ, AAPL, MSFT, NVDA, GOOGL, AMZN, META.
   Its denominator is the NYSE expected regular-session 5m slots;
   thinly traded days or missing vendor data can lower the ratio.
-- ambiguous_buckets_quarantined counts the earlier duplicate-minute
-  buckets rejected from the prices file.
+- ambiguous_buckets_quarantined counts duplicate-minute buckets.
+  invalid_source_5m_buckets_quarantined counts five-minute intervals excluded
+  because their underlying minute OHLCV was invalid. total_5m_buckets_quarantined
+  counts their union, without double-counting. These rows never become tradeable
+  prices and keep quality_status at REVIEW_REQUIRED.
 
 quality_status will stay REVIEW_REQUIRED even if no structural error
 is found: there is no independent certification of corporate actions,
