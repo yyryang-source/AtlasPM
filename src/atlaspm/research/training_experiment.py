@@ -1,6 +1,5 @@
 """Bounded synthetic model experiment, with a separate chronological holdout."""
 from __future__ import annotations
-from copy import deepcopy
 from itertools import product
 from math import prod
 import argparse
@@ -29,8 +28,8 @@ def experiment(payload, *, config, grid, holdout_start, selection_model="ridge")
     if type(holdout_start) is not int or not 1<holdout_start<len(sessions)-horizon:
         raise ValueError("INVALID_HOLDOUT_SPLIT")
     # Never send holdout prices or labels to the tuning trials.
-    prefix=deepcopy(payload)
-    prefix["sessions"]=deepcopy(sessions[:holdout_start])
+    # train treats the input as read-only; slice references rather than copying every row.
+    prefix={**payload,"sessions":sessions[:holdout_start]}
     keys=sorted(grid)
     trials=[]
     reference=None
@@ -40,7 +39,11 @@ def experiment(payload, *, config, grid, holdout_start, selection_model="ridge")
         if selection_model not in result["predictions"]:
             raise ValueError("SELECTION_MODEL_NOT_AVAILABLE")
         rows=result["predictions"][selection_model]
-        identity=[(r["security_id"],r["date"],r["label_end_date"],r["actual"]) for r in rows]
+        identity_hash=hashlib.sha256()
+        for row in rows:
+            identity_hash.update(json.dumps([row["security_id"],row["date"],row["label_end_date"],row["actual"]],separators=(",",":"),allow_nan=False).encode())
+            identity_hash.update(b"\n")
+        identity=identity_hash.hexdigest()
         if reference is None:
             reference=identity
         elif identity!=reference:
@@ -49,6 +52,7 @@ def experiment(payload, *, config, grid, holdout_start, selection_model="ridge")
         if stats["mae"] is None:
             raise ValueError("NO_MATURED_VALIDATION_LABELS")
         trials.append(dict(parameters=params,validation=stats))
+        del rows,result
     best=min(trials,key=lambda t:t["validation"]["mae"])
     selected={**config,**best["parameters"]}
     # Align the holdout to an actual model refit boundary; otherwise the
