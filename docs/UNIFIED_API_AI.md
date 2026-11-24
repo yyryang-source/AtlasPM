@@ -610,7 +610,7 @@ machine processing, third-party AI transmission and training.
 | IBKR | Local Client Portal/TWS session, Paper account and market data entitlements; ATLASPM_IBKR_MARKET_DATA_RIGHTS | Read-only account, contract mapping, quotes, Greeks, subscription limits, What-If; human-approved Paper lifecycle only |
 | Yahoo Finance | ATLASPM_YAHOO_NEWS_RIGHTS; licensed feed specification and retention rights | Authorized feed/file ingestion; no guessed URL |
 | Bloomberg | ATLASPM_BLOOMBERG_NEWS_RIGHTS, ATLASPM_BLOOMBERG_RESEARCH_RIGHTS plus explicit retention rights, enterprise delivery entitlement | Licensed news and third-party research schema/receipt smoke |
-| Unusual Whales | UNUSUAL_WHALES_API_KEY (check actual gateway key name in inventory), ATLASPM_UW_RIGHTS, ATLASPM_UW_MAX_REQUESTS | One bounded flow request then context/units/coverage checks |
+| Unusual Whales | UW_TOKEN, ATLASPM_UW_RIGHTS, ATLASPM_UW_MAX_REQUESTS | One bounded flow request then context/units/coverage checks |
 | Investment banks | ATLASPM_INVESTMENT_BANKS_RIGHTS and corresponding document RESEARCH_RIGHTS / RETENTION | Licensed original report import and identity/PIT validation; Bloomberg preferred |
 | XpressAPI (S&P/Moody's/Fitch) | XPRESSAPI_TOKEN or approved local username/password, token expiry, ATLASPM_XPRESSAPI_RIGHTS, ATLASPM_XPRESSAPI_MAX_REQUESTS | One rating scope request, independent publication/basis/coverage review |
 | S&P DJI/MSCI/FTSE Russell | Corresponding ATLASPM_*_RIGHTS and documented authorized delivery | Licensed normalized index-event import |
