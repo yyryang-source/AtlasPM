@@ -1,6 +1,22 @@
 """Optional tabular estimators. No model is approved for deployment."""
 from __future__ import annotations
 from importlib import metadata
+from math import isfinite
+
+
+def json_parameters(value):
+    """Normalize estimator metadata without allowing nonfinite JSON numbers."""
+    if isinstance(value,dict):
+        return {str(k):json_parameters(v) for k,v in value.items()}
+    if isinstance(value,(list,tuple)):
+        return [json_parameters(v) for v in value]
+    if value is None or isinstance(value,(str,bool,int)):
+        return value
+    if isinstance(value,float):
+        return value if isfinite(value) else ('NaN' if value!=value else ('Infinity' if value>0 else '-Infinity'))
+    if hasattr(value,'item'):
+        return json_parameters(value.item())
+    raise ValueError(f'UNSUPPORTED_ESTIMATOR_PARAMETER:{type(value).__name__}')
 
 MODELS = ("ridge", "historical_mean", "elastic_net", "random_forest",
           "lightgbm", "xgboost", "catboost", "mlp")
@@ -58,4 +74,4 @@ def fit_predict(name, x, y, test, seed):
     predicted=np.asarray(model.predict(test),dtype=float)*scale+mean
     if predicted.shape!=(len(test),) or not np.isfinite(predicted).all():
         raise ValueError(f"INVALID_MODEL_OUTPUT:{name}")
-    return predicted, model.get_params()
+    return predicted, json_parameters(model.get_params())
