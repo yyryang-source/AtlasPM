@@ -457,3 +457,59 @@ Historical listing venue/PIT identity, independent reference comparison,
 corporate actions and licensing still require real evidence. V4 never
 sets training or live-execution approval. After-close and non-NYSE-date
 categories are calendar disagreements, not proof of bad prices.
+
+
+## V5 evidence-based certification framework (offline, fail closed)
+
+V5 separates evidence validation from proof of data authenticity. It never
+sets training or live approval and never modifies the canonical lake.
+A no-input run creates a useful blocker inventory without scanning price data:
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-certify-v5
+~~~
+
+Supply independently obtained, licensed, local CSV ledgers, not fabricated
+rows or today's listing snapshot. Required headers (exact order):
+
+~~~
+security_id,symbol,exchange,valid_from,valid_to,known_date,source,evidence_id
+event_id,security_id,kind,effective_date,known_date,value,currency,source,evidence_id
+~~~
+
+The first header belongs in the identity CSV; the second in the actions
+CSV. Security IDs must be stable across ticker changes and distinguish
+ticker reuse. Exchange values are supported MICs (XNYS, XNAS, XASE, ARCX,
+BATS, IEXG); unknowns are rejected rather than defaulted. valid_from is
+inclusive; valid_to is exclusive (blank means open-ended). known_date is
+the date the evidence was available, not a fabricated listing date. Only
+evidence available before the decision date is eligible; same-day records
+are conservatively unavailable. This date-granularity ledger rejects
+overlapping symbol or security-ID intervals. It is not a fully bitemporal
+revision-history database and does not certify point-in-time knowledge of
+every field (including later revisions of end dates).
+
+Actions supported are SPLIT (new shares / old shares, blank currency)
+and CASH_DIVIDEND (positive USD per share). Split calculation requires
+independently verified unadjusted input; it does not rewrite OHLCV.
+Dividend total-return calculation, spin-offs, mergers, delisting returns,
+and full corporate-action completeness are not implemented. An empty
+action ledger is never proof of no actions.
+
+~~~powershell
+& $py -m atlaspm.cli market-db hf-5m-certify-v5 --start-month 2026-03 --end-month 2026-03 --identity-csv local_data\identities.csv --actions-csv local_data\actions.csv --scan
+~~~
+
+With --scan, the module uses the V4 full-NYSE-slot candidate projection,
+groups observations by symbol/date in DuckDB and counts mapping gaps,
+late-known records and mapped observations. This is observed mapping
+coverage, not expected historical universe completeness or venue-specific
+session certification. Scan errors remain visible. Without --scan no
+Parquet is scanned. Both modes write a private latest.json under
+local_data/stock_5m/huggingface/quality/certification_v5/.
+Ledger SHA-256 fingerprints identify supplied bytes, not authenticity.
+The independent daily reconciliation tool remains separate. Rights,
+true historical universe, action coverage, adjustment semantics and
+source provenance require independently reviewed evidence before any
+training approval. No new external data source is bundled.

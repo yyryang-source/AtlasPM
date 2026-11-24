@@ -42,6 +42,11 @@ jobs:
       - name: Verify V4 offline CLI
         run: python -m atlaspm.cli market-db hf-5m-session-v4 --dry-run
 
+      - name: Verify V5 identity, corporate action and PIT evidence guards
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_certification_v5.py" -v
+      - name: Verify V5 CLI without evidence (must remain blocked)
+        run: python -m atlaspm.cli market-db hf-5m-certify-v5
+
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
 

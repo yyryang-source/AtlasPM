@@ -330,6 +330,12 @@ def register_parser(sub):
     h.add_argument('--end-month',default='2026-03')
     h.add_argument('--all-months',action='store_true')
     h.add_argument('--dry-run',action='store_true')
+    h=actions.add_parser('hf-5m-certify-v5',help='Offline evidence review and historical identity coverage')
+    h.add_argument('--start-month',default='2000-01')
+    h.add_argument('--end-month',default='2026-03')
+    h.add_argument('--identity-csv',type=Path,default=None)
+    h.add_argument('--actions-csv',type=Path,default=None)
+    h.add_argument('--scan',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -470,6 +476,11 @@ def run(args):
         return hf_stock5m_session_v4.run(
             args.start_month,args.end_month,all_months=args.all_months,
             dry_run=args.dry_run)
+    if args.db_action == 'hf-5m-certify-v5':
+        from atlaspm.data import hf_stock5m_certification_v5
+        return hf_stock5m_certification_v5.run(
+            args.start_month,args.end_month,identity_csv=args.identity_csv,
+            actions_csv=args.actions_csv,scan=args.scan)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
