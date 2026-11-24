@@ -215,7 +215,7 @@
       "Healthcare": 0.6
     },
     "min_cash_fraction": 0.19,
-    "max_gross_exposure": 0.8,
+    "max_gross_exposure": 0.805,
     "max_turnover": 1,
     "min_trade_notional": 100,
     "max_single_order_fraction": 0.4,
