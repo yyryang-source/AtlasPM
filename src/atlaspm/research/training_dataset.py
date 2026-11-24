@@ -1,6 +1,9 @@
 """Synthetic point-in-time panel contracts; real data remains blocked."""
 from __future__ import annotations
 from datetime import date
+from array import array
+from bisect import bisect_left
+from atlaspm.research.training_compact import CompactSamples, IndexedRows
 from atlaspm.engine.contracts import finite, timestamp
 
 HORIZONS = (1, 5, 10, 21, 63)
@@ -47,6 +50,9 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False):
             raise ValueError("EMPTY_SESSION")
         observations.append(marks)
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
+    if compact:
+        prediction_samples=CompactSamples(dates,horizon,len(features))
+        valid_indices=array('Q')
     for i in range(max(0,len(observations)-horizon)):
         marks=observations[i]
         for sid,(price,x) in sorted(marks.items()):
@@ -58,15 +64,22 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False):
             sequence = None if compact else [observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
             missing_path = any(sid not in observations[j] for j in range(i+1,i+horizon+1))
             y = None if missing_path else observations[i+horizon][sid][0]/price-1
+            if compact:
+                prediction_samples.append(sid,i,x,y)
+                if missing_path:
+                    missing+=1
+                else:
+                    valid_indices.append(len(prediction_samples)-1)
+                continue
             sample = dict(security_id=sid,signal_index=i,label_end_index=i+horizon,
                           date=dates[i],label_end_date=dates[i+horizon],x=x,sequence=sequence,y=y)
-            if compact:
-                del sample['sequence']
             prediction_samples.append(sample)
             if missing_path:
                 missing += 1
             else:
                 samples.append(sample)
+    if compact:
+        samples=IndexedRows(prediction_samples,valid_indices)
     return dict(feature_names=features,dates=dates,samples=samples,horizon=horizon,
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
                 **({'observations':observations} if compact and sequence_length>1 else {}),
@@ -99,17 +112,23 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
     # Samples are already sorted by signal session. Reuse one compact index
     # of date boundaries instead of scanning the full panel for each fold.
     offsets=[0]*(len(panel["dates"])+1)
-    j=0
-    for i in range(len(offsets)):
-        while j<len(samples) and samples[j]["signal_index"]<i:
-            j+=1
-        offsets[i]=j
+    if isinstance(samples,CompactSamples):
+        for i in range(len(offsets)):
+            offsets[i]=bisect_left(samples.session,i)
+    else:
+        j=0
+        for i in range(len(offsets)):
+            while j<len(samples) and samples[j]["signal_index"]<i:
+                j+=1
+            offsets[i]=j
     if first>=end:
         raise ValueError("INSUFFICIENT_SESSIONS_FOR_FOLDS")
     for start in range(first,end,test_sessions):
         stop=min(start+test_sessions,end)
         cutoff=offsets[max(0,start-embargo_sessions-horizon)]
-        train=[i for i in range(cutoff) if samples[i]["y"] is not None]
+        train=(array('Q',(i for i in range(cutoff) if samples.label_exists(i)))
+               if isinstance(samples,CompactSamples) else
+               [i for i in range(cutoff) if samples[i]["y"] is not None])
         test=range(offsets[start],offsets[stop])
         if not train or not test:
             raise ValueError("EMPTY_PURGED_FOLD")
@@ -119,4 +138,4 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
 
 def purged_folds(panel, **kwargs):
     """Compatibility API; production loop uses the lazy iterator instead."""
-    return [dict(f,test=list(f["test"])) for f in iter_purged_folds(panel,**kwargs)]
+    return [dict(f,train=list(f["train"]),test=list(f["test"])) for f in iter_purged_folds(panel,**kwargs)]
