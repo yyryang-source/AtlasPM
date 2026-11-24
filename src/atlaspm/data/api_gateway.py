@@ -100,6 +100,9 @@ class _State:
         self.consecutive_failures = 0
         self.calls = self.failures = self.cache_hits = self.received_bytes = 0
         self.last_status = "NOT_CONTACTED"
+        self.successes = 0
+        self.last_success_utc = None
+        self.last_latency_seconds = None
 
 
 class Gateway:
@@ -238,6 +241,7 @@ class Gateway:
                     self._sleep(wait)
                 state.next_request = self._clock() + spec.interval
                 state.calls += 1
+                started = self._clock()
                 retry_delay = 0.0
                 try:
                     with self._open(request, timeout=45) as response:
@@ -268,6 +272,9 @@ class Gateway:
                 else:
                     state.consecutive_failures = 0
                     state.last_status = "SUCCESS"
+                    state.successes += 1
+                    state.last_success_utc = result.fetched_at
+                    state.last_latency_seconds = self._clock() - started
                     if cache_ttl:
                         self._remember(request_id, result)
                     return result
@@ -335,6 +342,7 @@ class Gateway:
                 self._sleep(wait)
             state.next_request = self._clock() + 2
             state.calls += 1
+            started = self._clock()
             try:
                 with self._open(Request(url, data=body, headers=headers, method="POST"), timeout=45) as response:
                     raw = response.read(min(self._max_bytes, 2 * 1024 * 1024) + 1)
@@ -356,7 +364,10 @@ class Gateway:
                 state.blocked_until = self._clock() + 60
                 raise GatewayError(f"{provider}: model request failed; billing status unknown") from None
             state.last_status = "SUCCESS"
-            return Response(provider, request_id, datetime.now(UTC).isoformat(), raw)
+            state.successes += 1
+            state.last_success_utc = datetime.now(UTC).isoformat()
+            state.last_latency_seconds = self._clock() - started
+            return Response(provider, request_id, state.last_success_utc, raw)
 
     async def fetch_many(self, requests):
         """At most 32 GETs, at most three active worker threads for this batch.
@@ -397,6 +408,10 @@ class Gateway:
                 key_env = spec.key_env if spec else MODEL_ENDPOINTS[name][1]
                 result[name] = {
                     "calls": state.calls, "failed_attempts": state.failures,
+                    "successful_requests": state.successes,
+                    "success_rate": state.successes / state.calls if state.calls else None,
+                    "last_success_utc": state.last_success_utc,
+                    "last_latency_seconds": state.last_latency_seconds,
                     "cache_hits": state.cache_hits, "received_bytes": state.received_bytes,
                     "last_status": state.last_status,
                     "circuit_open": self._clock() < state.blocked_until,

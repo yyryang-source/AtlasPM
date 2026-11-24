@@ -110,7 +110,7 @@ def review(rows, *, as_of, holdings=()):
     if not isinstance(holdings,(tuple,list,set)) or len(holdings)>1000:
         raise ValueError("Invalid holdings scope")
     holdings={_token(x) for x in holdings}
-    visible={}
+    revisions={}
     excluded=Counter()
     for row in rows:
         # Revalidate contract and identity; a supplied flag cannot grant authority.
@@ -122,19 +122,21 @@ def review(rows, *, as_of, holdings=()):
         if _time(item["received_at"])>cutoff:
             excluded["after_cutoff"]+=1
             continue
+        key=(item["event_id"],item["revision"])
+        prior=revisions.get(key)
+        if prior:
+            excluded["duplicate"]+=1
+            if prior["received_at"]<=item["received_at"]:
+                continue
+        revisions[key]=item
+    visible={}
+    for item in revisions.values():
         key=item["event_id"]
         prior=visible.get(key)
-        if prior:
-            if prior["revision"]==item["revision"]:
-                excluded["duplicate"]+=1
-                if item["received_at"]<prior["received_at"]:
-                    visible[key]=item
-                continue
-            if prior["received_at"]==item["received_at"]:
-                raise ValueError("Conflicting same-receipt revisions")
-            if prior["received_at"]>item["received_at"]:
-                continue
-        visible[key]=item
+        if prior and prior["received_at"]==item["received_at"]:
+            raise ValueError("Conflicting same-receipt revisions")
+        if not prior or prior["received_at"]<item["received_at"]:
+            visible[key]=item
     events=[]
     for item in visible.values():
         pub=_time(item["published_at"]) if item["published_at"] else None
@@ -158,7 +160,7 @@ def review(rows, *, as_of, holdings=()):
 
 def from_news(report):
     """Reuse existing authorized news archive review, not duplicate storage."""
-    return [normalize({"provider":report["provider"],"source_id":e["evidence_id"],"kind":"news",
+    return [normalize({"provider":report["provider"],"source_id":_digest(e["id"]),"kind":"news",
                        "subjects":["ticker:"+s for s in e["symbols"]],"published_at":e["published_at"],
                        "first_available_at":None,"effective_at":None,"evidence_sha256":e["evidence_id"],
                        "delivery":"file","expiry_seconds":86400},received_at=e["observed_at"])
@@ -190,3 +192,18 @@ def import_events(path):
         raise ValueError("Event import exceeds 1000 rows")
     received=datetime.now(UTC).isoformat()
     return [normalize(row,received_at=received) for row in rows]
+
+
+def from_credit(report):
+    """Rating dates are not wire availability; preserve unknown timestamps."""
+    stamp=report["transport"]["retrieved_at_utc"]
+    result=[]
+    for row in report["ratings"][:1000]:
+        action=(row.get("action_raw") or "").casefold()
+        kind="credit_withdrawal" if "withdraw" in action else "credit_rating"
+        digest=_digest(row)
+        result.append(normalize({"provider":"xpressapi","source_id":digest,"kind":kind,
+            "subjects":[row["identifier_type"]+":"+row["identifier"]],"published_at":None,
+            "first_available_at":None,"effective_at":None,"evidence_sha256":digest,
+            "delivery":"poll","expiry_seconds":86400},received_at=stamp))
+    return result

@@ -40,6 +40,7 @@ RIGHTS_ENV = {
 
 
 def local_rights(provider, *, retention=False):
+    require_enabled(provider)
     if provider not in RIGHTS_ENV:
         raise ValueError("Unknown restricted feed rights scope")
     scope = RIGHTS_ENV[provider]

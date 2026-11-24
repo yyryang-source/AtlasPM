@@ -279,6 +279,21 @@ def all_jobs() -> None:
     view_jobs()
 
 
+def api_management() -> None:
+    from atlaspm.monitoring.api_management import inventory, public_smoke
+    st.title("API 管理中心")
+    st.caption("仅本地进程状态；未验证的订阅、费用、权限和连接不会显示为已通过。")
+    st.dataframe(inventory(),hide_index=True)
+    st.info("通过本地环境变量或操作系统凭证启动器配置密钥。此页面不接收或显示密钥。")
+    if st.button("测试 Treasury 公开接口"):
+        try:
+            report=public_smoke()
+        except (ValueError,OSError):
+            st.error("公开接口检查失败；请检查本地连接及启用配置。")
+        else:
+            st.json(report)
+
+
 def main() -> None:
     st.set_page_config(page_title="AtlasPM 量化研究工作台", layout="wide", initial_sidebar_state="expanded")
     pages = {
@@ -295,11 +310,12 @@ def main() -> None:
                          title="多资产对冲", url_path="hedge"),
         "rebalance": st.Page(rebalance_dashboard.render, title="调仓审核", url_path="rebalance"),
         "jobs": st.Page(all_jobs, title="研究任务", url_path="jobs"),
+        "api": st.Page(api_management, title="API 管理中心", url_path="api"),
     }
     page = st.navigation({
         "工作台": [pages["home"]],
         "研究": [pages[key] for key in ("screen", "backtest", "options", "treasury", "hedge")],
-        "本地运行": [pages["rebalance"], pages["jobs"]],
+        "本地运行": [pages["rebalance"], pages["jobs"], pages["api"]],
     })
     page.run()
 
