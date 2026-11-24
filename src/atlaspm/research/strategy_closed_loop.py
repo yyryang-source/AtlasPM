@@ -2,7 +2,7 @@
 
 Model selection, strategy selection and final cash replay are separated.
 Reuse the existing trainer, adaptive ensemble, portfolio optimizer and
-cash execution simulator. Never grant broker or real-data permissions.
+synthetic execution simulator. Never grant broker or real-data permissions.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from atlaspm.research.training_engine import train
 from atlaspm.research.training_registry import FLAGS
 
 STRATEGY_FIELDS={"top_k","rebalance_sessions","cash_reserve","optimizer"}
-EXECUTION_FIELDS={"initial_cash","fee_bps","slippage_bps","settlement_sessions","execution_policy","risk_policy"}
+EXECUTION_FIELDS={"initial_cash","fee_bps","slippage_bps","settlement_sessions","execution_policy","risk_policy","margin_policy"}
 
 
 def _validate_market(payload,market):
@@ -128,6 +128,8 @@ def _evaluate(sessions,strategy,execution,*,include_path=False):
              "execution_model":result["execution_model"],"risk_halt_latched":result["risk_halt_latched"],
              "remaining_positions_after_halt":result["remaining_positions_after_halt"],
              "risk_audit_root":result["risk_audit_root"]}
+    if "margin_debt" in result:
+        summary["assumed_financing"]={k:result[k] for k in ("margin_debt","accrued_financing_interest","financing_interest_total","borrowed_total","principal_repaid_total","interest_paid_total")}
     if include_path:
         summary.update(curve=curve,trades=trades,allocations=result["allocations"],
                        orders=result["orders"],unexecuted_final_signal=result["unexecuted_final_signal"],
@@ -158,6 +160,11 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
     if not isinstance(strategies,list) or not 2<=len(strategies)<=32:
         raise ValueError("REQUIRES_2_TO_32_STRATEGIES")
     configs=[_strategy(s) for s in strategies]
+    if "margin_policy" in execution:
+        from atlaspm.engine.replay_funding import MarginFunding
+        MarginFunding.from_policy(execution["margin_policy"])
+        if execution.get("risk_policy") is None or any(s["cash_reserve"]!=0 or "optimizer" in s for s in configs):
+            raise ValueError("SYNTHETIC_MARGIN_REQUIRES_RISK_POLICY_AND_ZERO_RESERVE_RANK_WEIGHTS")
     if len({_sha(s) for s in configs})!=len(configs):
         raise ValueError("DUPLICATE_STRATEGY")
     cap=finite(max_validation_drawdown,"max_validation_drawdown")
@@ -217,7 +224,8 @@ def run(payload,market,*,model_config,model_candidates,model_selection_end,
             "holdout":final,"fresh_cash_per_evaluation":True,
             "holdout_drawdown_within_validation_cap":abs(final["statistics"]["max_drawdown"])<=cap,
             "missing_forecast_policy":"hold_existing_positions_no_new_orders",
-            "limitations":["synthetic fixed universe at most 20 assets","cash only; no borrowing",
+            "limitations":["synthetic fixed universe at most 20 assets",
+                "assumed margin only; no verified brokerage financing" if "margin_policy" in execution else "cash only; no borrowing",
                 "no real identity, corporate actions, liquidity or broker verification",
                 "terminal horizon forecasts are censored by existing trainer; hold existing positions",
                 "risk cap is validation filter, not a guaranteed holdout drawdown limit"]}
