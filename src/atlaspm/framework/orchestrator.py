@@ -79,6 +79,7 @@ def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
     """
     from datetime import date
     from atlaspm.research.signal_fusion import historical_diagnostics,matured_correlations
+    from atlaspm.research.training_autonomy import review_schedule
     cutoff=date.fromisoformat(as_of_date)
     if (not isinstance(streams,dict) or not 2<=len(streams)<=8 or
         any(not isinstance(rows,list) or len(rows)>10000 for rows in streams.values())):
@@ -91,6 +92,7 @@ def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
     correlations=matured_correlations(clean,as_of_date=as_of_date,minimum_dates=minimum_dates)
     return {**FLAGS,"as_of_date":as_of_date,"diagnostics":result,"correlations":correlations,
             "retrain_task":"INDEPENDENT_SYNTHETIC_RESEARCH_REVIEW_REQUIRED",
+            "retrain_review_requests":review_schedule(result["monitor"],holdout_start=min(r["date"] for rows in clean.values() for r in rows)),
             "training_started":False,"model_promoted":False}
 
 
@@ -109,7 +111,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
     from atlaspm.framework.continuous_simulation import continuous,synthetic_fixture
     from atlaspm.framework.autonomous_cycle import run_fixture,multiasset_fixture
     from atlaspm.monitoring.api_management import inventory
-    from atlaspm.research.intelligence import model_inventory,offline_model_responses
+    from atlaspm.research.intelligence import model_inventory,offline_model_responses,offline_joint_research
     from atlaspm.execution.oms_controls import verify_audit_chain
 
     start,cpu=perf_counter(),process_time()
@@ -151,6 +153,20 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
     model_report=offline_model_responses()
     checks["three_model_schema_fixtures"]=len(model_report["models"])==3 and all(
         m["findings"]>0 and m["actual_provider_call"] is False for m in model_report["models"])
+    from atlaspm.research.financial_events import KINDS,normalize
+    first=data["sessions"][0]
+    stamp=first["close_at"]
+    events=[e for e in first["events"] if "SYN:AAA" in e["subjects"]]
+    for kind in KINDS:
+        events.append(normalize({"provider":"synthetic","source_id":"SYN:joint:"+kind,"kind":kind,
+            "subjects":["SYN:AAA"],"published_at":stamp,"first_available_at":stamp,"effective_at":None,
+            "evidence_sha256":digest(["joint",kind]),"delivery":"file","expiry_seconds":3600},received_at=stamp))
+    joint=offline_joint_research(events,[r for r in first["research"] if r["security_id"]=="SYN:AAA"],
+                                 as_of=stamp,security_id="SYN:AAA",weights=weights)
+    checks["joint_all_topics"]=joint["complete_topic_coverage"] and all(v=="available" for v in joint["coverage"].values())
+    checks["joint_fixture_routing"]=len(joint["model_reports"])==3 and all(
+        not r["actual_provider_call"] for r in joint["model_reports"])
+    checks["joint_decision"]=joint["decision"]["candidates"][0]["action"]=="BUY" and not joint["trade_authorized"]
     # First run validates full prefix, second run proves identical restart.
     sim=continuous(data,weights=weights,checkpoint=checkpoint)
     repeated=continuous(data,weights=weights,checkpoint=checkpoint)
@@ -182,6 +198,15 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
             mixed_report["account_replay"]["net_liquidation_reconciliation_gap"])<.01 and all(
             order["status"]=="FILLED" for order in mixed_report["orders"])
         checks["multiasset_risk_audit"]=verify_audit_chain(mixed_report["audit_events"],mixed_report["audit_root_sha256"])
+        for scenario in ("cancel","unknown"):
+            path=Path(temp)/(scenario+".oms-fixture.json")
+            pending=multiasset_fixture(checkpoint=path,event_count=4,scenario=scenario)
+            final=multiasset_fixture(checkpoint=path,scenario=scenario)
+            order=final["report"]["orders"][0]
+            checks["cancel_recovery_"+scenario]=(pending["report"]["orders"][0]["status"]=="CANCEL_REQUESTED" and
+                order["status"]==("CANCELED" if scenario=="cancel" else "UNKNOWN") and order["filled_quantity"]==4 and
+                abs(final["report"]["account_replay"]["net_liquidation_reconciliation_gap"])<.01 and
+                (scenario!="unknown" or final["report"]["decision"]=="HALT_RECONCILIATION"))
 
     if paused():
         return result("PAUSED")
@@ -213,6 +238,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
                       "flat_and_settled":sim["flat_and_settled"],"ending_equity":replay["curve"][-1]["equity"],
                       "total_cost":replay["total_cost"],"result_sha256":sim["result_sha256"]},
                   single_cycle_decision=single["decision"],learning=learning,
+                  joint_fixture={"coverage":joint["coverage"],"model_reports":joint["model_reports"],"model_outputs_are_fixtures":True},
                   mixed_asset_fixture={"decision":mixed_report["decision"],"orders":len(mixed_report["orders"]),
                                        "result_sha256":mixed["result_sha256"],"broker_verified":False},
                   historical_data_certified=False,real_api_connected=False,

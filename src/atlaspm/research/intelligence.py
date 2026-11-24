@@ -345,7 +345,7 @@ _EVENT_TOPICS={
 }
 
 
-def event_research(event_report):
+def event_research(event_report, *, include_contracts=False):
     """Generate deterministic, descriptive research contracts from visible events.
 
     No raw report text, no price prediction, no vendor calls. Unmapped ticker,
@@ -368,6 +368,7 @@ def event_research(event_report):
         "received_at","event_id","revision","rights_status")} for e in events]
     visible=review(normalized,as_of=cutoff.isoformat())["events"]
     rows=[]
+    contracts=[]
     blocked=[]
     for e in visible:
         if e["expired"]:
@@ -393,9 +394,12 @@ def event_research(event_report):
                     "risk_factors":["event metadata only; no verified price impact"],
                     "invalidation":["superseding or expired event"],"synthetic_fixture":True}
                 item=contract(raw,as_of=cutoff.isoformat())
+                if include_contracts:
+                    contracts.append(item["contract"])
                 rows.append({"research_id":item["research_id"],"topic":topic,"event_revision":e["revision"],
                              "contract_sha256":digest(item["contract"]),"numeric_eligible":False})
     return {**FLAGS,"research_tasks":rows,"blocked_tasks":blocked,
+            **({"contracts":contracts} if include_contracts else {}),
             "network_calls":0,"trade_authorized":False}
 
 
@@ -493,6 +497,64 @@ def offline_model_responses():
         reports.append({"adapter":provider,"fixture_model":model,"findings":len(findings),
                         "mode":"synthetic_response_schema_test","actual_provider_call":False})
     return {**_FLAGS,"models":reports,"network_calls":0,"actual_cost_usd":None}
+
+
+def offline_joint_research(events, forecasts, *, as_of, security_id, weights):
+    """Synthetic joint review with real contracts and bounded fixture routing.
+
+    Each topic is assigned once. Fixed responses exercise actual schemas,
+    not external inference; qualitative context never becomes numeric alpha.
+    """
+    from atlaspm.research.financial_events import review,FLAGS
+    from atlaspm.research.research_contract import CATEGORIES
+    from atlaspm.engine.autonomous_decision import decide
+    if (not isinstance(events,list) or not 1<=len(events)<=100 or
+        any(e.get("provider")!="synthetic" or security_id not in e.get("subjects",[]) for e in events)
+        or not isinstance(forecasts,list) or len(forecasts)>64
+        or any(r.get("synthetic_fixture") is not True or r.get("security_id")!=security_id for r in forecasts)):
+        raise ValueError("JOINT_OFFLINE_SYNTHETIC_ONLY")
+    context=event_research(review(events,as_of=as_of),include_contracts=True)
+    rows=context["contracts"]
+    routes={"openai":[],"anthropic":[],"gemini":[]}
+    topics=sorted({r["category"] for r in rows})
+    providers=tuple(routes)
+    for index,topic in enumerate(topics):
+        row=next(r for r in rows if r["category"]==topic)
+        evidence=row["evidence"][0]
+        if evidence["available_at"] is None:
+            continue
+        routes[providers[index%3]].append({"evidence_id":evidence["sha256"][:32]+"-"+str(index),
+            "source":"synthetic public fixture","available_at":evidence["available_at"],
+            "text":"Synthetic metadata topic: "+topic,"external_use_reviewed":True})
+    model_reports=[]
+    for provider,excerpts in routes.items():
+        if not excerpts:
+            continue
+        cutoff,prepared,by_id=_prepare("fundamental",excerpts,as_of)
+        request=_payload(provider,"fixture-model",json.dumps({"as_of":cutoff,"evidence":prepared}),128)
+        text=json.dumps({"findings":[{"evidence_id":e["evidence_id"],"quote":e["text"],
+            "interpretation":"Synthetic context only."} for e in excerpts]})
+        if provider=="openai":
+            wire={"status":"completed","model":"fixture-openai","output":[{"type":"message","content":[{"type":"output_text","text":text}]}]}
+        elif provider=="anthropic":
+            wire={"stop_reason":"end_turn","model":"fixture-anthropic","content":[{"type":"text","text":text}]}
+        else:
+            wire={"modelVersion":"fixture-gemini","candidates":[{"finishReason":"STOP","content":{"parts":[{"text":text}]}}]}
+        output,model,_=_extract(provider,wire)
+        findings=_findings(output,by_id)
+        if "tools" in request:
+            raise ValueError("OFFLINE_MODEL_TOOL_SCOPE")
+        model_reports.append({"provider":provider,"fixture_model":model,"findings":len(findings),
+                              "actual_provider_call":False})
+    all_rows=rows+forecasts
+    joint=joint_local_review(security_id=security_id,asset_type="stock",as_of=as_of,
+                             events=events,research_rows=all_rows,weights=weights)
+    if joint["unmatched_evidence_rows"]:
+        raise ValueError("JOINT_OFFLINE_EVIDENCE_MISMATCH")
+    decision=decide(all_rows,as_of=as_of,weights=weights,horizon_days=1,cost_fraction=.01)
+    return {**FLAGS,"coverage":joint["coverage"],"complete_topic_coverage":set(topics)==CATEGORIES,
+            "model_reports":model_reports,"decision":decision,"network_calls":0,
+            "model_outputs_are_fixtures":True,"trade_authorized":False}
 
 
 def main():

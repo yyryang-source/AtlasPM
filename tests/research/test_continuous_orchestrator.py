@@ -253,3 +253,19 @@ class ContinuousTests(unittest.TestCase):
         self.assertTrue(all(x["status"].startswith("BLOCKED") for x in result["tasks"][1:]))
         self.assertEqual(result["network_calls"],0)
         self.assertFalse(result["trade_authorized"])
+
+
+    def test_cancel_pending_and_unknown_recovery_preserve_partial_fill(self):
+        from atlaspm.framework.autonomous_cycle import multiasset_fixture
+        for scenario,expected in (("cancel","CANCELED"),("unknown","UNKNOWN")):
+            path="local_data/"+scenario+".oms-fixture.json"
+            pending=multiasset_fixture(checkpoint=path,event_count=4,scenario=scenario)
+            self.assertEqual(pending["report"]["orders"][0]["status"],"CANCEL_REQUESTED")
+            final=multiasset_fixture(checkpoint=path,scenario=scenario)
+            self.assertEqual(final["report"]["orders"][0]["status"],expected)
+            self.assertEqual(final["report"]["orders"][0]["filled_quantity"],4)
+            self.assertAlmostEqual(final["report"]["account_replay"]["net_liquidation_reconciliation_gap"],0)
+            if scenario=="unknown":
+                self.assertEqual(final["report"]["decision"],"HALT_RECONCILIATION")
+            with self.assertRaisesRegex(ValueError,"PREFIX_CONFLICT"):
+                multiasset_fixture(checkpoint=path,scenario="normal")

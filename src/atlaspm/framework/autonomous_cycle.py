@@ -123,7 +123,7 @@ def run_fixture(payload):
         return {**FLAGS,"decision":"EXIT_BLOCKED","reason":str(exc),"entry":entry}
 
 
-def multiasset_fixture(*, checkpoint, event_count=None):
+def multiasset_fixture(*, checkpoint, event_count=None, scenario="normal"):
     """Persist validated synthetic OMS journal and actual account/order state.
 
     Fixed packaged basket only. Reuses exact-leg independent preflight and
@@ -136,13 +136,20 @@ def multiasset_fixture(*, checkpoint, event_count=None):
     ledger,plan,journal=[json.loads((root/name).read_text(encoding="utf-8"))
         for name in ("institutional_batch_ledger.json","institutional_batch_plan.json","paper_oms_events.json")]
     all_events=journal["events"]
+    if scenario in {"cancel","unknown"}:
+        all_events=all_events[:3]+[{"sequence":4,"event_id":"SYN-CANCEL-REQUEST",
+            "timestamp":"2026-11-20T21:04:00Z","type":"CANCEL_REQUEST","leg_id":"SELL-QQQ-10"},
+            {"sequence":5,"event_id":"SYN-CANCEL-RESULT","timestamp":"2026-11-20T21:05:00Z",
+             "type":"CANCELED" if scenario=="cancel" else "UNKNOWN_OUTCOME","leg_id":"SELL-QQQ-10"}]
+    elif scenario!="normal":
+        raise ValueError("INVALID_OMS_FIXTURE_SCENARIO")
     size=len(all_events) if event_count is None else event_count
     if type(size) is not int or not 1<=size<=len(all_events):
         raise ValueError("INVALID_OMS_FIXTURE_PREFIX")
     if not str(checkpoint).endswith(".oms-fixture.json"):
         raise ValueError("OMS_FIXTURE_CHECKPOINT_SUFFIX_REQUIRED")
     journal["events"]=all_events[:size]
-    input_hash=digest([ledger,plan])
+    input_hash=digest([ledger,plan,scenario])
     def commit(items):
         if set(items)-{"oms_fixture"}:
             raise ValueError("OMS_FIXTURE_CHECKPOINT_KIND_MISMATCH")
