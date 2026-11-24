@@ -1,6 +1,7 @@
 """Offline tests for the unified reader; fixtures confer no data approval."""
 from contextlib import closing
 from decimal import Decimal
+from datetime import date
 from importlib.util import find_spec
 import os
 from pathlib import Path
@@ -171,3 +172,35 @@ class UnifiedTests(unittest.TestCase):
             for value in (0, 0., Decimal("0.00"), None):
                 with self.subTest(field=field, value=value):
                     unified._validate_field(field, value)
+
+    @unittest.skipUnless(find_spec("duckdb"), "lake extra required")
+    def test_raw_minute_read_only_rth_and_quality(self):
+        import duckdb
+        path = hf_stock5m.raw_path("2020-01")
+        path.parent.mkdir(parents=True)
+        quoted = str(path).replace("\\", "/").replace("'", "''")
+        def write(rows):
+            if path.exists():
+                path.unlink()
+            with closing(duckdb.connect()) as con:
+                con.execute(f"""COPY (SELECT * FROM (VALUES {rows})
+                    AS t(ticker,timestamp,open,high,low,close,volume))
+                    TO '{quoted}' (FORMAT PARQUET)""")
+        good = "(' a ', TIMESTAMPTZ '2020-01-02 14:30:00+00',10,11,9,10,0)"
+        pre = "('A', TIMESTAMPTZ '2020-01-02 14:29:00+00',10,11,9,10,1)"
+        write(good + "," + pre)
+        before = path.read_bytes()
+        batch, = list(self.query("equity_1m", columns=("close", "volume_shares"), symbols=("A",)))
+        self.assertEqual(batch.rows[0], ("A", date(2020, 1, 2), 1577975400000, 10, 0))
+        self.assertFalse(batch.approved_for_model_training)
+        self.assertEqual(path.read_bytes(), before)
+        with self.assertRaises(unified.DataUnavailable):
+            list(self.query("equity_1m", end="2020-02-01"))
+        for bad in (good + "," + good,
+                    good.replace("14:30:00", "14:30:01"),
+                    good.replace("10,11,9,10,0", "10,9,9,10,0"),
+                    good.replace("2020-01-02", "2020-02-03")):
+            with self.subTest(bad=bad):
+                write(bad)
+                with self.assertRaises(unified.DataQualityError):
+                    list(self.query("equity_1m", columns=("close",)))

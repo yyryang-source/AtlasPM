@@ -11,13 +11,14 @@ exploratory batch as a permission token. Existing CLI and raw data are unchanged
 | Dataset | Existing backend |
 | --- | --- |
 | equity_daily | market_db SQLite adjusted daily closes |
+| equity_1m | HF raw monthly minute Parquet, nominal RTH, strict raw QC |
 | equity_5m | existing HF RTH converted monthly Parquet |
 | option_1m / option_5m / option_daily | market_db option_bars, separate timeframe |
 | option_quotes / option_greeks | market_db timestamped tables |
 | treasury_auctions / bond_quotes | market_db SQLite |
 | factors_hf / factors_sqlite | factor_db source-isolated monthly Parquet |
 
-Unconnected catalog entries deliberately raise DataUnavailable: equity_1m,
+Unconnected catalog entries deliberately raise DataUnavailable:
 equity_realtime, company_fundamentals, sec_filings, macro, security_identity,
 corporate_actions, ibkr_accounts, ibkr_positions, option_contracts, bond_terms.
 Several have existing domain modules or raw storage, but adapters are not
@@ -94,3 +95,5 @@ Benchmark only ranges actually present in local_data. Report wall time, CPU
 time, row throughput and Python allocation peak; native DuckDB memory and
 process RSS are not measured by tracemalloc. Repeat with the same source and
 projection before comparing results.
+
+Raw minute scans reuse the existing raw QC, reject any invalid source rows, misaligned timestamps, and RTH rows outside the declared month. Duplicate selected normalized symbol/minute keys fail during iteration. No raw repair or new data file. RTH clock filtering is not exchange-calendar certification. The full raw QC requires additional scans; benchmark before repeated research use.

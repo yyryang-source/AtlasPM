@@ -50,6 +50,8 @@ def _option(timeframe):
 CATALOG = MappingProxyType({
     "equity_daily": Dataset("sqlite", "equity_daily", ("symbol", "trade_date"),
                             ("adjusted_close",)),
+    "equity_1m": Dataset("parquet", "hf_raw", ("symbol", "trade_date_et", "timestamp_ms"),
+                         ("open", "high", "low", "close", "volume_shares"), source="hf"),
     "equity_5m": Dataset("parquet", "hf", ("symbol", "trade_date_et", "timestamp_ms"),
                          ("open", "high", "low", "close", "volume_shares",
                           "source_minute_bars", "unique_source_minutes"), source="hf"),
@@ -71,7 +73,7 @@ CATALOG = MappingProxyType({
 
 # Explicitly unavailable through this API, not fabricated empty tables.
 UNCONNECTED = frozenset({
-    "equity_1m", "equity_realtime", "company_fundamentals", "sec_filings",
+    "equity_realtime", "company_fundamentals", "sec_filings",
     "macro", "security_identity", "corporate_actions", "ibkr_accounts",
     "ibkr_positions", "option_contracts", "bond_terms",
 })
@@ -104,8 +106,12 @@ def _partitions(spec, start, end):
     y, m = start.year, start.month
     while (y, m) <= (end.year, end.month):
         month = f"{y:04d}-{m:02d}"
-        path = (hf_stock5m.output_path(month, "rth") if spec.relation == "hf"
-                else factor_db._path(month, spec.source, "rth", "factors"))
+        if spec.relation == "hf_raw":
+            path = hf_stock5m.raw_path(month)
+        elif spec.relation == "hf":
+            path = hf_stock5m.output_path(month, "rth")
+        else:
+            path = factor_db._path(month, spec.source, "rth", "factors")
         if not path.is_file():
             raise DataUnavailable(f"Missing {spec.relation} partition: {month}")
         yield private_path(path, exists=True)
@@ -137,6 +143,28 @@ def _sql(spec, columns, symbols, start, end, relation):
         params.append(spec.timeframe)
     return (f"SELECT {','.join(columns)} FROM {relation} WHERE {where}"
             f" ORDER BY {','.join(spec.keys)}"), params
+
+
+def _raw_minute_relation(con, path):
+    """Reuse existing raw QC; do not silently drop invalid or ambiguous rows."""
+    try:
+        _, invalid = hf_stock5m._check_raw(con, path)
+    except ValueError as exc:
+        raise DataQualityError(str(exc)) from exc
+    if invalid:
+        raise DataQualityError("Raw partition has invalid OHLCV; use existing quarantine workflow")
+    relation = factor_db._files_sql([path])
+    if con.execute(f"""SELECT 1 FROM {relation}
+        WHERE epoch_us(timestamp) % 60000000 <> 0 LIMIT 1""").fetchone():
+        raise DataQualityError("Raw minute timestamps are not aligned")
+    # Nominal exchange-local RTH, not a verified session/holiday calendar.
+    # Preserve source values; no adjustment or invented missing observations.
+    return f"""(SELECT upper(trim(ticker)) AS symbol,
+        CAST(timezone('America/New_York', timestamp) AS DATE) AS trade_date_et,
+        epoch_ms(timestamp) AS timestamp_ms, open, high, low, close,
+        volume AS volume_shares FROM {relation}
+        WHERE CAST(timezone('America/New_York', timestamp) AS TIME) >= TIME '09:30:00'
+          AND CAST(timezone('America/New_York', timestamp) AS TIME) < TIME '16:00:00')"""
 
 
 def _finite_numeric(value):
@@ -229,8 +257,15 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
         with closing(factor_db._db(memory, threads)) as con:
             for path in paths:
                 version = _version(path)
-                sql, params = _sql(spec, selected, ids, first, last,
-                                   factor_db._files_sql([path]))
+                relation = (_raw_minute_relation(con, path) if spec.relation == "hf_raw"
+                            else factor_db._files_sql([path]))
+                if spec.relation == "hf_raw":
+                    month = path.stem.removeprefix("ohlcv_")
+                    if con.execute(f"""SELECT 1 FROM {relation}
+                        WHERE strftime(trade_date_et, '%Y-%m') <> ? LIMIT 1""",
+                                   [month]).fetchone():
+                        raise DataQualityError("Raw RTH date outside declared partition")
+                sql, params = _sql(spec, selected, ids, first, last, relation)
                 yield from _batches(con.execute(sql, params), name=dataset, spec=spec,
                                     columns=selected, path=path, batch_size=batch_size,
                                     version=version)
