@@ -91,8 +91,24 @@ def train(payload, *, feature_cache_dir=None, **kwargs):
         return _train(payload,feature_column=column,**kwargs)
 
 
+def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_assets_per_session=100000, **kwargs):
+    """Stream validated synthetic partitions into the same fold engine."""
+    from contextlib import ExitStack, closing
+    from atlaspm.research.training_parquet import iter_sessions
+    from atlaspm.research.training_stream_panel import build_stream_panel, DiskObservations
+    if feature_cache_dir is None:
+        raise ValueError('STREAMING_REQUIRES_DISK_WORKSPACE')
+    with ExitStack() as stack:
+        column=stack.enter_context(feature_workspace(feature_cache_dir))
+        length=kwargs.get('sequence_length',1)
+        observations=stack.enter_context(closing(DiskObservations(column.path.parent/'observations.sqlite3'))) if length>1 else None
+        sessions=iter_sessions(root,manifest,batch_rows=batch_rows,max_assets_per_session=max_assets_per_session)
+        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations)
+        return _train(manifest,feature_column=column,prepared_panel=panel,**kwargs)
+
+
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -101,7 +117,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
-    panel=build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
+    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
@@ -237,6 +253,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
                 prediction_storage="sqlite" if archive is not None else "memory",
                 feature_storage="memmap" if feature_column is not None else "memory",
+                input_storage="parquet_stream" if prepared_panel is not None else "json",
+                peak_buffered_sessions=panel.get("peak_buffered_sessions"),
                 compact_sample_numeric_bytes=samples.numeric_bytes,
                 prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
@@ -256,7 +274,12 @@ def main():
     parser.add_argument("--file",required=True,type=Path)
     args=parser.parse_args()
     import sys
-    json.dump(train(**json.loads(args.file.read_text(encoding="utf-8"))),sys.stdout,indent=2,allow_nan=False)
+    config=json.loads(args.file.read_text(encoding="utf-8"))
+    if "manifest" in config:
+        result=train_parquet(**config)
+    else:
+        result=train(**config)
+    json.dump(result,sys.stdout,indent=2,allow_nan=False)
     print()
 
 
