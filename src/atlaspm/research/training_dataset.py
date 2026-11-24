@@ -102,6 +102,8 @@ def sequence_for(panel,row):
         return [row["x"]]
     i=row["signal_index"]
     sid=row["security_id"]
+    if panel.get("observation_store") is not None:
+        return panel["observation_store"].sequence(i,sid,length)
     return [panel["observations"][j][sid][1] for j in range(i-length+1,i+1)]
 
 
