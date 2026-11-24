@@ -85,7 +85,7 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -110,6 +110,12 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         except PackageNotFoundError as exc:
             raise ValueError('SEQUENCE_MODEL_REQUIRES_PYTORCH') from exc
     predictions={m:[] for m in models}
+    archive=None
+    if prediction_archive_path is not None:
+        if ensemble is not None:
+            raise ValueError('DISK_PREDICTIONS_REQUIRE_STREAMING_ENSEMBLE_NOT_YET_SUPPORTED')
+        from atlaspm.research.training_predictions import PredictionArchive
+        archive=PredictionArchive(prediction_archive_path)
     model_settings={}
     audit=[]
     fingerprint=_fingerprint(payload)
@@ -140,13 +146,16 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     raise ValueError("CHECKPOINT_SAMPLE_MISMATCH")
                 for row in rows:
                     finite(row["prediction"],"checkpoint_prediction")
-                predictions[name].extend(rows)
+                if archive is None:
+                    predictions[name].extend(rows)
+                else:
+                    archive.append(name,rows)
             audit.append(cached["audit"])
             model_settings=dict(cached["audit"]["model_settings"])
             resumed+=1
             continue
         with FoldArrays(array_budget_mib,spill_dir) as arrays:
-            offsets={m:len(predictions[m]) for m in models}
+            fold_predictions={m:[] for m in models}
             train_rows=[samples[i] for i in fold["train"]]
             test_rows=[samples[i] for i in fold["test"]]
             x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
@@ -186,7 +195,7 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 for row,value in zip(test_rows,values):
                     base={k:row[k] for k in ("security_id","date","label_end_date")}
                     base["actual"]=row["y"]
-                    predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
+                    fold_predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
             audit.append(dict(test_start=panel["dates"][fold["test_start_index"]],
                               test_end=panel["dates"][fold["test_end_index"]],
                               latest_train_label=panel["dates"][fold["latest_training_label_end"]],
@@ -197,7 +206,12 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                               array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
             if store is not None:
                 store.save(fold_index,dict(audit=audit[-1],
-                           predictions={m:predictions[m][offsets[m]:] for m in models}))
+                           predictions=fold_predictions))
+            for name,rows in fold_predictions.items():
+                if archive is None:
+                    predictions[name].extend(rows)
+                else:
+                    archive.append(name,rows)
     ensemble_audit=None
     if ensemble is not None:
         if not isinstance(ensemble,dict):
@@ -206,14 +220,19 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         combined=adaptive_ensemble(predictions,**ensemble)
         predictions["adaptive_ensemble"]=combined["predictions"]
         ensemble_audit=combined["weight_history"]
+    metrics={m:_metrics(archive.rows(m) if archive is not None else rows) for m,rows in predictions.items()}
+    if archive is not None:
+        archive.finalize()
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
+                prediction_storage="sqlite" if archive is not None else "memory",
+                prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
-                metrics={k:_metrics(v) for k,v in predictions.items()},predictions=predictions,
+                metrics=metrics,predictions=predictions if archive is None else None,
                 research_only=True,approved_for_model_training=False,
                 historical_security_identity_verified=False,live_execution_enabled=False,
                 broker_order_submission_enabled=False,model_registry_admission=False)
