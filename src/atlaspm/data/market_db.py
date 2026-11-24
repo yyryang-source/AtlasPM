@@ -342,6 +342,24 @@ def register_parser(sub):
         if name != 'factor-status':
             f.add_argument('--memory', default='4GB')
             f.add_argument('--threads', type=int, default=4)
+    e = actions.add_parser('factor-evaluate',
+        help='Exploratory Rank IC/ICIR/quintile diagnostics; never a training gate')
+    e.add_argument('--start', required=True)
+    e.add_argument('--end', required=True)
+    e.add_argument('--source', choices=['hf', 'sqlite'], default='hf')
+    e.add_argument('--session', choices=['rth'], default='rth')
+    e.add_argument('--factors', nargs='+', default=None)
+    e.add_argument('--horizons', type=int, nargs='+', default=[5])
+    e.add_argument('--holdout-start', default=None)
+    e.add_argument('--min-symbols', type=int, default=30)
+    e.add_argument('--min-dates', type=int, default=8)
+    e.add_argument('--min-bars', type=int, default=60)
+    e.add_argument('--min-minute-fraction', type=float, default=0.85)
+    e.add_argument('--cost-bps-per-leg-roundtrip', type=float, default=20.0)
+    e.add_argument('--memory', default='4GB')
+    e.add_argument('--threads', type=int, default=4)
+    e.add_argument('--exploratory', action='store_true')
+    e.add_argument('--no-save', action='store_true')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -351,6 +369,16 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action == 'factor-evaluate':
+        from atlaspm.data import factor_eval
+        return factor_eval.evaluate(
+            start=args.start, end=args.end, source=args.source, session=args.session,
+            factors=args.factors, horizons=args.horizons, holdout_start=args.holdout_start,
+            min_symbols=args.min_symbols, min_dates=args.min_dates,
+            min_bars=args.min_bars, min_minute_fraction=args.min_minute_fraction,
+            cost_bps_per_leg_roundtrip=args.cost_bps_per_leg_roundtrip,
+            memory=args.memory, threads=args.threads,
+            exploratory=args.exploratory, save=not args.no_save)
     if args.db_action.startswith('factor-'):
         from atlaspm.data import factor_db
         action = args.db_action
