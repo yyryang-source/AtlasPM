@@ -60,9 +60,9 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(a["folds"],b["folds"])
         self.assertEqual(b["resumed_folds"],len(a["folds"]))
 
-    def test_unsupported_model_explicit(self):
-        with self.assertRaisesRegex(ValueError,"MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR"):
-            train(self.payload,models=["random_forest"],model_artifact_path=self.path)
+    @unittest.skipUnless(all(find_spec(m) for m in ("sklearn","lightgbm","xgboost","catboost")),"research-ml required")
+    def test_optional_model_roundtrip(self):
+        self.verify_model(["elastic_net","random_forest","mlp","lightgbm","xgboost","catboost"],1)
 
     @unittest.skipUnless(find_spec("torch"),"torch required")
     def test_sequence_roundtrip(self):

@@ -235,14 +235,16 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                                                  mixed_precision=mixed_precision,
                                                  capture_weights=saved_weights.update if artifact_store is not None else None)
                 else:
-                    values,settings=fit_predict(name,z,y,test,seed)
+                    values,settings=fit_predict(name,z,y,test,seed,
+                                                capture_weights=saved_weights.update if artifact_store is not None else None)
                 if artifact_store is not None:
                     if name in SEQUENCE_MODELS:
                         weights=saved_weights
                         snapshot_settings=settings
                         length=sequence_length
                     else:
-                        weights={'coefficients':coef.tolist() if name=='ridge' else [0.]*len(mean)}
+                        weights=({'coefficients':coef.tolist() if name=='ridge' else [0.]*len(mean)}
+                                 if name in ('ridge','historical_mean') else saved_weights)
                         snapshot_settings=dict(feature_mean=mean.tolist(),feature_scale=scale.tolist(),intercept=intercept)
                         length=1
                     artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,

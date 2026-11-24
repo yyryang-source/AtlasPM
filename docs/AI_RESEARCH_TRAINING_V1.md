@@ -102,7 +102,7 @@ guarantee. No external data is downloaded.
 
 ## Numeric model snapshots
 
-Opt in to `"model_artifact_path": "local_data/models.sqlite3"` in a training config. Ridge, historical mean, LSTM, GRU and Transformer save fold-specific numeric weights and training-only normalization, content-addressed by SHA-256. Other estimators fail explicitly if snapshot storage is requested. This does not use pickle or load executable objects. The same checkpoint and artifact database paths are required when resuming an artifact-enabled run. Snapshots from an interrupted run may exist; only a completed report establishes successful training. They do not authorize real-data inference or deployment.
+Opt in to `"model_artifact_path": "local_data/models.sqlite3"` in a training config. All eleven model adapters save fold-specific weights and training-only normalization, content-addressed by SHA-256. Scikit-learn linear, MLP and forest models use explicit numeric representations; LightGBM, XGBoost and CatBoost use their native model formats. This does not use pickle or load executable objects. The same checkpoint and artifact database paths are required when resuming an artifact-enabled run. Snapshots from an interrupted run may exist; only a completed report establishes successful training. They do not authorize real-data inference or deployment.
 
 ```powershell
 python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 list
@@ -110,4 +110,4 @@ python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 sho
 python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 predict ARTIFACT_ID --file local_data/synthetic_window.json
 ```
 
-Inference accepts only a validated synthetic window of exactly the saved sequence length, with the original feature order and no earlier date than the artifact's first test session. CPU replay of GPU-trained weights may differ within numerical precision; dependency versions must match. No epoch resume or third-party estimator snapshots are provided yet.
+Inference accepts only a validated synthetic window of exactly the saved sequence length, with the original feature order and no earlier date than the artifact's first test session. CPU replay of GPU-trained weights may differ within numerical precision; dependency versions must match. Epoch resume is independent of model snapshots.

@@ -35,7 +35,7 @@ def versions(models):
     return result
 
 
-def fit_predict(name, x, y, test, seed):
+def fit_predict(name, x, y, test, seed, *, capture_weights=None):
     """Fit only the provided training fold. Fixed settings, no OOS tuning."""
     if name == "elastic_net":
         from sklearn.linear_model import ElasticNet
@@ -74,4 +74,108 @@ def fit_predict(name, x, y, test, seed):
     predicted=np.asarray(model.predict(test),dtype=float)*scale+mean
     if predicted.shape!=(len(test),) or not np.isfinite(predicted).all():
         raise ValueError(f"INVALID_MODEL_OUTPUT:{name}")
+    if capture_weights is not None:
+        capture_weights(dict(target_mean=mean,target_scale=scale,model=export_estimator(name,model)))
     return predicted, json_parameters(model.get_params())
+
+
+def export_estimator(name,model):
+    """Store numeric sklearn estimators and library-native tree formats."""
+    if name=="elastic_net":
+        return dict(coefficients=model.coef_.tolist(),intercept=float(model.intercept_))
+    if name=="mlp":
+        return dict(coefficients=[v.tolist() for v in model.coefs_],
+                    intercepts=[v.tolist() for v in model.intercepts_])
+    if name=="random_forest":
+        return dict(trees=[dict(left=t.tree_.children_left.tolist(),
+                    right=t.tree_.children_right.tolist(),feature=t.tree_.feature.tolist(),
+                    threshold=t.tree_.threshold.tolist(),
+                    value=t.tree_.value[:,0,0].tolist()) for t in model.estimators_])
+    if name=="lightgbm":
+        return dict(native=model.booster_.model_to_string())
+    if name=="xgboost":
+        return dict(native=bytes(model.get_booster().save_raw(raw_format="json")).decode("utf-8"))
+    if name=="catboost":
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            path=Path(tmp)/"model.json"
+            model.save_model(str(path),format="json")
+            return dict(native=path.read_text(encoding="utf-8"))
+    raise ValueError("UNKNOWN_OPTIONAL_MODEL")
+
+
+def load_estimator_predictor(name,weights,feature_count):
+    """Return a batch predictor; no pickle or arbitrary Python deserialization."""
+    import numpy as np
+    if name=="elastic_net":
+        coef=np.asarray(weights["coefficients"],dtype=float)
+        intercept=float(weights["intercept"])
+        if coef.shape!=(feature_count,) or not np.isfinite(coef).all() or not isfinite(intercept):
+            raise ValueError("ARTIFACT_LINEAR_INVALID")
+        return lambda x:x@coef+intercept
+    if name=="mlp":
+        coefs=[np.asarray(v,dtype=float) for v in weights["coefficients"]]
+        biases=[np.asarray(v,dtype=float) for v in weights["intercepts"]]
+        dims=(feature_count,32,16,1)
+        if len(coefs)!=3 or len(biases)!=3 or any(
+            a.shape!=(dims[i],dims[i+1]) or b.shape!=(dims[i+1],)
+            or not np.isfinite(a).all() or not np.isfinite(b).all()
+            for i,(a,b) in enumerate(zip(coefs,biases))):
+            raise ValueError("ARTIFACT_MLP_INVALID")
+        def predict(x):
+            for i,(a,b) in enumerate(zip(coefs,biases)):
+                x=x@a+b
+                if i<2:
+                    x=np.maximum(x,0)
+            return x[:,0]
+        return predict
+    if name=="random_forest":
+        trees=[]
+        for tree in weights["trees"]:
+            left,right,feature=(np.asarray(tree[k],dtype=np.int64) for k in ("left","right","feature"))
+            threshold,value=(np.asarray(tree[k],dtype=float) for k in ("threshold","value"))
+            n=len(left)
+            if not n or any(v.shape!=(n,) for v in (right,feature,threshold,value)) or not np.isfinite(threshold).all() or not np.isfinite(value).all():
+                raise ValueError("ARTIFACT_FOREST_INVALID")
+            for i in range(n):
+                if left[i]==right[i]==-1:
+                    continue
+                if not (i<left[i]<n and i<right[i]<n and 0<=feature[i]<feature_count):
+                    raise ValueError("ARTIFACT_FOREST_INVALID")
+            trees.append((left,right,feature,threshold,value))
+        if not trees:
+            raise ValueError("ARTIFACT_FOREST_EMPTY")
+        def predict(x):
+            x=np.asarray(x,dtype=np.float32)
+            out=np.zeros(len(x),dtype=float)
+            for left,right,feature,threshold,value in trees:
+                nodes=np.zeros(len(x),dtype=np.int64)
+                while True:
+                    active=np.flatnonzero(left[nodes]!=-1)
+                    if not len(active):
+                        break
+                    nd=nodes[active]
+                    nodes[active]=np.where(x[active,feature[nd]]<=threshold[nd],left[nd],right[nd])
+                out+=value[nodes]
+            return out/len(trees)
+        return predict
+    if name=="lightgbm":
+        from lightgbm import Booster
+        return Booster(model_str=weights["native"]).predict
+    if name=="xgboost":
+        from xgboost import Booster,DMatrix
+        booster=Booster()
+        booster.load_model(bytearray(weights["native"].encode("utf-8")))
+        return lambda x:booster.predict(DMatrix(x))
+    if name=="catboost":
+        from catboost import CatBoostRegressor
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        model=CatBoostRegressor()
+        with TemporaryDirectory() as tmp:
+            path=Path(tmp)/"model.json"
+            path.write_text(weights["native"],encoding="utf-8")
+            model.load_model(str(path),format="json")
+        return model.predict
+    raise ValueError("UNKNOWN_OPTIONAL_MODEL")

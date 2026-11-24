@@ -6,7 +6,6 @@ The database is local and hashes detect corruption, not malicious authorship.
 from __future__ import annotations
 import argparse
 from contextlib import closing
-from datetime import date
 from importlib.metadata import version
 import json
 from pathlib import Path
@@ -16,7 +15,9 @@ from atlaspm.research.training_registry import FLAGS,canonical,digest,local_path
 from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions
 from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
-ARTIFACT_MODELS=("ridge","historical_mean")+SEQUENCE_MODELS
+from atlaspm.research.training_models import MODELS,PACKAGES,load_estimator_predictor
+
+ARTIFACT_MODELS=MODELS+SEQUENCE_MODELS
 SCHEMA="atlaspm_numeric_model_snapshot_v1"
 
 
@@ -120,13 +121,27 @@ def predict_snapshot(record,payload,*,batch_size=128):
     else:
         mean=np.asarray(settings["feature_mean"],dtype=float)
         scale=np.asarray(settings["feature_scale"],dtype=float)
-        coef=np.asarray(record["weights"]["coefficients"],dtype=float)
-        if any(v.shape!=(len(names),) or not np.isfinite(v).all() for v in (mean,scale,coef)) or not (scale>0).all():
+        if any(v.shape!=(len(names),) or not np.isfinite(v).all() for v in (mean,scale)) or not (scale>0).all():
             raise ValueError("ARTIFACT_NORMALIZATION_INVALID")
+        if name in PACKAGES:
+            package=PACKAGES[name]
+            if version(package)!=record["dependencies"][package]:
+                raise ValueError("ARTIFACT_DEPENDENCY_MISMATCH:"+package)
+            weights=record["weights"]
+            predict=load_estimator_predictor(name,weights["model"],len(names))
+            offset=weights["target_mean"]
+            multiplier=weights["target_scale"]
+        else:
+            coef=np.asarray(record["weights"]["coefficients"],dtype=float)
+            if coef.shape!=(len(names),) or not np.isfinite(coef).all():
+                raise ValueError("ARTIFACT_LINEAR_INVALID")
+            predict=lambda x:x@coef
+            offset=settings["intercept"]
+            multiplier=1.
         for start in range(0,len(ids),batch_size):
             subset=ids[start:start+batch_size]
             x=np.asarray([latest[sid][1] for sid in subset],dtype=float)
-            vals=(x-mean)/scale@coef+settings["intercept"]
+            vals=np.asarray(predict((x-mean)/scale),dtype=float)*multiplier+offset
             out.extend(zip(subset,map(float,vals)))
     if not all(np.isfinite(v) for _,v in out):
         raise ValueError("NONFINITE_ARTIFACT_PREDICTION")
