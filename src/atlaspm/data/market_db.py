@@ -368,6 +368,18 @@ def register_parser(sub):
     h.add_argument('--bar-date',required=True)
     h.add_argument('--as-of',required=True)
     h.add_argument('--raw-unadjusted',action='store_true')
+    h=actions.add_parser('hf-5m-discover-v54',help='Build local research-only market anomaly queue')
+    h.add_argument('--month',required=True)
+    h.add_argument('--threshold',type=float,default=1.5)
+    h.add_argument('--limit',type=int,default=200)
+    h.add_argument('--memory',default='2GB')
+    h.add_argument('--threads',type=int,default=2)
+    h=actions.add_parser('hf-5m-investigate-v54',help='Find bounded issuer filing evidence for market anomalies')
+    h.add_argument('--month',required=True)
+    h.add_argument('--max-events',type=int,default=10)
+    h.add_argument('--per-event',type=int,default=5)
+    h.add_argument('--max-requests',type=int,default=20)
+    h.add_argument('--fetch',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -537,6 +549,14 @@ def run(args):
             return master.snapshot(args.as_of,args.trade_date)
         return master.adjustment(args.security_id,args.bar_date,args.as_of,
                                  raw_unadjusted=args.raw_unadjusted)
+    if args.db_action in ('hf-5m-discover-v54','hf-5m-investigate-v54'):
+        from atlaspm.data import hf_stock5m_discovery_v54 as discovery
+        if args.db_action == 'hf-5m-discover-v54':
+            return discovery.scan(args.month,threshold=args.threshold,limit=args.limit,
+                                  memory=args.memory,threads=args.threads)
+        return discovery.investigate(args.month,max_events=args.max_events,
+                                     per_event=args.per_event,fetch=args.fetch,
+                                     max_requests=args.max_requests)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
