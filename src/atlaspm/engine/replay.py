@@ -158,7 +158,7 @@ def replay(payload):
                     k=(1+slip+(.05 if policy is not None else 0))*(1+fee)-1
                     budget=margin.buy_budget(cash=cash,pending=sum(v for _,v in pending),
                         gross=marked_gross(op),equity=opening_equity-cost_today,
-                        adverse_cost_ratio=k)
+                        adverse_cost_ratio=k,gross_limit=gross_limit)
                 qty = min(max(0, desired[s]-holdings.get(s,0)), max(0, floor(budget/unit)))
                 if policy is not None:
                     requested = max(0, desired[s]-holdings.get(s,0))
