@@ -381,6 +381,7 @@ def register_parser(sub):
     h.add_argument('--max-requests',type=int,default=20)
     h.add_argument('--fetch',action='store_true')
     h=actions.add_parser('hf-5m-match-v55',help='Resumable local market-to-filing evidence matching')
+    h.add_argument('--reference-jsonl')
     h.add_argument('--start-month',default='2026-03')
     h.add_argument('--end-month',default='2026-03')
     h.add_argument('--threshold',type=float,default=1.5)
@@ -573,7 +574,7 @@ def run(args):
         return matching.run(args.start_month,args.end_month,threshold=args.threshold,
                             limit=args.limit,max_events=args.max_events,per_event=args.per_event,
                             fetch=args.fetch,max_requests=args.max_requests,
-                            memory=args.memory,threads=args.threads)
+                            memory=args.memory,threads=args.threads,reference_jsonl=args.reference_jsonl)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
