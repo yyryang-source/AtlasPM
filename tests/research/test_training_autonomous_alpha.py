@@ -119,6 +119,7 @@ class AlphaTests(unittest.TestCase):
         from tempfile import TemporaryDirectory
         from pathlib import Path
         import sqlite3
+        from contextlib import closing
         from atlaspm.research.alpha_lifecycle import history, transition
         from atlaspm.research.training_registry import load
         root=Path("local_data")
@@ -138,10 +139,14 @@ class AlphaTests(unittest.TestCase):
             self.assertEqual(b["decision"],"NO_TRADE")
             self.assertEqual(b["persistent_lifecycle_state"],"SUSPENDED")
             self.assertEqual(transition(db,version,"RETIRED","replaced")["state"],"RETIRED")
-            with sqlite3.connect(db) as con:
+            # sqlite3's context manager commits/rolls back but does not close.
+            with closing(sqlite3.connect(db)) as con, con:
                 con.execute("UPDATE alpha_events SET event_sha='corrupt' WHERE sequence=1")
             with self.assertRaisesRegex(ValueError,"ALPHA_LIFECYCLE_INTEGRITY"):
                 history(db,version)
+            # Explicit deletion catches leaked SQLite handles on Windows.
+            db.unlink()
+            self.assertFalse(db.exists())
 
     def test_benchmark_reports_real_measurements(self):
         import json

@@ -24,10 +24,14 @@ TRANSITIONS = {
 
 def _connect(path):
     con = sqlite3.connect(local_path(path), timeout=30)
-    con.execute("""CREATE TABLE IF NOT EXISTS alpha_events (
-        version TEXT NOT NULL, sequence INTEGER NOT NULL,
-        event_json TEXT NOT NULL, event_sha TEXT NOT NULL,
-        PRIMARY KEY(version,sequence)) WITHOUT ROWID""")
+    try:
+        con.execute("""CREATE TABLE IF NOT EXISTS alpha_events (
+            version TEXT NOT NULL, sequence INTEGER NOT NULL,
+            event_json TEXT NOT NULL, event_sha TEXT NOT NULL,
+            PRIMARY KEY(version,sequence)) WITHOUT ROWID""")
+    except BaseException:
+        con.close()
+        raise
     return con
 
 
