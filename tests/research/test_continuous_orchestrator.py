@@ -239,3 +239,17 @@ class ContinuousTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"PREFIX_CONFLICT"):
             multiasset_fixture(checkpoint=checkpoint,event_count=3)
         self.assertFalse(final["broker_side_effects"])
+
+
+    def test_local_specialist_dispatch_dedup_and_blocked_wire_access(self):
+        from atlaspm.research.intelligence import local_specialist_tasks
+        session=fixture()["sessions"][0]
+        task={"route":"events","params":{"events":session["events"]}}
+        result=local_specialist_tasks([task,task,{"route":"ibkr","params":{}},
+            {"route":"unusual_whales","params":{}}],as_of=session["close_at"])
+        self.assertEqual(len(result["tasks"]),3)
+        self.assertEqual(result["tasks"][0]["status"],"LOCAL_REVIEW_COMPLETED")
+        self.assertGreater(len(result["tasks"][0]["report"]["research_tasks"]),0)
+        self.assertTrue(all(x["status"].startswith("BLOCKED") for x in result["tasks"][1:]))
+        self.assertEqual(result["network_calls"],0)
+        self.assertFalse(result["trade_authorized"])

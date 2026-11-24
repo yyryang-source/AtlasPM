@@ -399,6 +399,70 @@ def event_research(event_report):
             "network_calls":0,"trade_authorized":False}
 
 
+def local_specialist_tasks(tasks, *, as_of):
+    """Explicit bounded local research routes; never fetch provider data.
+
+    Existing archive and artifact readers own their schemas and rights.
+    Reports stay local; missing wire access or identity is a blocked task.
+    No automatic paid fallback, new storage or trading permission.
+    """
+    from atlaspm.research.training_registry import digest
+    from atlaspm.research.financial_events import review,FLAGS
+    cutoff=_timestamp(as_of).isoformat()
+    if _timestamp(cutoff)>datetime.now(UTC) or not isinstance(tasks,list) or not 1<=len(tasks)<=16:
+        raise ValueError("INVALID_SPECIALIST_TASK_BATCH")
+    shapes={"yahoo_finance":{"month"},"bloomberg":{"month"},
+        "institutional":{"subject","previous_as_of","unit","period","basis"},
+        "credit_history":{"identifier_type","identifier"},
+        "factor_admission":{"months"},"local_artifact":{"artifact_db","artifact_id","payload"},
+        "events":{"events"}}
+    blocked={"ibkr","unusual_whales","sec","fred","federal_reserve","treasury","finra","msrb",
+             "sp_dji","msci","ftse_russell","sp_ratings","moodys","fitch","industry","bond"}
+    for task in tasks:
+        if not isinstance(task,dict) or set(task)!={"route","params"} or not isinstance(task["params"],dict):
+            raise ValueError("INVALID_SPECIALIST_TASK")
+        route=task["route"]
+        if not isinstance(route,str) or (route not in shapes and route not in blocked):
+            raise ValueError("UNKNOWN_SPECIALIST_ROUTE")
+        if set(task["params"])!=shapes.get(route,set()):
+            raise ValueError("INVALID_SPECIALIST_PARAMETERS")
+    reports={}
+    for task in tasks:
+        route,args=task["route"],task["params"]
+        key=digest([cutoff,task])
+        if key in reports:
+            continue
+        if route in blocked:
+            reports[key]={"route":route,"status":"BLOCKED_VERIFIED_LOCAL_INPUT_OR_PROVIDER_ACCESS_REQUIRED"}
+            continue
+        try:
+            if route in {"yahoo_finance","bloomberg"}:
+                from atlaspm.research.news_intelligence import review as news_review
+                report=news_review(route,args["month"],as_of=cutoff)
+            elif route=="institutional":
+                from atlaspm.research.institutional_research import factors
+                report=factors(as_of=cutoff,**args)
+            elif route=="credit_history":
+                from atlaspm.research.credit_intelligence import rating_history
+                report=rating_history(as_of=cutoff,**args)
+            elif route=="factor_admission":
+                from atlaspm.research.training_admission import audit_factor_months
+                if not isinstance(args["months"],list) or len(args["months"])>3:
+                    raise ValueError("LOCAL_FACTOR_MONTH_BUDGET")
+                report=audit_factor_months(args["months"],memory="256MB",threads=1)
+            elif route=="local_artifact":
+                report=predict_local_artifact(**args)
+            else:
+                report=event_research(review(args["events"],as_of=cutoff))
+            # Do not persist or print licensed report contents via dispatch.
+            reports[key]={"route":route,"status":"LOCAL_REVIEW_COMPLETED","report_sha256":digest(report),
+                          "report":report}
+        except (ValueError,TypeError,KeyError,OSError,ImportError):
+            reports[key]={"route":route,"status":"BLOCKED_INPUT_RIGHTS_OR_DEPENDENCY"}
+    return {**FLAGS,"as_of":cutoff,"tasks":[{"task_sha256":k,**v} for k,v in reports.items()],
+            "network_calls":0,"trade_authorized":False}
+
+
 def offline_model_responses():
     """Exercise the actual request/response schemas without transport or keys.
 

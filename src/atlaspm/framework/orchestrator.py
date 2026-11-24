@@ -222,13 +222,34 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
+    parser.add_argument("--file",help="Local research task JSON under local_data")
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.action=="research":
+        from pathlib import Path
+        from atlaspm.data.market_db import private_path
+        from atlaspm.research.intelligence import local_specialist_tasks
+        if not args.file:
+            parser.error("research requires --file")
+        control=status()["control"]
+        if control.get("stopped") or control.get("manual_takeover"):
+            print(json.dumps({**FLAGS,"status":"PAUSED"}))
+            return 1
+        path=private_path(Path(args.file),exists=True)
+        with path.open("rb") as handle:
+            raw=handle.read(2*1024*1024+1)
+        if len(raw)>2*1024*1024:
+            raise ValueError("LOCAL_RESEARCH_FILE_LIMIT")
+        data=json.loads(raw)
+        out=local_specialist_tasks(data["tasks"],as_of=data["as_of"])
+        out["tasks"]=[{k:v for k,v in row.items() if k!="report"} for row in out["tasks"]]
+        print(json.dumps(out,indent=2,allow_nan=False))
+        return 0
     if args.action=="offline":
         out=offline_release(checkpoint=args.checkpoint)
         print(json.dumps(out,indent=2,allow_nan=False))

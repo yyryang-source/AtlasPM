@@ -626,3 +626,57 @@ pricing, entitlement, quota, retention and API addresses must be confirmed
 from supplier agreement and official documentation before paid activation.
 No credentials supplied or real calls made in this batch. PR #94 remains
 frozen, formal training, formal backtest and automatic live remain disabled.
+
+
+## Offline V1.0 functional integration checkpoint (not approved)
+
+Actual c0cc70c Windows full dependency suite: 1104/1105, one rating
+momentum assertion failure, zero errors/skips, 95.474 s test runner.
+Previous OMS integer adapter and unified fixture test had no failure.
+Fix 668b4fa preserves matched-panel rating momentum (unchanged analysts
+included) separately from new-receipt numeric revisions; assertions unchanged.
+Basic Python CI had incorrectly invoked full offline command without optional
+calendar/portfolio dependencies; restored base tests, full Windows and Linux
+jobs explicitly run the offline benchmark instead.
+
+Event queue now automatically routes normalized metadata into bounded local
+descriptive research contracts for synthetic subjects. Real events without
+verified instrument mapping are blocked, no numeric prediction or provider
+call. Write-failure injection verifies prior committed queue state survives
+and retries once. Existing mixed-asset exact-leg OMS fixture (equity sale,
+Treasury purchase, protective long put, debt repayment) now persists full
+validated event prefix, account and order state and audit digest under local
+data. Partial fill recovery recomputes and checks prior persisted state, then
+extends; no duplicate cumulative fills, no production broker recovery.
+This is not general cross-asset optimization, exercise/assignment handling or
+real broker settlement. Existing risk and margin restrictions unchanged.
+
+Explicit local specialist dispatcher: `python -m atlaspm.framework.orchestrator
+research --file local_data/research_tasks.json`. JSON contains as_of and
+tasks, each {route, params}. Routes yahoo_finance/bloomberg month, institutional
+subject/previous_as_of/unit/period/basis, credit_history identifier_type/
+identifier, factor_admission months (max 3, structural audit only), local_artifact
+artifact_db/artifact_id/payload, events normalized event list. Max 16 tasks;
+same task dedup, local rights and existing schemas enforced. CLI emits hashes
+and status, not restricted report contents. Other designated routes explicitly
+blocked until verified local input or authorized integration is available.
+Not a fully automatic specialist or paid AI scheduler. No independent identity
+or verified model performance claim.
+
+New offline benchmark reuses existing OS RSS/I/O functions:
+```powershell
+python scripts/maintenance/verify_release.py --minimum-passed 1109
+python scripts/maintenance/benchmark_unified_data.py --offline
+```
+Expected 1109 (1105 + 4 tests), not measured. Benchmark calls canonical offline
+entry and reports actual CPU/wall/lifetime RSS and process I/O when executed.
+Default checkpoint under current checkout local_data; if old fixture changed,
+use a separate review checkout or versioned checkpoint for direct offline CLI.
+No new database, duplicate HTTP/OMS or task framework. No code deleted without
+evidence. Source audit on c0cc70c showed 276 modules, 175 test files, 66 shims,
+zero duplicate body candidates and zero errors. This is not final source
+certification. Remaining: latest CI/Windows, automatic real and local specialist
+generation across all sources, genuine model inference/routing, general
+multiasset allocation and lifecycle, production durable recovery/kill switch,
+independent research promotion/rollback scheduling, performance and real
+data/rights verification. Keep #94 frozen; formal training/backtest/live disabled.
