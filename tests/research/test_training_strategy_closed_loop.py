@@ -100,6 +100,23 @@ class ClosedLoopTests(unittest.TestCase):
             self.assertLessEqual(max(allocation["weights"].values()),.6+1e-8)
             self.assertLessEqual(allocation["estimation_last_date"],allocation["signal_date"])
 
+    def test_assumed_margin_closed_loop(self):
+        p,m=fixture()
+        config=options()
+        for s in config["strategies"]:
+            s["cash_reserve"]=0
+        config["execution"].update(
+            margin_policy={"target_gross":1.5,"initial_fraction":.5,"maintenance_fraction":.3,"annual_apr":.06},
+            risk_policy={"max_gross_leverage":2,"max_drawdown":.25,"max_stress_loss_fraction":.5})
+        r=loop.run(p,m,**config)
+        self.assertEqual(r["status"],"SYNTHETIC_CASH_CLOSED_LOOP_COMPLETE",r)
+        h=r["holdout"]
+        self.assertEqual(h["execution_model"],"synthetic_next_open_assumed_margin")
+        self.assertGreater(h["assumed_financing"]["borrowed_total"],0)
+        self.assertGreater(h["assumed_financing"]["financing_interest_total"],0)
+        self.assertFalse(r["live_execution_enabled"])
+        self.assertFalse(r["broker_order_submission_enabled"])
+
     def test_adaptive_signal_uses_existing_ensemble(self):
         p,m=fixture()
         r=loop.run(p,m,**options(),signal_model="adaptive_ensemble",
