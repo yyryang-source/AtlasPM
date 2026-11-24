@@ -117,7 +117,9 @@ class V3DuckDB(V3Contracts):
                 p.with_suffix(".json").write_text(json.dumps({
                     "version": factor_db.VERSION, "source": source,
                     "session": "rth", "month": month,
-                    "source_price_adjustment": "UNVERIFIED_HF_RAW",
+                    "source_price_adjustment": (
+                        "UNVERIFIED_HF_RAW" if source=="hf"
+                        else "SQLITE_ADJUSTED_CLOSE_VENDOR_UNVERIFIED"),
                     "approved_for_model_training": False,
                 }), encoding="utf-8")
         finally:
