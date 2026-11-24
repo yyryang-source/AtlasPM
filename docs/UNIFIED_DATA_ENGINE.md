@@ -19,8 +19,7 @@ exploratory batch as a permission token. Existing CLI and raw data are unchanged
 | factors_hf / factors_sqlite | factor_db source-isolated monthly Parquet |
 
 Unconnected catalog entries deliberately raise DataUnavailable:
-equity_realtime, macro, ibkr_accounts, ibkr_positions,
-option_contracts, bond_terms.
+equity_realtime, macro, option_contracts, bond_terms.
 Several have existing domain modules or raw storage, but adapters are not
 implemented here. This is not a claim of provider availability. Never fill
 these gaps with synthetic data or conflate two sources.
@@ -105,3 +104,7 @@ Raw minute scans reuse the existing raw QC, reject any invalid source rows, misa
 ### Fundamental snapshots and file fingerprints
 
 `iter_fundamentals(path, start=..., end=..., as_of=..., purpose="exploratory")` streams both existing annual fundamental CSV formats with their provenance fields, validates their selected ratios using the existing screener validator, rejects same-day close-derived values, and requires unique chronological records. It never assigns a permanent security ID or forward-fills a missing release. CSV rows are scanned rather than indexed. `parquet_manifest(dataset, start=..., end=...)` reuses the existing SHA-256 fingerprint function to hash monthly partitions in chunks. It records content changes without copying data, is not a signed admission receipt, and does not validate the Parquet schema or source authenticity. SQLite and DuckDB databases may have WAL state and are deliberately excluded from this file manifest. The existing data builder and audit checkpoint workflows remain unchanged.
+
+### Maintenance and private broker review
+
+`archive_plan(start_month, end_month)` is a no-write inventory of raw, converted, quarantine and factor files, including months outside the advertised archive. File presence is not coverage or integrity. `audit_archive(..., resume=True, dry_run=True)` delegates to the existing resumable monthly QC workflow. Only an explicit `dry_run=False` writes existing QC metadata; it never downloads or alters raw data. Existing download and factor build commands remain the canonical paths. No automatic download or conversion is enabled. `review_broker_capture(capture_path, mapping_path)` consumes private local JSON files and reuses the existing IBKR mapping diagnostic, including freshness, currency and mapping blockers. Synthetic captures require explicit opt-in and remain labeled; no network, credentials, order submission or margin approval. Returned financial data must remain local. Do not share the full report or commit it.

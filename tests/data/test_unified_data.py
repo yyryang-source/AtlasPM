@@ -278,3 +278,38 @@ class UnifiedTests(unittest.TestCase):
         self.assertFalse(second["approved_for_model_training"])
         with self.assertRaises(unified.DataUnavailable):
             unified.parquet_manifest("equity_5m", **{**args, "end":"2020-02-01"})
+
+    def test_archive_plan_includes_unadvertised_months_and_no_writes(self):
+        path = hf_stock5m.raw_path("2026-03")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"fixture")
+        report = unified.archive_plan("2026-03", "2026-04")
+        first, second = report["months"]
+        self.assertTrue(first["raw_present"])
+        self.assertFalse(first["bars_present"])
+        self.assertFalse(second["within_advertised_archive"])
+        self.assertFalse(report["approved_for_model_training"])
+        self.assertFalse(hf_stock5m.output_path("2026-03").exists())
+        with self.assertRaises(unified.DataUnavailable):
+            unified.audit_archive("2026-03", "2026-04")
+        self.assertEqual(unified.audit_archive("2026-03", "2026-03")["mode"], "dry_run")
+
+    def test_broker_capture_is_local_and_fixture_requires_explicit_opt_in(self):
+        import json
+        from unittest.mock import patch
+        path = Path("local_data/capture.json")
+        mapping = Path("local_data/mapping.json")
+        path.write_text(json.dumps({"source": "synthetic_ibkr_fixture",
+                                    "live_execution_enabled": False}), encoding="utf-8")
+        mapping.write_text("{}", encoding="utf-8")
+        with self.assertRaises(unified.AdmissionDenied):
+            unified.review_broker_capture(path, mapping)
+        with patch("atlaspm.execution.ibkr_mapping.diagnose_ibkr_contract_mapping",
+                   return_value={"mapping_status": "BLOCK_MAPPING"}) as diagnose:
+            result = unified.review_broker_capture(path, mapping, allow_fixture=True)
+        diagnose.assert_called_once()
+        self.assertTrue(result["synthetic_fixture"])
+        self.assertFalse(result["live_execution_enabled"])
+        self.assertFalse(result["approved_for_model_training"])
+        with self.assertRaises(ValueError):
+            unified.review_broker_capture(Path("outside.json"), mapping)

@@ -18,7 +18,7 @@ import re
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
-from atlaspm.data import factor_db, hf_stock5m
+from atlaspm.data import factor_db, hf_stock5m, hf_stock5m_batch
 from atlaspm.data import hf_stock5m_filings_v52 as filings
 from atlaspm.data import hf_stock5m_security_master_v53 as security_master
 from atlaspm.data.market_db import DB_PATH, private_path
@@ -84,8 +84,7 @@ CATALOG = MappingProxyType({
 # Explicitly unavailable through this API, not fabricated empty tables.
 UNCONNECTED = frozenset({
     "equity_realtime",
-    "macro", "ibkr_accounts",
-    "ibkr_positions", "option_contracts", "bond_terms",
+    "macro", "option_contracts", "bond_terms",
 })
 
 
@@ -377,6 +376,73 @@ def parquet_manifest(dataset: str, *, start: str, end: str):
         partitions.append({"path": str(path.relative_to(Path.cwd().resolve())),
                            "sha256": record["sha256"], "bytes": record["bytes"]})
     return {"dataset": dataset, "partitions": partitions, "coverage_verified": False,
+            "approved_for_model_training": False, "approved_for_backtest": False,
+            "live_execution_enabled": False}
+
+
+def archive_plan(start_month: str, end_month: str):
+    """Inspect monthly availability without downloading, writing or certifying."""
+    start = _day(hf_stock5m.validate_month(start_month) + "-01")
+    end = _day(hf_stock5m.validate_month(end_month) + "-01")
+    if start > end or (end.year-start.year)*12 + end.month-start.month > 119:
+        raise ValueError("Plan at most 120 months")
+    rows = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        month = f"{y:04d}-{m:02d}"
+        raw = hf_stock5m.raw_path(month)
+        bars = hf_stock5m.output_path(month, "rth")
+        factors = factor_db._path(month, "hf", "rth", "factors")
+        _, qc = hf_stock5m.quality_paths(bars)
+        rows.append({"month": month,
+                     "within_advertised_archive": hf_stock5m.EARLIEST_MONTH <= month <= hf_stock5m.LATEST_ADVERTISED_MONTH,
+                     "raw_present": raw.is_file(), "bars_present": bars.is_file(),
+                     "quarantine_report_present": qc.is_file(),
+                     "factor_present": factors.is_file()})
+        y, m = (y+1, 1) if m == 12 else (y, m+1)
+    return {"months": rows, "mode": "plan_only", "coverage_verified": False,
+            "approved_for_model_training": False, "live_execution_enabled": False}
+
+
+def audit_archive(start_month: str, end_month: str, *, resume: bool = True,
+                  dry_run: bool = True):
+    """Delegate to the existing resumable audit without claiming admission."""
+    plan = archive_plan(start_month, end_month)
+    if any(not row["within_advertised_archive"] for row in plan["months"]):
+        raise DataUnavailable("Requested audit extends beyond advertised archive")
+    if type(resume) is not bool or type(dry_run) is not bool:
+        raise ValueError("resume and dry_run must be boolean")
+    return hf_stock5m_batch.run(start_month, end_month, session="rth",
+                               resume=resume, dry_run=dry_run)
+
+
+def review_broker_capture(capture_path: Path, mapping_path: Path, *,
+                          allow_fixture: bool = False, now_utc=None):
+    """Read existing private capture/mapping files; no broker connection or orders."""
+    from atlaspm.execution.ibkr_gateway import _json_no_nan
+    from atlaspm.execution.ibkr_mapping import diagnose_ibkr_contract_mapping
+    if type(allow_fixture) is not bool:
+        raise ValueError("allow_fixture must be boolean")
+    def load(path):
+        path = private_path(Path(path))
+        if not path.is_file():
+            raise DataUnavailable("Private broker review input missing")
+        with path.open("rb") as handle:
+            data = handle.read(12 * 1024 * 1024 + 1)
+        if len(data) > 12 * 1024 * 1024:
+            raise DataQualityError("Private broker review input exceeds 12 MiB")
+        result = _json_no_nan(data)
+        if not isinstance(result, dict):
+            raise DataQualityError("Expected broker review JSON object")
+        return result
+    capture = load(capture_path)
+    fixture = capture.get("source") == "synthetic_ibkr_fixture"
+    if fixture and not allow_fixture:
+        raise AdmissionDenied("Synthetic broker captures require explicit fixture mode")
+    if capture.get("live_execution_enabled") is not False:
+        raise AdmissionDenied("Expected read-only broker capture")
+    report = diagnose_ibkr_contract_mapping(capture, load(mapping_path), now_utc=now_utc)
+    return {**report, "synthetic_fixture": fixture, "local_only": True,
             "approved_for_model_training": False, "approved_for_backtest": False,
             "live_execution_enabled": False}
 
