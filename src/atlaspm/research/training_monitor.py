@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import date
-from itertools import groupby,zip_longest
+from itertools import groupby
 from math import ceil
 from statistics import fmean
 from atlaspm.research.training_registry import FLAGS
 from atlaspm.engine.contracts import finite
+from atlaspm.research.training_predictions import aligned_forecasts
 
 
 def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
@@ -29,27 +29,16 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
     history=deque(maxlen=2*window_dates)
     pending=deque()
     audit=[]
-    previous=None
     total={m:0 for m in models}
     hits={m:0 for m in models}
     covered_dates={m:0 for m in models}
     assessed_dates={m:0 for m in models}
 
-    def aligned():
-        for bundle in zip_longest(*(iter(streams[m]) for m in models)):
-            if any(r is None for r in bundle):
-                raise ValueError("MONITOR_ALIGNMENT_MISMATCH")
-            first=bundle[0]
-            key=(first["date"],first["security_id"],first["label_end_date"],first["actual"])
-            if any((r["date"],r["security_id"],r["label_end_date"],r["actual"])!=key for r in bundle):
-                raise ValueError("MONITOR_ALIGNMENT_MISMATCH")
-            if date.fromisoformat(key[2])<=date.fromisoformat(key[0]):
-                raise ValueError("MONITOR_LABEL_MATURITY")
-            for row in bundle:
-                finite(row["prediction"],"prediction")
-            if key[3] is not None:
-                finite(key[3],"actual")
-            yield first["date"],bundle
+    aligned=aligned_forecasts(streams,models,
+        mismatch="MONITOR_ALIGNMENT_MISMATCH",
+        order="MONITOR_DATE_OR_SECURITY_ORDER",
+        label_mismatch="MONITOR_ALIGNMENT_MISMATCH",
+        maturity="MONITOR_LABEL_MATURITY")
 
     def admit(day):
         while pending and pending[0]["maturity"]<day:
@@ -63,13 +52,11 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
                         assessed_dates[model]+=1
                         covered_dates[model]+=int(item["hits"][model]==item["count"])
 
-    for day,group in groupby(aligned(),key=lambda x:x[0]):
-        if previous is not None and day<=previous:
-            raise ValueError("MONITOR_DATE_ORDER")
-        previous=day
+    for day,group in groupby(aligned,key=lambda rows:rows[0]["date"]):
         admit(day)
-        recent=list(history)[-window_dates:]
-        older=list(history)[:-window_dates]
+        past=list(history)
+        recent=past[-window_dates:]
+        older=past[:-window_dates]
         intervals={}
         diagnostics={}
         for model in models:
@@ -94,14 +81,9 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
         losses={m:[] for m in models}
         matches={m:0 for m in models}
         maturity=None
-        previous_id=None
         count=0
-        for _,bundle in group:
+        for bundle in group:
             row=bundle[0]
-            sid=row["security_id"]
-            if previous_id is not None and sid<=previous_id:
-                raise ValueError("MONITOR_SECURITY_ORDER")
-            previous_id=sid
             end=row["label_end_date"]
             maturity=end if maturity is None else max(end,maturity)
             if row["actual"] is None:

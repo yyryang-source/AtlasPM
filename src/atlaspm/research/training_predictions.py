@@ -1,6 +1,8 @@
 """Disk-backed chronological prediction archive for synthetic research."""
 from __future__ import annotations
 from contextlib import closing
+from datetime import date
+from itertools import zip_longest
 import sqlite3
 from atlaspm.research.training_registry import local_path
 from atlaspm.engine.contracts import finite
@@ -80,3 +82,32 @@ class PredictionArchive:
             cur=con.execute("UPDATE prediction_state SET status='COMPLETE' WHERE status='INCOMPLETE'")
             if cur.rowcount!=1:
                 raise ValueError("PREDICTION_ARCHIVE_FINALIZED")
+
+
+def aligned_forecasts(streams, names, *, mismatch, order, label_mismatch, maturity):
+    """Single validation contract for chronological aligned model streams."""
+    previous=None
+    for rows in zip_longest(*(iter(streams[name]) for name in names)):
+        if any(row is None for row in rows):
+            raise ValueError(mismatch)
+        first=rows[0]
+        key=(first["date"],first["security_id"])
+        label=(first["actual"],first["label_end_date"])
+        if previous is not None and key<=previous:
+            raise ValueError(order)
+        previous=key
+        try:
+            valid_dates=date.fromisoformat(label[1])>date.fromisoformat(key[0])
+        except (TypeError,ValueError) as exc:
+            raise ValueError(maturity) from exc
+        if not valid_dates:
+            raise ValueError(maturity)
+        if label[0] is not None:
+            finite(label[0],"actual")
+        for row in rows:
+            if (row["date"],row["security_id"])!=key:
+                raise ValueError(mismatch)
+            if (row["actual"],row["label_end_date"])!=label:
+                raise ValueError(label_mismatch)
+            finite(row["prediction"],"prediction")
+        yield rows

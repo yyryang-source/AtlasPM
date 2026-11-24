@@ -151,3 +151,7 @@ mean/scale are null as well. Sequence-specific scaling remains in model settings
 Prediction metadata is read without copying feature vectors. Prediction archive
 readers use bounded keyset pages after the requested model has finished writing,
 so appending other models does not pin a full-run SQLite WAL read transaction.
+
+All model snapshots retain the panel's trailing-window eligibility length,
+including tabular estimators that consume only the final feature row. Ensemble
+and monitoring share one aligned chronological forecast validation contract.

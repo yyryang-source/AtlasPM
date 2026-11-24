@@ -260,7 +260,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 elif name in SEQUENCE_MODELS:
                     if sequence_train is None:
                         def materialize(rows):
-                            return arrays.rows(rows,(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
+                            return arrays.rows(rows.metadata(),(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
                         sequence_train=materialize(train_rows)
                         sequence_test=materialize(test_rows)
                     epoch_store=None
@@ -285,7 +285,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                                  if name in ('ridge','historical_mean') else saved_weights)
                         snapshot_settings=dict(feature_mean=mean.tolist() if mean is not None else [0.]*len(panel["feature_names"]),
                                                feature_scale=scale.tolist() if scale is not None else [1.]*len(panel["feature_names"]),intercept=intercept)
-                        length=1
+                        length=sequence_length
                     artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,
                         dataset_sha256=fingerprint,fold_index=fold_index,feature_names=panel['feature_names'],
                         horizon=horizon,sequence_length=length,dependencies=dependency_versions,

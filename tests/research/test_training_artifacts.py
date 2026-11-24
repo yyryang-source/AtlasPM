@@ -41,6 +41,9 @@ class ArtifactTests(unittest.TestCase):
                 self.assertAlmostEqual(row["prediction"],expected[row["security_id"]],places=6)
         return out,store
 
+    def test_tabular_snapshot_preserves_panel_window(self):
+        self.verify_model(['ridge','historical_mean'],3)
+
     def test_linear_roundtrip_and_tamper(self):
         out,store=self.verify_model(["ridge","historical_mean"],1)
         key=out["folds"][0]["model_artifact_ids"]["ridge"]
