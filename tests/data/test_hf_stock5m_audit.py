@@ -167,7 +167,12 @@ class HuggingFaceAuditTests(unittest.TestCase):
     def test_possible_valid_partial_bucket_stays_review_only(self):
         self.seed()
         cx = duckdb.connect()
-        cx.execute("CREATE TABLE updated AS SELECT * FROM read_parquet(?)", [str(self.out)])
+        cx.execute("""
+            CREATE TABLE updated AS
+            SELECT symbol,trade_date_et,timestamp_ms,open,high,low,close,
+                   volume_shares,transactions,source_minute_bars,unique_source_minutes
+            FROM read_parquet(?)
+        """, [str(self.out)])
         cx.execute("""
             UPDATE updated SET source_minute_bars=3,unique_source_minutes=3
             WHERE symbol='AAPL' AND open=100
@@ -194,7 +199,12 @@ class HuggingFaceAuditTests(unittest.TestCase):
     def test_partial_early_close_bucket_not_falsely_out_of_session(self):
         self.seed()
         cx = duckdb.connect()
-        cx.execute("CREATE TABLE updated AS SELECT * FROM read_parquet(?)", [str(self.out)])
+        cx.execute("""
+            CREATE TABLE updated AS
+            SELECT symbol,trade_date_et,timestamp_ms,open,high,low,close,
+                   volume_shares,transactions,source_minute_bars,unique_source_minutes
+            FROM read_parquet(?)
+        """, [str(self.out)])
         cx.execute("""
             INSERT INTO updated
             VALUES ('AAPL', DATE '2026-03-02',
