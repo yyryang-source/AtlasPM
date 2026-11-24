@@ -14,7 +14,7 @@ from atlaspm.data import hf_stock5m
 from atlaspm.data.market_db import private_path
 
 BENCHMARKS = ("AAPL", "MSFT", "NVDA", "SPY", "QQQ", "GOOGL", "AMZN", "META")
-SCHEMA = "atlaspm_hf_5m_research_qc_v1"
+SCHEMA = "atlaspm_hf_5m_research_qc_v2"
 
 
 def _calendar(month: str):
@@ -33,8 +33,12 @@ def _calendar(month: str):
         closing = row["market_close"]
         start_ms = int(opening.timestamp() * 1000)
         end_ms = int(closing.timestamp() * 1000)
-        if end_ms <= start_ms or (end_ms - start_ms) % hf_stock5m.FIVE_MINUTES_MS:
-            raise ValueError("NYSE schedule has non-5m market duration")
+        if end_ms <= start_ms or start_ms % 60_000 or end_ms % 60_000:
+            raise ValueError("Invalid NYSE market session bounds")
+        # Historical NYSE sessions include 09:31/09:32/09:33 late opens and
+        # even 15:56 closes. A duration need not be divisible by five minutes.
+        # The lake aggregates fixed UTC 5m buckets, so partial boundary
+        # buckets require separate scrutiny instead of rejecting the calendar.
         dates.append((index.date(), start_ms, end_ms))
     if not dates:
         raise ValueError("NYSE calendar produced zero sessions")
@@ -54,12 +58,31 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
     if not source.is_file():
         raise ValueError(f"Local 5m Parquet not found: {source}. Run hf-5m-backfill first")
     sessions = _calendar(month)
-    expected = sum((end - start) // hf_stock5m.FIVE_MINUTES_MS
-                   for _, start, end in sessions)
+    width = hf_stock5m.FIVE_MINUTES_MS
+    # Include every fixed UTC 5m bucket overlapping the [open, close)
+    # exchange session. This preserves the partial first/last bucket.
+    calendar_rows = [
+        (day, opening, closing, (opening // width) * width,
+         ((closing + width - 1) // width) * width)
+        for day, opening, closing in sessions
+    ]
+    expected = sum((last - first) // width for _, _, _, first, last in calendar_rows)
+    special_boundaries = [
+        {"date": day.isoformat(), "market_open_ms": opening,
+         "market_close_ms": closing,
+         "late_open_partial_bucket": opening % width != 0,
+         "early_close_partial_bucket": closing % width != 0}
+        for day, opening, closing, _, _ in calendar_rows
+        if opening % width or closing % width
+    ]
     cx = hf_stock5m._open_duckdb()
     try:
-        cx.execute("CREATE TEMP TABLE nyse(trade_date DATE, open_ms BIGINT, close_ms BIGINT)")
-        cx.executemany("INSERT INTO nyse VALUES (?,?,?)", sessions)
+        cx.execute("""
+            CREATE TEMP TABLE nyse(
+                trade_date DATE, open_ms BIGINT, close_ms BIGINT,
+                first_bucket_ms BIGINT, last_bucket_end_ms BIGINT)
+        """)
+        cx.executemany("INSERT INTO nyse VALUES (?,?,?,?,?)", calendar_rows)
         cx.execute(f"CREATE TEMP VIEW bars AS SELECT * FROM read_parquet('{hf_stock5m._quote(source)}')")
         required = {
             "symbol", "trade_date_et", "timestamp_ms", "open", "high", "low", "close",
@@ -105,13 +128,30 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             )
         """).fetchone()[0]
         non_session = None
+        boundary_bars = None
+        boundary_minute_overflow = None
         if session == "rth":
+            # A 5m bar is named by its UTC bucket START. For irregular
+            # opening/closing minutes the bucket may start before the actual
+            # exchange session yet still contain valid trades.
             non_session = cx.execute("""
                 SELECT count(*)
                 FROM bars a LEFT JOIN nyse s ON a.trade_date_et=s.trade_date
-                WHERE s.trade_date IS NULL OR a.timestamp_ms < s.open_ms
-                   OR a.timestamp_ms >= s.close_ms
+                WHERE s.trade_date IS NULL OR a.timestamp_ms < s.first_bucket_ms
+                   OR a.timestamp_ms >= s.last_bucket_end_ms
             """).fetchone()[0]
+            boundary_bars, boundary_minute_overflow = cx.execute(f"""
+                SELECT count(*),
+                       count(*) FILTER (
+                           WHERE a.source_minute_bars > floor(
+                             (least(a.timestamp_ms + {width}, s.close_ms)
+                              - greatest(a.timestamp_ms, s.open_ms)) / 60000.0))
+                FROM bars a JOIN nyse s ON a.trade_date_et=s.trade_date
+                WHERE a.timestamp_ms < s.close_ms
+                  AND a.timestamp_ms + {width} > s.open_ms
+                  AND (a.timestamp_ms < s.open_ms
+                       OR a.timestamp_ms + {width} > s.close_ms)
+            """).fetchone()
         day_rows = cx.execute("""
             SELECT trade_date_et, count(*), count(DISTINCT symbol)
             FROM bars GROUP BY trade_date_et ORDER BY trade_date_et
@@ -172,6 +212,10 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             problems.append(f"OUTSIDE_NYSE_SESSIONS:{non_session}")
         if session == "rth" and unexpected_days:
             problems.append("UNEXPECTED_TRADING_DATES")
+        if boundary_minute_overflow:
+            # More observed 1m rows than calendar-open minutes in a partial
+            # 5m bucket cannot be fully explained by exchange RTH alone.
+            problems.append(f"NYSE_BOUNDARY_MINUTE_COUNT_EXCEEDED:{boundary_minute_overflow}")
         if exclusion is None:
             problems.append("NO_CONVERSION_QC_METADATA")
         if total_excluded and not quarantine.is_file():
@@ -189,6 +233,10 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             review.append("QUARANTINED_INVALID_SOURCE_5M_BUCKETS")
         if invalid_source_rows:
             review.append("RAW_SOURCE_OHLCV_ANOMALIES")
+        if session == "rth" and special_boundaries:
+            review.append("HISTORICAL_NYSE_PARTIAL_5M_SESSION_BOUNDARIES")
+        if session == "rth" and boundary_bars:
+            review.append("PARTIAL_NYSE_BOUNDARY_5M_BARS_REQUIRE_SOURCE_REVIEW")
         if session == "all":
             review.append("EXTENDED_HOURS_NOT_VERIFIED_AGAINST_EXCHANGE_SCHEDULE")
         status = ("STRUCTURAL_QC_FAILED" if problems else "REVIEW_REQUIRED")
@@ -211,6 +259,12 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             "out_of_nyse_session_bars": int(non_session) if non_session is not None else None,
             "nyse_expected_sessions": len(sessions),
             "nyse_expected_rth_slots_per_liquid_symbol": int(expected),
+            "non_5m_aligned_nyse_sessions": special_boundaries,
+            "partial_nyse_boundary_5m_bars": (
+                int(boundary_bars) if boundary_bars is not None else None),
+            "nyse_boundary_minute_count_exceeded": (
+                int(boundary_minute_overflow)
+                if boundary_minute_overflow is not None else None),
             "missing_whole_trading_dates": missing_days,
             "unexpected_trading_dates": unexpected_days,
             "daily_summary": daily,
@@ -232,6 +286,7 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             "warnings": [
                 "No automatic approval for AI model training or portfolio/order workflows.",
                 "Missing 5m slots may reflect low liquidity, not a vendor outage.",
+                "Non-aligned NYSE open/close times require boundary-minute review; this 5m lake does not reveal exact included 1m timestamps.",
                 "Adjusted/raw split and dividend semantics require independent verification.",
                 "Historical company identities, IPO/delist dates and universe are not point-in-time certified.",
                 "Source data rights and secondary redistribution permission are not established.",
