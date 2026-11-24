@@ -489,6 +489,114 @@ def evaluate_forecasts(*, subject, as_of, outcomes_file, archive=ARCHIVE):
             "weights_enabled":False}
 
 
+def review_rating_outcomes(*, subject, as_of, outcomes_file, archive=ARCHIVE):
+    """Descriptive association to independently supplied observed returns.
+
+    This is not a backtest, execution simulation or selection model. It uses
+    identical subject/receipt and explicit benchmark observations, never
+    constructs trades from historical recommendations. No certified weights.
+    """
+    cutoff=_time(as_of)
+    rows=visible(as_of=as_of,subject=subject,archive=archive,all_revisions=True)
+    eligible={}
+    for row in rows:
+        if row["evidence_type"]!="original_report" or row["first_available_at"] is None:
+            continue
+        claims=[c["value"] for c in row["claims"] if c["metric"]=="rating"]
+        if len(claims)!=1 or any(c["metric"]=="rating_action" and c["value"]=="withdrawal" for c in row["claims"]):
+            continue
+        eligible[row["receipt_sha256"]]=(row,claims[0])
+    with private_path(Path(outcomes_file),exists=True).open("rb") as handle:
+        raw=handle.read(1024*1024+1)
+    if len(raw)>1024*1024:
+        raise ValueError("Rating outcome file too large")
+    values=json.loads(raw)
+    if not isinstance(values,list) or len(values)>2000:
+        raise ValueError("Invalid rating outcomes")
+    fields={"subject","receipt_sha256","entry_at","exit_at","observed_at",
+            "security_return","market_return","industry_return","cost_bps",
+            "market_benchmark","industry_benchmark","evidence_sha256"}
+    candidates=[]
+    seen=set()
+    for item in values:
+        if not isinstance(item,dict) or set(item)!=fields or item["subject"]!=subject:
+            raise ValueError("Invalid rating outcome contract")
+        receipt=item["receipt_sha256"]
+        if receipt not in eligible or not re.fullmatch(r"[0-9a-f]{64}",item["evidence_sha256"]):
+            raise ValueError("Outcome lacks eligible rating evidence")
+        row,rating=eligible[receipt]
+        entry,exit,observed=(_time(item[k]) for k in ("entry_at","exit_at","observed_at"))
+        known=max(_time(row["first_available_at"]),_time(row["received_at"]))
+        if not known<=entry<exit<=observed or (entry-known).total_seconds()>3*86400:
+            raise ValueError("Rating outcome timing not comparable")
+        horizon=(exit-entry).total_seconds()/86400
+        if not 1<=horizon<=365:
+            raise ValueError("Rating outcome horizon outside limits")
+        bucket="1-30d" if horizon<=30 else "31-90d" if horizon<=90 else "91-365d"
+        key=(receipt,bucket)
+        if key in seen:
+            raise ValueError("Duplicate rating horizon outcome")
+        seen.add(key)
+        if observed>cutoff:
+            continue
+        market=_subject(item["market_benchmark"])
+        industry=_subject(item["industry_benchmark"])
+        if market==subject or industry==subject or market==industry:
+            raise ValueError("Independent benchmark identifiers required")
+        numbers=[]
+        for name in ("security_return","market_return","industry_return","cost_bps"):
+            value=item[name]
+            if not isinstance(value,str) or not re.fullmatch(r"-?[0-9]{1,8}(?:\.[0-9]{1,8})?",value):
+                raise ValueError("Invalid observed return/cost")
+            numbers.append(Decimal(value))
+        security,mkt,sector,cost=numbers
+        if any(not -1<=x<=100 for x in (security,mkt,sector)) or not 0<=cost<=1000:
+            raise ValueError("Observed return/cost outside limits")
+        actor=(row["firm"],row["analyst_id"],bucket,market,industry,rating)
+        # Signed association score, not a trade or actual investment return.
+        direction=_RATING[rating]
+        cost_fraction=cost/10000
+        candidates.append((actor,entry,exit,receipt,item["evidence_sha256"],
+                           float(security-mkt),float(security-sector),
+                           float(direction*(security-mkt)-cost_fraction) if direction else None,
+                           float(direction*(security-sector)-cost_fraction) if direction else None))
+    groups={}
+    last_exit={}
+    overlap=0
+    # Exclude overlapping intervals across ratings by the same analyst and
+    # horizon, even if benchmark or recommendation changes.
+    for item in sorted(candidates,key=lambda x:(x[1],x[2],x[3])):
+        actor,entry,exit,*rest=item
+        key=actor[:3]
+        if key in last_exit and entry<last_exit[key]:
+            overlap+=1
+            continue
+        last_exit[key]=exit
+        groups.setdefault(actor,[]).append(rest)
+    scores=[]
+    for actor,obs in sorted(groups.items()):
+        market_scores=[x[4] for x in obs if x[4] is not None]
+        sector_scores=[x[5] for x in obs if x[5] is not None]
+        # Nonannualized descriptive mean/dispersion; not a Sharpe ratio.
+        disp=pstdev(sector_scores) if len(sector_scores)>=2 else None
+        scores.append({"firm":actor[0],"analyst_id":actor[1],"horizon_bucket":actor[2],
+            "market_benchmark":actor[3],"industry_benchmark":actor[4],"rating":actor[5],
+            "n":len(obs),"market_excess_return_mean":mean(x[2] for x in obs),
+            "industry_excess_return_mean":mean(x[3] for x in obs),
+            "market_signed_net_association":_avg(market_scores),
+            "industry_signed_net_association":_avg(sector_scores),
+            "industry_signed_net_dispersion":disp,
+            "industry_mean_to_dispersion":mean(sector_scores)/disp if disp else None,
+            "evidence_receipts":sorted({x[0] for x in obs}),
+            "outcome_digests":sorted({x[1] for x in obs}),"research_weight":None})
+    return {**FLAGS,"model":"rating_outcome_association_v1","subject":subject,
+            "as_of":cutoff.isoformat(),"scores":scores,"eligible_rating_receipts":len(eligible),
+            "matched_rating_receipts":len({x[3] for x in candidates}),
+            "evaluated":sum(x["n"] for x in scores),"overlaps_excluded":overlap,
+            "outcome_file_sha256":sha256(raw).hexdigest(),"outcomes_independently_verified":False,
+            "selection_bias_controlled":False,"weights_enabled":False}
+
+
 def event_review(*, subject, as_of, context=(), archive=ARCHIVE, holdings=()):
     """Link research with existing normalized news/options/disclosure events.
 
@@ -527,11 +635,13 @@ def main():
     parser.add_argument("--period")
     parser.add_argument("--basis")
     parser.add_argument("--outcomes")
+    parser.add_argument("--rating-outcomes",action="store_true")
     args=parser.parse_args()
     if args.import_metadata:
         result=ingest(args.import_metadata)
     elif args.subject and args.as_of and args.outcomes:
-        result=evaluate_forecasts(subject=args.subject,as_of=args.as_of,outcomes_file=args.outcomes)
+        evaluator=review_rating_outcomes if args.rating_outcomes else evaluate_forecasts
+        result=evaluator(subject=args.subject,as_of=args.as_of,outcomes_file=args.outcomes)
         result.pop("scores")
     elif all((args.subject,args.as_of,args.previous_as_of,args.period,args.basis)):
         result=factors(subject=args.subject,as_of=args.as_of,previous_as_of=args.previous_as_of,

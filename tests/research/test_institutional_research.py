@@ -164,3 +164,30 @@ class InstitutionalTests(unittest.TestCase):
         self.assertEqual(result["values"]["analyst_coverage_change"],-1)
         self.assertIsNone(result["values"]["analyst_consensus"])
         self.assertIsNone(result["values"]["analyst_rating_momentum"])
+
+
+    def test_rating_outcomes_benchmark_cost_overlap_and_cutoff(self):
+        first=self.report()
+        second=self.report("r2",received="2020-01-03",published="2020-01-02",
+                           text="Rating: Buy")
+        rows=ir.visible(as_of="2020-01-04T00:00:00Z",subject="conid:123",all_revisions=True)
+        by_revision={r["revision"]:r["receipt_sha256"] for r in rows}
+        outcome={"subject":"conid:123","receipt_sha256":by_revision[first["revision"]],
+                 "entry_at":"2020-01-03T15:00:00Z","exit_at":"2020-01-20T15:00:00Z",
+                 "observed_at":"2020-01-21T00:00:00Z","security_return":"0.1",
+                 "market_return":"0.03","industry_return":"0.04","cost_bps":"10",
+                 "market_benchmark":"index:market","industry_benchmark":"index:sector",
+                 "evidence_sha256":"b"*64}
+        second_out={**outcome,"receipt_sha256":by_revision[second["revision"]],
+                    "entry_at":"2020-01-04T15:00:00Z","exit_at":"2020-01-21T15:00:00Z",
+                    "observed_at":"2020-01-22T00:00:00Z"}
+        file=Path("local_data/rating_outcomes.json")
+        file.write_text(json.dumps([outcome,second_out]))
+        report=ir.review_rating_outcomes(subject="conid:123",as_of="2020-01-23T00:00:00Z",outcomes_file=file)
+        self.assertEqual(report["evaluated"],1)
+        self.assertEqual(report["overlaps_excluded"],1)
+        self.assertAlmostEqual(report["scores"][0]["industry_signed_net_association"],.059)
+        self.assertFalse(report["approved_for_backtest"])
+        self.assertFalse(report["weights_enabled"])
+        early=ir.review_rating_outcomes(subject="conid:123",as_of="2020-01-19T00:00:00Z",outcomes_file=file)
+        self.assertEqual(early["evaluated"],0)
