@@ -126,7 +126,7 @@ def _cached(month: str, session: str, output: Path, qc: Path) -> dict | None:
         return None
     try:
         data = json.loads(checkpoint.read_text(encoding="utf-8"))
-        if (data["schema"] != SCHEMA or data["monthly_audit_schema"] != hf_stock5m_audit.SCHEMA
+        if (data["schema"] != SCHEMA
                 or data["month"] != month or data["session"] != session
                 or data["parquet_signature"] != _file_signature(output)
                 or data["qc_signature"] != _file_signature(qc)
@@ -136,6 +136,16 @@ def _cached(month: str, session: str, output: Path, qc: Path) -> dict | None:
         if (record["month"] != month or record["status"] not in (REVIEW, STRUCTURAL)
                 or not isinstance(record.get("five_minute_bars"), int)):
             return None
+        audit_schema = data.get("monthly_audit_schema")
+        if audit_schema != hf_stock5m_audit.SCHEMA:
+            # V3 only changes how a cross-venue feed's NYSE partial
+            # boundary-minute overflow is classified. All other V2 audits
+            # remain semantically valid and need not re-scan 25+ GiB.
+            # V1 and unknown schemas must always be re-audited.
+            if (audit_schema != "atlaspm_hf_5m_research_qc_v2"
+                    or "nyse_boundary_minute_count_exceeded" not in record
+                    or int(record["nyse_boundary_minute_count_exceeded"] or 0) != 0):
+                return None
         return record
     except (OSError, ValueError, TypeError, KeyError):
         return None
