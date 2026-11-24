@@ -194,6 +194,35 @@ class V3DuckDB(V3Contracts):
         self.assertTrue(res["industry_neutralization_state"].startswith("APPLIED"))
         self.assertFalse(res["industry_classifications_verified"])
 
+    def test_neutralization_removes_daily_group_level(self):
+        self._generate()
+        mapping = self._industry()
+        cfg = factor_v3._validate(
+            start="2026-01-05",end="2026-01-30",factors=["mom_5d"],
+            horizon=1,holdout_start=None,weighting="equal",
+            neutralize_industry=True,industry_csv=mapping,
+            min_group_size=2,winsor_tail=0.0,redundancy_threshold=0.85,
+            min_symbols=5,min_dates=2,min_bars=60,min_minute_fraction=0.85,
+            source="hf",session="rth")
+        con = factor_db._db("256MB",1)
+        try:
+            files = [factor_db._path("2026-01","hf","rth","factors")]
+            con.execute("CREATE TEMP TABLE v3_raw AS SELECT * FROM " +
+                        factor_db._files_sql(files))
+            sector_rows,_ = factor_v3._map_rows(mapping)
+            factor_v3._base(con,cfg,sector_rows)
+            factor_v3._normalize(con,cfg)
+            means = con.execute(
+                """SELECT trade_date,industry,avg(z_mom_5d)
+                   FROM v3_norm
+                   WHERE trade_date BETWEEN DATE '2026-01-05'
+                                        AND DATE '2026-01-30'
+                   GROUP BY 1,2""").fetchall()
+            self.assertGreater(len(means),20)
+            self.assertTrue(all(abs(mean) < 1e-9 for _,_,mean in means))
+        finally:
+            con.close()
+
     def test_train_ic_weights_and_holdout_purge(self):
         self._generate()
         kwargs = {**self._kwargs(), "factors": ["mom_5d", "intraday_range"],
