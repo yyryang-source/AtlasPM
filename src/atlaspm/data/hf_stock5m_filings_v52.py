@@ -286,7 +286,12 @@ def collect(ciks,start,end,kind,limit=20,*,fetch=False,max_requests=20):
                 ev._json(manifest,{"source_url":url,"sha256":digest,"retrieved_utc":ev.now()})
             result = extract(data,filing)
             item = {**filing,"sha256":digest,**result,"status":"REVIEW_REQUIRED"}
-            ev._json(BASE / "hints" / (key+"-"+digest+"-"+filing["form"].replace("/","_")+".json"),item)
+            # Two concatenated SHA-256 hashes plus the local root can exceed
+            # Windows MAX_PATH (including the atomic writer's .part suffix).
+            # Hash the full identity once, keeping every provenance field in JSON.
+            hint_key = ev._sha(json.dumps([url,digest,filing["cik"],filing["form"],
+                                           filing["filed_date"]],separators=(",",":")).encode())
+            ev._json(BASE / "hints" / (hint_key+".json"),item)
             report["results"].append({**filing,"sha256":digest,
                                      "hint_count":len(result["hints"]),"truncated":result["truncated"],
                                      "multiple_ratio_candidates":result["multiple_ratio_candidates"],
