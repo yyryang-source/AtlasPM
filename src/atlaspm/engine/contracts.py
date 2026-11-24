@@ -93,6 +93,9 @@ class Holding:
             raise ValueError("INVALID_HOLDING_IDENTITY")
         if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError(f"INVALID_HOLDING_SHARES:{symbol}")
+        mark_age = finite(value.get("mark_age_seconds", 0), "mark_age_seconds", minimum=0)
+        if mark_age > 120 or value.get("mark_source", "synthetic") != "synthetic":
+            raise ValueError(f"STALE_OR_UNVERIFIED_HOLDING_MARK:{symbol}")
         return cls(symbol, qty, finite(value.get("mark_price"), "mark_price", minimum=0.000001), sector)
 
 
@@ -119,6 +122,11 @@ class Account:
         kind = value.get("account_type")
         if not isinstance(account_id, str) or not account_id.strip() or kind not in {"cash", "margin"}:
             raise ValueError("INVALID_ACCOUNT_ID_OR_TYPE")
+        if value.get("currency", "USD") != "USD":
+            raise ValueError("V1_ACCOUNT_USD_ONLY")
+        for name in ("unsettled_receivable", "unsettled_payable"):
+            if finite(value.get(name, 0), name, minimum=0) > 0:
+                raise ValueError("UNSETTLED_ACCOUNT_BALANCES_REQUIRE_FULL_LEDGER_ADAPTER")
         positions = value.get("positions")
         if not isinstance(positions, list):
             raise ValueError("positions: expected list")
