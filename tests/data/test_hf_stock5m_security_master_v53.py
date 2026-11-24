@@ -128,6 +128,25 @@ class SecurityMasterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
 
+    def test_visible_returns_uses_actual_ledger(self):
+        from atlaspm.data import hf_stock5m_visible_returns_v59 as returns
+        self.ingest(self.pair("listing",self.identity())+
+                    self.pair("split",self.action(),known="2020-02-20",kind="ACTION"))
+        path=Path("local_data/marks.jsonl")
+        path.write_text(json.dumps(dict(security_id="ID1",start_date="2020-02-01",
+            end_date="2020-03-31",start_symbol="ABC",end_symbol="ABC",
+            start_close="100",end_close="55")),encoding="utf-8")
+        with self.assertRaises(ValueError):
+            returns.run(path,"2020-04-01")
+        result=returns.run(path,"2020-04-01",raw_unadjusted=True)
+        self.assertEqual(result["rows_computed"],1)
+        self.assertEqual(result["results"][0]["visible_action_return_no_reinvestment"],"0.1")
+        self.assertFalse(result["approved_for_model_training"])
+        self.ingest([self.claim("conflict",self.identity("ID2"),"A")])
+        blocked=returns.run(path,"2020-04-01",raw_unadjusted=True)
+        self.assertEqual(blocked["rows_computed"],0)
+        self.assertEqual(blocked["results"][0]["reason"],"UNRESOLVED_VISIBLE_LEDGER_CLAIMS")
+
     def test_cash_exit_and_unknown_identity(self):
         self.ingest(self.pair("listing",self.identity(end="2020-03-01"))+
                     self.pair("exit",self.action("CASH_EXIT","12.50"),kind="ACTION"))
