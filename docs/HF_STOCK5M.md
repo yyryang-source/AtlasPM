@@ -738,3 +738,53 @@ must still be supplied.
 Local output: local_data/stock_5m/huggingface/quality/certification_v5/discovery_v54/
 (daily/, queues/YYYY-MM.json, latest.json). V5.2 index must be built
 before meaningful filing selection; missing quarters are reported.
+
+
+## V5.5 retrospective evidence matching
+
+This command combines V5.4 monthly discovery and V5.2 targeted filing
+collection, then reopens hash-verified original SEC bodies. It compares
+issuer/accession headers, explicit effective-date and ticker wording,
+split ratio (new shares / old shares), and the observed overnight
+price ratio. A 15% provisional residual-price tolerance is diagnostic,
+not independent confirmation. Uncertain wording, incompatible ratios,
+and incomplete or mismatched headers remain review items.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-match-v55 --start-month 2026-03 --end-month 2026-03
+# With ATLASPM_SEC_USER_AGENT configured, explicitly allow bounded downloads:
+& $py -m atlaspm.cli market-db hf-5m-match-v55 --start-month 2026-03 --end-month 2026-03 --fetch --max-requests 20
+~~~
+
+The V5.2 index must already exist with relevant quarters imported.
+A date range processes one month at a time and persists each report.
+Reruns reuse validated daily and SEC body caches, but recompute review
+results rather than blindly trusting previous checkpoints. A global
+network budget applies; failed network attempts or uncertain failures
+stop subsequent network requests for the run. The strongest bounded
+candidate set is investigated, not the entire historical event universe.
+Reported coverage counts are discovery counts, not certified market
+coverage. Offline runs make no requests.
+
+Optional --reference-jsonl accepts externally reviewed split assertions,
+one JSON object per line under local_data, with fields symbol,
+effective_date, new_over_old_shares (positive integer fraction string
+such as 1/25), security_id, source_family, source_url, evidence_path,
+evidence_sha256, known_date. The HTTPS source must be non-SEC, with
+original locally retained bytes outside the certification pipeline.
+The engine verifies hashes, compares ratios and flags conflicts, but
+does not authenticate publisher independence or prove the supplied
+historical share-class mapping. No optional reference is synthesized.
+
+The output directory is
+local_data/stock_5m/huggingface/quality/certification_v5/matching_v55/
+with months/YYYY-MM.json and latest.json. Evidence paths and excerpts
+are for local review. No claim is automatically approved or ingested.
+After actual source review, use V5.3's existing reviewed-claims JSONL
+ingest, with separate known dates and documented security identity.
+Do not equate a filing date or retrospective agreement with earlier
+knowledge. Primary-form regex matching misses many legitimate events;
+dividend, merger, exit and ticker-change terms need separate validation.
+No full-history completeness, source independence, price adjustment
+semantics, rights, training or trading authorization is inferred.
