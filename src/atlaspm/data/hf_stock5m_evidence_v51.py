@@ -91,37 +91,65 @@ def quarters(start, end):
             y, q = y+1, 1
 
 
+class EvidenceParseError(ValueError):
+    """A response-specific parse failure, not a provider access restriction."""
+
+
 def parse_sec_index(data, quarter):
-    # Historical SEC indexes may use Latin-1. Preserve the original bytes.
-    text = data.decode("latin-1")
+    # Historical SEC indexes may use Latin-1. Preserve original bytes.
     header = "CIK|Company Name|Form Type|Date Filed|Filename"
-    lines = iter(StringIO(text))
-    for line in lines:
+    lines = enumerate(StringIO(data.decode("latin-1")), 1)
+    for _, line in lines:
         if line.strip() == header:
             break
     else:
-        raise ValueError("SEC master index header missing")
-    total, candidates = 0, []
-    for line in lines:
+        raise EvidenceParseError("SEC master index header missing")
+    total, rejected, candidates = 0, 0, []
+    reasons, examples = {}, []
+    for line_no, line in lines:
         line = line.strip()
         if not line or set(line) == {"-"}:
             continue
         parts = line.split("|")
+        reason = None
         if len(parts) != 5:
-            raise ValueError("Malformed SEC master index row")
-        cik, name, form, filed, path = parts
-        d = date.fromisoformat(filed)
-        if (not cik.isdigit() or not name or not form
-            or f"{d.year}-Q{(d.month-1)//3+1}" != quarter
-            or not re.fullmatch(r"edgar/data/\d+/[0-9-]+\.txt", path)):
-            raise ValueError("Invalid SEC filing reference")
+            reason = "MALFORMED_COLUMNS"
+        else:
+            cik, name, form, filed, path = parts
+            try:
+                d = date.fromisoformat(filed)
+                if d.isoformat() != filed:
+                    raise ValueError("Noncanonical date")
+            except ValueError:
+                reason = "INVALID_FILED_DATE"
+            else:
+                if not re.fullmatch(r"[0-9]+", cik) or not name or not form:
+                    reason = "INVALID_FILING_FIELDS"
+                elif not re.fullmatch(r"edgar/data/[0-9]+/[0-9-]+\.txt", path):
+                    reason = "INVALID_ARCHIVE_PATH"
+                elif f"{d.year}-Q{(d.month-1)//3+1}" != quarter:
+                    reason = "OUTSIDE_REQUESTED_QUARTER"
+        if reason:
+            rejected += 1
+            reasons[reason] = reasons.get(reason, 0) + 1
+            if len(examples) < 25:
+                examples.append({"line": line_no, "reason": reason, "raw_row": line[:1000]})
+            continue
         total += 1
         if form in FORMS:
             candidates.append({"cik": cik.zfill(10), "issuer": name, "form": form,
                                "filed_date": filed, "source_url": "https://www.sec.gov/Archives/" + path})
-    if not total:
-        raise ValueError("Empty SEC master index")
-    return {"filings": total, "candidate_filings": len(candidates)}, candidates
+    # A substantially damaged or wholly wrong-quarter file remains blocked.
+    # Isolated invalid rows are omitted from candidate output, retained in raw
+    # bytes, and explicitly flagged for review (never certified).
+    if not total or rejected > 100 or rejected / (total + rejected) > 0.001:
+        raise EvidenceParseError(f"SEC index quality failed: valid={total}, rejected={rejected}, "
+                                 f"reasons={reasons}, examples={examples[:3]}")
+    stats = {"filings": total, "candidate_filings": len(candidates)}
+    if rejected:
+        stats.update({"raw_filing_rows": total + rejected, "rejected_rows": rejected,
+                      "rejection_reasons": reasons, "rejection_examples": examples})
+    return stats, candidates
 
 
 def parse_sec_tickers(data):
@@ -231,11 +259,17 @@ def _collect(task, agent, key, refresh, before_request):
         retrieved = now()
         digest = _sha(data)
         cached = False
-    stats, rows = _parse(name, data, retrieved)
     raw = BASE / "objects" / (digest+".bin")
     normalized = BASE / "candidates" / (cache_key+"-"+digest+".json")
     if not cached:
         _write(raw, data)
+    try:
+        stats, rows = _parse(name, data, retrieved)
+    except EvidenceParseError as exc:
+        _json(BASE / "rejected" / (cache_key+"-"+digest+".json"),
+              {"task": name, "source_url": url, "retrieved_utc": retrieved,
+               "sha256": digest, "raw_path": str(private_path(raw)), "detail": str(exc)})
+        raise
     _json(normalized, rows)
     manifest = {"task": name, "scope": scope, "source_url": url,
                 "retrieved_utc": retrieved, "sha256": digest,
@@ -282,14 +316,24 @@ def run(start="2000-Q1", end="2026-Q1", *, listing_dates=None, current=True,
                 time.sleep(0.25 if not task[0].startswith("av-") else 1.0)
         except RequestBudgetReached:
             break
+        except EvidenceParseError as exc:
+            # A malformed quarterly response must not halt unrelated quarters.
+            report["results"].append({"task":task[0], "error":type(exc).__name__,
+                                      "detail":str(exc)})
+            time.sleep(0.25)
         except Exception as exc:
             blocked.add(provider)
             report["results"].append({"task":task[0], "error":type(exc).__name__,
                                       "detail":str(exc) if isinstance(exc, ValueError) else "Collection failed"})
     report["blocked_providers"] = sorted(blocked)
     report["tasks_completed"] = sum("sha256" in x for x in report["results"])
-    report["status"] = ("CANDIDATES_COLLECTED" if report["tasks_completed"] == len(tasks)
-                        else "PARTIAL_OR_BLOCKED")
+    report["tasks_with_rejected_rows"] = [x["task"] for x in report["results"]
+                                          if x.get("stats", {}).get("rejected_rows", 0)]
+    report["total_rejected_rows"] = sum(x.get("stats", {}).get("rejected_rows", 0)
+                                        for x in report["results"])
+    report["status"] = ("PARTIAL_OR_BLOCKED" if report["tasks_completed"] != len(tasks)
+                        else "CANDIDATES_COLLECTED_WITH_REVIEW" if report["tasks_with_rejected_rows"]
+                        else "CANDIDATES_COLLECTED")
     report["summary_path"] = str(private_path(BASE / "latest.json"))
     _json(BASE / "latest.json", report)
     return report
