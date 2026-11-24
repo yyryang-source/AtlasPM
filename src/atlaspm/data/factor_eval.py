@@ -141,17 +141,25 @@ def _eligible(alias: str, c: dict) -> str:
             f"{fraction} * 5 * {alias}.observed_5m_bars, false)")
 
 
-def _dated_sql(name: str, horizon: int, config: dict) -> str:
-    # name is whitelisted by _config, horizon is one of four fixed integers.
-    # A world-calendar index is used, NOT the symbol's next observed bar.
-    # This avoids "next trade" changing from one security to another.
-    signal_elig = _eligible("s", config)
-    entry_elig = _eligible("en", config)
-    exit_elig = _eligible("ex", config)
+def _forward_label_sql(horizon: int, config: dict, *, version: str) -> str:
+    """Common global-calendar forward returns, independent of factor validity.
+
+    V2 requires all three price rows to pass quality; V3 uses its already
+    filtered base table. The raw calendar is never filtered by stock eligibility.
+    """
+    if type(horizon) is not int or horizon not in HORIZONS:
+        raise ValueError("Invalid evaluation horizon")
+    if version == "v2":
+        raw = prices = "eval_prices"
+        checks = " AND ".join(_eligible(alias, config) for alias in ("s","en","ex"))
+    elif version == "v3":
+        raw, prices, checks = "v3_raw", "v3_base", "TRUE"
+    else:
+        raise ValueError("Invalid factor label source")
     return f"""
     WITH days0 AS (
       SELECT trade_date, lag(trade_date) OVER (ORDER BY trade_date) AS prev_date
-      FROM (SELECT DISTINCT trade_date FROM eval_prices)
+      FROM (SELECT DISTINCT trade_date FROM {raw})
     ), calendar AS (
       SELECT trade_date,
              row_number() OVER (ORDER BY trade_date)-1 AS seq,
@@ -163,21 +171,46 @@ def _dated_sql(name: str, horizon: int, config: dict) -> str:
                OVER (ORDER BY trade_date ROWS BETWEEN 1 FOLLOWING
                      AND {horizon+1} FOLLOWING) AS future_missing_periods
       FROM days0
-    ), pairs AS (
+    )
+    SELECT s.symbol, s.trade_date, d.exit_day AS label_exit,
+           ex.close::DOUBLE/en.close::DOUBLE-1 AS forward_ret
+    FROM {prices} s
+    JOIN calendar d ON s.trade_date=d.trade_date
+    JOIN {prices} en ON en.symbol=s.symbol AND en.trade_date=d.entry_day
+    JOIN {prices} ex ON ex.symbol=s.symbol AND ex.trade_date=d.exit_day
+    WHERE s.trade_date BETWEEN ? AND ?
+      AND d.seq % {horizon}=0
+      AND d.future_missing_periods=0
+      AND d.entry_day IS NOT NULL AND d.exit_day IS NOT NULL
+      AND en.close>0 AND ex.close>0 AND {checks}
+      AND isfinite(ex.close::DOUBLE/en.close::DOUBLE-1)
+    """
+
+
+def _materialize_forward_labels(con, horizon: int, config: dict, *, version: str) -> None:
+    """Keep only one horizon's compact key/return relation in the database."""
+    con.execute("DROP TABLE IF EXISTS factor_forward_labels")
+    con.execute("CREATE TEMP TABLE factor_forward_labels AS " +
+                _forward_label_sql(horizon, config, version=version),
+                [config["start"], config["end"]])
+
+
+def _dated_sql(name: str, horizon: int, config: dict, *, materialized: bool = False) -> str:
+    if name not in factor_db.FEATURES:
+        raise ValueError("Invalid evaluation factor")
+    if type(horizon) is not int or horizon not in HORIZONS:
+        raise ValueError("Invalid evaluation horizon")
+    # Keep the standalone diagnostic SQL interface for parity tests. Normal
+    # evaluation materializes the same labels once per horizon.
+    labels = ("SELECT * FROM factor_forward_labels" if materialized else
+              _forward_label_sql(horizon, config, version="v2"))
+    return f"""
+    WITH labels AS ({labels}), pairs AS (
       SELECT s.symbol, s.trade_date,
              s.{name}::DOUBLE AS factor_value,
-             ex.close::DOUBLE/en.close::DOUBLE-1 AS future_return
-      FROM eval_prices s
-      JOIN calendar d ON s.trade_date=d.trade_date
-      JOIN eval_prices en ON en.symbol=s.symbol AND en.trade_date=d.entry_day
-      JOIN eval_prices ex ON ex.symbol=s.symbol AND ex.trade_date=d.exit_day
-      WHERE s.trade_date BETWEEN ? AND ?
-        AND d.seq % {horizon}=0
-        AND d.future_missing_periods=0
-        AND d.entry_day IS NOT NULL AND d.exit_day IS NOT NULL
-        AND s.{name} IS NOT NULL AND isfinite(s.{name})
-        AND en.close>0 AND ex.close>0
-        AND {signal_elig} AND {entry_elig} AND {exit_elig}
+             l.forward_ret AS future_return
+      FROM eval_prices s JOIN labels l USING (symbol,trade_date)
+      WHERE s.{name} IS NOT NULL AND isfinite(s.{name})
     ), ranked AS (
       SELECT *,
         rank() OVER (PARTITION BY trade_date ORDER BY factor_value)
@@ -245,7 +278,7 @@ def evaluate(*, start: str, end: str, source: str = "hf", session: str = "rth",
                           "This does not authorize ML training or trading."}
     con = factor_db._db(memory, threads)
     try:
-        select_columns = ", ".join(factor_db.FEATURES)
+        select_columns = ", ".join(c["factors"])
         con.execute("CREATE TEMP TABLE eval_prices AS "
                     "SELECT symbol,trade_date,close,observed_5m_bars,observed_1m_bars,"
                     f"{select_columns} FROM {factor_db._files_sql(paths)}")
@@ -261,10 +294,11 @@ def evaluate(*, start: str, end: str, source: str = "hf", session: str = "rth",
             raise ValueError("Duplicate symbol/date across factor inputs")
         reports = []
         for horizon in c["horizons"]:
+            _materialize_forward_labels(con, horizon, c, version="v2")
             for name in c["factors"]:
-                result = con.execute(_dated_sql(name, horizon, c),
-                                     [c["start"], c["end"]])
-                daily = [dict(zip([col[0] for col in result.description], row))
+                result = con.execute(_dated_sql(name, horizon, c, materialized=True))
+                columns = [col[0] for col in result.description]
+                daily = [dict(zip(columns, row))
                          for row in result.fetchall()]
                 for day in daily:
                     day["trade_date"] = day["trade_date"].isoformat()
