@@ -7,7 +7,6 @@ import hashlib
 from io import StringIO
 import json
 import os
-from pathlib import Path
 import re
 import time
 from urllib.error import HTTPError
