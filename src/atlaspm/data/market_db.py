@@ -360,6 +360,30 @@ def register_parser(sub):
     e.add_argument('--threads', type=int, default=4)
     e.add_argument('--exploratory', action='store_true')
     e.add_argument('--no-save', action='store_true')
+    v = actions.add_parser('factor-v3-analyze',
+        help='V3 descriptive factor normalization, correlation, neutralization and composite IC')
+    v.add_argument('--start', required=True)
+    v.add_argument('--end', required=True)
+    v.add_argument('--source', choices=['hf', 'sqlite'], default='hf')
+    v.add_argument('--session', choices=['rth'], default='rth')
+    v.add_argument('--factors', nargs='+', default=None)
+    v.add_argument('--horizon', type=int, choices=[1, 5, 21, 63], default=1)
+    v.add_argument('--holdout-start', default=None)
+    v.add_argument('--weighting', choices=['equal', 'ic_train'], default='equal')
+    v.add_argument('--neutralize-industry', action='store_true')
+    v.add_argument('--industry-csv', type=Path, default=None)
+    v.add_argument('--min-group-size', type=int, default=5)
+    v.add_argument('--winsor-tail', type=float, default=0.01)
+    v.add_argument('--redundancy-threshold', type=float, default=0.85)
+    v.add_argument('--min-symbols', type=int, default=30)
+    v.add_argument('--min-dates', type=int, default=8)
+    v.add_argument('--min-bars', type=int, default=60)
+    v.add_argument('--min-minute-fraction', type=float, default=0.85)
+    v.add_argument('--memory', default='4GB')
+    v.add_argument('--threads', type=int, default=4)
+    v.add_argument('--exploratory', action='store_true')
+    v.add_argument('--no-save', action='store_true')
+    v.add_argument('--save-scores', action='store_true')
     for action in ('import-stocks','import-option-contracts','import-option-bars','import-treasury'):
         q = actions.add_parser(action)
         q.add_argument('--input',type=Path,action='append',default=[])
@@ -369,6 +393,19 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action == 'factor-v3-analyze':
+        from atlaspm.data import factor_v3
+        return factor_v3.analyze(
+            start=args.start, end=args.end, source=args.source, session=args.session,
+            factors=args.factors, horizon=args.horizon, holdout_start=args.holdout_start,
+            weighting=args.weighting, neutralize_industry=args.neutralize_industry,
+            industry_csv=args.industry_csv, min_group_size=args.min_group_size,
+            winsor_tail=args.winsor_tail,
+            redundancy_threshold=args.redundancy_threshold,
+            min_symbols=args.min_symbols, min_dates=args.min_dates,
+            min_bars=args.min_bars, min_minute_fraction=args.min_minute_fraction,
+            memory=args.memory, threads=args.threads, exploratory=args.exploratory,
+            save=not args.no_save, save_scores=args.save_scores)
     if args.db_action == 'factor-evaluate':
         from atlaspm.data import factor_eval
         return factor_eval.evaluate(
