@@ -173,7 +173,11 @@ def load_reference(filename):
 def review(queue,investigation,reference=None):
     indexed={e["event_id"]:e for e in queue["candidates"]}
     outcomes=[]
+    seen=set()
     for row in investigation["results"]:
+        if row["event_id"] in seen:
+            raise ValueError("Duplicate investigation event")
+        seen.add(row["event_id"])
         event=indexed.get(row["event_id"])
         if not event or event["symbol"]!=row["symbol"] or event["date"]!=row["date"]:
             raise ValueError("Investigation does not match market queue")
@@ -252,6 +256,7 @@ def run(start="2026-03",end="2026-03",*,threshold=1.5,limit=200,max_events=10,
             detail={"month":month,"status":"REVIEW_REQUIRED","total_detected":q["total_detected"],
                     "queued":q["candidate_count"],"queue_truncated":q["truncated"],
                     "events_considered":len(outcomes),
+                    "filings_parsed":sum(x.get("filings_parsed",0) for x in inv["results"]),
                     "unambiguous_current_leads":inv["unambiguous_current_leads"],
                     "status_counts":counts,"investigation":inv,"outcomes":outcomes}
             target=BASE/"months"/(month+".json")
@@ -268,6 +273,10 @@ def run(start="2026-03",end="2026-03",*,threshold=1.5,limit=200,max_events=10,
     report["months_completed"]=sum(x["status"]!="ERROR" for x in report["months"])
     report["events_detected"]=sum(x.get("total_detected",0) for x in report["months"])
     report["events_considered"]=sum(x.get("events_considered",0) for x in report["months"])
+    report["filing_parse_observations"]=sum(x.get("filings_parsed",0) for x in report["months"])
+    report["events_queued"]=sum(x.get("queued",0) for x in report["months"])
+    report["detected_events_not_considered"]=report["events_detected"]-report["events_considered"]
+    report["complete_historical_event_coverage_verified"]=False
     report["status_counts"]=dict(sum((Counter(x.get("status_counts",{})) for x in report["months"]),Counter()))
     report["certified_events"]=0
     report["claims_ingested"]=0
