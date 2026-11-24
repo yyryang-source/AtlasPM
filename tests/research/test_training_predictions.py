@@ -27,6 +27,24 @@ class ArchiveTests(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_keyset_pages_release_read_transactions(self):
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                archive=PredictionArchive('local_data/p.sqlite3')
+                rows=[dict(date='2020-01-02',security_id=f'SYN:{i:04}',label_end_date='2020-01-03',actual=.1,prediction=.05) for i in range(23)]
+                archive.append('ridge',rows)
+                stream=archive.rows('ridge',page_size=4)
+                first=next(stream)
+                archive.append('ensemble',rows)
+                with closing(sqlite3.connect(archive.path)) as con:
+                    self.assertEqual(con.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0],0)
+                self.assertEqual([first,*stream],rows)
+                self.assertEqual(list(archive.rows('ensemble',page_size=3)),rows)
+            finally:
+                os.chdir(cwd)
+
     def test_lifecycle(self):
         cwd=Path.cwd()
         with tempfile.TemporaryDirectory() as tmp:

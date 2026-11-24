@@ -96,14 +96,22 @@ class CompactSamples(Sequence):
             i+=len(self)
         if not 0<=i<len(self):
             raise IndexError(i)
+        row=self.metadata_at(i)
+        start=i*self.feature_count
+        row["x"]=self.features[start:start+self.feature_count].tolist()
+        return row
+
+    def metadata_at(self,i):
+        if i<0:
+            i+=len(self)
+        if not 0<=i<len(self):
+            raise IndexError(i)
         signal=self.session[i]
         end=signal+self.horizon
         y=self.labels[i]
-        start=i*self.feature_count
         return dict(security_id=self.identities[self.security[i]],
                     signal_index=signal,label_end_index=end,
                     date=self.dates[signal],label_end_date=self.dates[end],
-                    x=self.features[start:start+self.feature_count].tolist(),
                     y=None if isnan(y) else y)
 
     def signal_at(self,i):
@@ -131,6 +139,16 @@ class IndexedRows(Sequence):
         if isinstance(i,slice):
             return IndexedRows(self.source,self.indices[i])
         return self.source[self.indices[i]]
+
+
+    def metadata(self):
+        """Iterate keys and labels without fetching feature vectors."""
+        getter=getattr(self.source,"metadata_at",None)
+        if getter is None:
+            yield from self
+        else:
+            for index in self.indices:
+                yield getter(index)
 
 
 class IndexPrefix(Sequence):

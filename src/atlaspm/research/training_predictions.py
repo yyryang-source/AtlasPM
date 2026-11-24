@@ -41,11 +41,39 @@ class PredictionArchive:
                 raise ValueError("PREDICTION_ARCHIVE_FINALIZED")
             con.executemany("INSERT INTO forecasts VALUES (?,?,?,?,?,?)",values())
 
-    def rows(self,model):
+    def rows(self,model,*,page_size=4096):
+        """Read immutable model rows in keyset pages, without pinning a WAL snapshot.
+
+        Call after all writes to the requested model are complete. Other models
+        can be appended by the same research run while this iterator is open.
+        """
+        if type(page_size) is not int or not 1<=page_size<=65536:
+            raise ValueError("INVALID_PREDICTION_PAGE_SIZE")
         with closing(sqlite3.connect(self.path,timeout=30)) as con:
-            for day,sid,end,actual,prediction in con.execute(
-                "SELECT date,security_id,label_end_date,actual,prediction FROM forecasts WHERE model=? ORDER BY date,security_id",(model,)):
-                yield dict(date=day,security_id=sid,label_end_date=end,actual=actual,prediction=prediction)
+            upper=con.execute(
+                "SELECT date,security_id FROM forecasts WHERE model=? ORDER BY date DESC,security_id DESC LIMIT 1",
+                (model,)).fetchone()
+            if upper is None:
+                return
+            last=None
+            while True:
+                if last is None:
+                    page=con.execute("""SELECT date,security_id,label_end_date,actual,prediction
+                        FROM forecasts WHERE model=? AND (date,security_id)<=(?,?)
+                        ORDER BY date,security_id LIMIT ?""",(model,*upper,page_size)).fetchall()
+                else:
+                    page=con.execute("""SELECT date,security_id,label_end_date,actual,prediction
+                        FROM forecasts WHERE model=? AND (date,security_id)>(?,?)
+                        AND (date,security_id)<=(?,?) ORDER BY date,security_id LIMIT ?""",
+                        (model,*last,*upper,page_size)).fetchall()
+                if not page:
+                    break
+                last=page[-1][:2]
+                # fetchall ends the SQLite statement before yielding to callers.
+                for day,sid,end,actual,prediction in page:
+                    yield dict(date=day,security_id=sid,label_end_date=end,actual=actual,prediction=prediction)
+                if last==upper:
+                    break
 
     def finalize(self):
         with closing(sqlite3.connect(self.path,timeout=30)) as con,con:

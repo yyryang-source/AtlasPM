@@ -14,6 +14,15 @@ class ModelSelectionTests(unittest.TestCase):
     def test_baseline_subset(self):
         out=train(fixture(),minimum_train_sessions=10,models=["historical_mean"])
         self.assertEqual(set(out["metrics"]),{"historical_mean"})
+        self.assertTrue(all(f["coefficients"] is None for f in out["folds"]))
+        self.assertTrue(all(f["feature_mean"] is None for f in out["folds"]))
+
+    def test_mean_only_skips_ridge_and_feature_materialization(self):
+        from unittest.mock import patch
+        with patch("numpy.linalg.solve",side_effect=AssertionError("unselected ridge")):
+            out=train(fixture(),minimum_train_sessions=10,models=["historical_mean"])
+        for fold in out["folds"]:
+            self.assertEqual(fold["array_resident_bytes"],fold["training_rows"]*8)
 
 
 @unittest.skipUnless(all(find_spec(m) for m in ("numpy","sklearn","lightgbm","xgboost","catboost")),

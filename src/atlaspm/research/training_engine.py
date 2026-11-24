@@ -182,6 +182,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     if incremental_ridge:
         from atlaspm.research.training_models import ExpandingRidge
         incremental=ExpandingRidge(len(panel['feature_names']))
+    tabular_required=any(m not in SEQUENCE_MODELS and m!='historical_mean' for m in models)
+    ridge_required='ridge' in models
     resumed=0
     # Validate resource settings even when every fold is cached.
     FoldArrays(array_budget_mib,spill_dir)
@@ -193,7 +195,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         if cached is not None:
             if set(cached["predictions"])!=set(models):
                 raise ValueError("CHECKPOINT_MODEL_MISMATCH")
-            expected=[(r["security_id"],r["date"],r["label_end_date"],r["y"]) for r in IndexedRows(samples,fold["test"])]
+            expected=[(r["security_id"],r["date"],r["label_end_date"],r["y"]) for r in IndexedRows(samples,fold["test"]).metadata()]
             for name, rows in cached["predictions"].items():
                 if [(r["security_id"],r["date"],r["label_end_date"],r["actual"]) for r in rows]!=expected:
                     raise ValueError("CHECKPOINT_SAMPLE_MISMATCH")
@@ -219,29 +221,32 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             fold_predictions={m:[] for m in models}
             train_rows=IndexedRows(samples,fold["train"])
             test_rows=IndexedRows(samples,fold["test"])
-            x=y=z=block=None
+            x=y=z=block=test=ridge=mean=scale=coef=None
             if incremental is not None:
                 mean,scale,coef,intercept=incremental.solve(alpha)
             else:
-                x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
-                y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
-                mean=x.mean(axis=0)
-                x-=mean
-                # Compute variance on centered data in bounded blocks, not a full-size temporary.
-                squared=np.zeros(x.shape[1],dtype=np.float64)
-                for start in range(0,len(x),4096):
-                    block=x[start:start+4096]
-                    squared+=np.einsum("ij,ij->j",block,block)
-                scale=np.sqrt(squared/len(x))
-                scale=np.where(scale>1e-12,scale,1.)
-                x/=scale
-                z=x
+                y=arrays.rows(train_rows.metadata(),(len(train_rows),),lambda r:r["y"])
                 intercept=float(y.mean())
-                coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
-            test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
-            test-=mean
-            test/=scale
-            ridge=test@coef+intercept
+                if tabular_required:
+                    x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
+                    mean=x.mean(axis=0)
+                    x-=mean
+                    squared=np.zeros(x.shape[1],dtype=np.float64)
+                    for start in range(0,len(x),4096):
+                        block=x[start:start+4096]
+                        squared+=np.einsum("ij,ij->j",block,block)
+                    scale=np.sqrt(squared/len(x))
+                    scale=np.where(scale>1e-12,scale,1.)
+                    x/=scale
+                    z=x
+                    if ridge_required:
+                        coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
+            if tabular_required:
+                test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
+                test-=mean
+                test/=scale
+                if ridge_required:
+                    ridge=test@coef+intercept
             sequence_train=sequence_test=None
             artifact_ids={}
             for name in models:
@@ -276,9 +281,10 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                         snapshot_settings=settings
                         length=sequence_length
                     else:
-                        weights=({'coefficients':coef.tolist() if name=='ridge' else [0.]*len(mean)}
+                        weights=({'coefficients':coef.tolist() if name=='ridge' else [0.]*len(panel['feature_names'])}
                                  if name in ('ridge','historical_mean') else saved_weights)
-                        snapshot_settings=dict(feature_mean=mean.tolist(),feature_scale=scale.tolist(),intercept=intercept)
+                        snapshot_settings=dict(feature_mean=mean.tolist() if mean is not None else [0.]*len(panel["feature_names"]),
+                                               feature_scale=scale.tolist() if scale is not None else [1.]*len(panel["feature_names"]),intercept=intercept)
                         length=1
                     artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,
                         dataset_sha256=fingerprint,fold_index=fold_index,feature_names=panel['feature_names'],
@@ -290,7 +296,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 if len(values)!=len(test_rows):
                     raise ValueError('MODEL_OUTPUT_ROW_COUNT_MISMATCH:'+name)
                 model_settings[name]=settings
-                for row,value in zip(test_rows,values):
+                for row,value in zip(test_rows.metadata(),values):
                     base={k:row[k] for k in ("security_id","date","label_end_date")}
                     base["actual"]=row["y"]
                     fold_predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
@@ -298,8 +304,9 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                               test_end=panel["dates"][fold["test_end_index"]],
                               latest_train_label=panel["dates"][fold["latest_training_label_end"]],
                               training_rows=len(train_rows),test_rows=len(test_rows),
-                              feature_mean=mean.tolist(),feature_scale=scale.tolist(),
-                              coefficients=coef.tolist(),intercept=intercept,
+                              feature_mean=mean.tolist() if mean is not None else None,
+                              feature_scale=scale.tolist() if scale is not None else None,
+                              coefficients=coef.tolist() if coef is not None else None,intercept=intercept,
                               model_settings=dict(model_settings),
                               array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
             if incremental is not None:
