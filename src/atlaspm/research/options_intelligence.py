@@ -171,7 +171,10 @@ def fetch_alerts(*, ticker=None, limit=100, min_premium=100000, older_than=None,
     if older_than is not None:
         query["older_than"] = _stamp(older_than).isoformat()
     response = gateway.fetch("unusual_whales", BASE + "/api/option-trades/flow-alerts?" + urlencode(query))
-    return analyze_alerts(response, as_of=response.fetched_at, min_premium=min_premium)
+    report = analyze_alerts(response, as_of=response.fetched_at, min_premium=min_premium)
+    if older_than is not None and any(_stamp(row["created_at"]) >= _stamp(older_than) for row in report["alerts"]):
+        raise GatewayError("Flow page does not honor requested historical cursor")
+    return report
 
 
 def fetch_context(kind, ticker, *, gateway=DEFAULT_GATEWAY):
@@ -187,8 +190,18 @@ def fetch_context(kind, ticker, *, gateway=DEFAULT_GATEWAY):
     data = response.data().get("data")
     if not isinstance(data, list) or len(data) > 10000 or any(not isinstance(row, dict) for row in data):
         raise GatewayError("Invalid or oversized context page")
+    exposures = []
+    if kind == "greek_exposure":
+        for row in data:
+            # Retain categories separately; dealer-side and units unverified.
+            vals = {k:_text(_decimal(row.get(k),optional=True,signed=True))
+                    for k in ("call_gamma","put_gamma","call_delta","put_delta")}
+            if not any(v is not None for v in vals.values()):
+                raise GatewayError("Greek exposure response missing documented fields")
+            exposures.append({"date":row.get("date"),"member_type":row.get("member_type"),
+                              "issuer":row.get("issuer"),**vals})
     return {**_FLAGS, "kind": kind, "ticker": ticker, "transport": response.evidence(),
-            "model": "provider_context_unreconciled", "rows": data,
+            "model": "provider_context_unreconciled", "rows": data, "exposure_fields": exposures,
             "units_and_publication_time_verified": False, "coverage_complete": False}
 
 
@@ -204,6 +217,7 @@ def main():
     # Console only displays counts/transport; restricted research payload not exported.
     report.pop("alerts", None)
     report.pop("clusters", None)
+    report.pop("exposure_fields", None)
     rows = report.pop("rows", None)
     if rows is not None:
         report["row_count"] = len(rows)

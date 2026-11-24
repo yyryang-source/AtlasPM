@@ -124,6 +124,7 @@ class MarketPool:
 
     def connect(self):
         """Validate existing session, not a new authentication flow."""
+        local_rights("ibkr")
         with self.lock:
             self._ready = False
             auth = self.transport.get("/iserver/auth/status")
@@ -185,16 +186,56 @@ class MarketPool:
                 received = datetime.now(UTC)
                 quotes = normalize_snapshot(raw, self._desired, received_at=received,
                                             max_age_seconds=self.max_age)
+                digest=sha256(json.dumps(raw,sort_keys=True,allow_nan=False).encode()).hexdigest()
             except (ValueError, OSError):
                 self._ready = False
                 self._uncertain = True
                 raise
             return {**_FLAGS, **self._status(), "provider":"ibkr", "model":"l1_snapshot_quality_v1",
                     "retrieved_at_utc":received.isoformat(),
-                    "source_sha256":sha256(json.dumps(raw,sort_keys=True,allow_nan=False).encode()).hexdigest(),
+                    "source_sha256":digest,
                     "rights_status":"operator_attested_not_independently_verified",
                     "quotes":quotes, "alerts":[{"conid":r["conid"],"status":r["availability"]}
                          for r in quotes if not r["fresh_realtime_book_candidate"]]}
+
+    def history(self, conid, *, period="1d", bar="5min"):
+        """Return validated raw provider OHLCV, without guessing timestamp/volume units."""
+        local_rights("ibkr")
+        _conid(conid)
+        with self.lock:
+            if not self._ready or self._uncertain or conid not in self._desired:
+                raise ValueError("History requires ready session and selected contract")
+            try:
+                raw = self.transport.market_history(conid, period, bar)
+                if not isinstance(raw, dict) or not isinstance(raw.get("data"), list) or len(raw["data"]) > 1000:
+                    raise ValueError("Invalid historical response")
+                expected_seconds = {"1min":60,"5min":300,"15min":900,"1h":3600,"1d":86400}.get(bar)
+                if expected_seconds is None or raw.get("barLength") != expected_seconds:
+                    raise ValueError("Historical bar interval mismatch")
+                previous = None
+                for row in raw["data"]:
+                    if not isinstance(row, dict) or type(row.get("t")) is not int or row["t"] <= 0:
+                        raise ValueError("Invalid provider history timestamp")
+                    if previous is not None and row["t"] <= previous:
+                        raise ValueError("Unordered or duplicate historical bar")
+                    previous = row["t"]
+                    vals = [_number(row.get(k)) for k in ("o","h","l","c","v")]
+                    if any(v is None for v in vals):
+                        raise ValueError("Invalid historical OHLCV")
+                    op,hi,lo,cl,_ = vals
+                    if not 0 < lo <= min(op,cl) <= max(op,cl) <= hi:
+                        raise ValueError("Invalid historical price geometry")
+                digest=sha256(json.dumps(raw,sort_keys=True,allow_nan=False).encode()).hexdigest()
+            except (ValueError,OSError):
+                self._ready=False
+                self._uncertain=True
+                raise
+            return {**_FLAGS,"provider":"ibkr","conid":conid,"model":"history_raw_qc_v1",
+                    "retrieved_at_utc":datetime.now(UTC).isoformat(),"source_sha256":digest,
+                    "period":period,"bar":bar,"provider_metadata":{k:raw.get(k) for k in
+                    ("symbol","barLength","mdAvailability","mktDataDelay","volumeFactor","outsideRth")},
+                    "rows":raw["data"],"timestamp_and_volume_units_verified":False,
+                    "coverage_complete":False,"rights_status":"operator_attested_not_independently_verified"}
 
     def close(self):
         """Release only owned/reserved IDs; no automatic unsubscribe-all.

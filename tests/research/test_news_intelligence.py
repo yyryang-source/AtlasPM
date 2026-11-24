@@ -34,7 +34,7 @@ class NewsIntelligenceTests(unittest.TestCase):
         self.assertFalse(Path("local_data/news").exists())
 
     def test_incremental_dedup_revisions_and_local_cutoff(self):
-        before = datetime.now(UTC).isoformat()
+        before = (datetime.now(UTC)-timedelta(seconds=1)).isoformat()
         with patch.dict(os.environ, self.env):
             a = news.ingest("yahoo_finance", self.path)
             b = news.ingest("yahoo_finance", self.path)
@@ -73,3 +73,20 @@ class NewsIntelligenceTests(unittest.TestCase):
                                       "available_at":"2020-01-01T00:00:00Z",
                                       "text":"fixture", "external_use_reviewed":True}],
                              "2020-01-02T00:00:00Z")
+
+    def test_bloomberg_isolation_and_retention(self):
+        env={"ATLASPM_BLOOMBERG_NEWS_RIGHTS":"local-test",
+             "ATLASPM_BLOOMBERG_NEWS_RIGHTS_RETENTION":"1"}
+        with patch.dict(os.environ,{**self.env,**env}):
+            self.row["title"]="Inflation report shows higher CPI"
+            self.path.write_text(json.dumps([self.row]),encoding="utf-8")
+            a=news.ingest("bloomberg",self.path)
+            b=news.review("bloomberg",a["month"],as_of=datetime.now(UTC).isoformat())
+            self.assertEqual(b["events"][0]["event_categories"],["macro_release"])
+            self.assertFalse(b["cross_provider_combination"])
+            self.assertEqual(news.review("yahoo_finance",a["month"],
+                              as_of=datetime.now(UTC).isoformat())["events"],[])
+        with patch.dict(os.environ,{"ATLASPM_BLOOMBERG_NEWS_RIGHTS":"local-test",
+                                    "ATLASPM_BLOOMBERG_NEWS_RIGHTS_RETENTION":"0"}):
+            with self.assertRaisesRegex(ValueError,"RETENTION"):
+                news.ingest("bloomberg",self.path)

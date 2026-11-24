@@ -127,6 +127,7 @@ def ingest(provider, input_file, *, directory=Path("local_data/news")):
         raw = handle.read(4 * 1024 * 1024 + 1)
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("News input exceeds 4 MiB")
+    input_digest = sha256(raw).hexdigest()
     data = json.loads(raw)
     if not isinstance(data, list) or len(data) > 1000:
         raise ValueError("News input requires at most 1000 metadata rows")
@@ -148,7 +149,7 @@ def ingest(provider, input_file, *, directory=Path("local_data/news")):
             if revision in known:
                 continue
             rows.append({"provider": provider, "observed_at": now.isoformat(),
-                         "revision_sha256": revision, "input_sha256": sha256(raw).hexdigest(),
+                         "revision_sha256": revision, "input_sha256": input_digest,
                          "metadata": meta})
             known.add(revision)
             added += 1
@@ -162,7 +163,7 @@ def ingest(provider, input_file, *, directory=Path("local_data/news")):
     finally:
         lock.unlink(missing_ok=True)
     return {**_FLAGS, "provider": provider, "month": month, "added": added,
-            "duplicate_revisions": len(prepared)-added, "input_sha256": sha256(raw).hexdigest(),
+            "duplicate_revisions": len(prepared)-added, "input_sha256": input_digest,
             "rights_status": "operator_attested_not_independently_verified", "network_requests": 0}
 
 

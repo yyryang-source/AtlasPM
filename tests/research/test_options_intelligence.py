@@ -80,3 +80,14 @@ class OptionsIntelligenceTests(unittest.TestCase):
         with self.assertRaisesRegex(GatewayError, "historical"):
             Gateway(opener=lambda *a, **kw: self.fail("network")).fetch(
                 "massive", "https://api.massive.com/v3/snapshot/options/SPY", key="test")
+
+    def test_greek_context_retains_signed_components_without_dealer_inference(self):
+        payload={"data":[{"date":"2026-01-05","call_gamma":"10","put_gamma":"-20",
+                          "call_delta":"15","put_delta":"-5","member_type":"house"}]}
+        gateway=Gateway(opener=lambda *a,**kw: BytesIO(json.dumps(payload).encode()))
+        with patch.dict(os.environ,{"ATLASPM_UW_RIGHTS":"local-reviewed","UW_TOKEN":"fixture",
+                                    "ATLASPM_UW_MAX_REQUESTS":"1"}):
+            report=opt.fetch_context("greek_exposure","SPY",gateway=gateway)
+        self.assertEqual(report["exposure_fields"][0]["put_gamma"],"-20")
+        self.assertFalse(report["units_and_publication_time_verified"])
+        self.assertFalse(report["external_ai_allowed"])

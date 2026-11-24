@@ -57,5 +57,5 @@ def inventory():
                        "connection_verified": False,
                        "rights_attestation_configured": bool(os.environ.get(RIGHTS_ENV[provider]))
                        if provider in RIGHTS_ENV else None,
-                       "external_ai_allowed_by_default": provider not in RESTRICTED}
+                       "external_ai_allowed_by_default": False}
             for provider, role in ROLES.items()}

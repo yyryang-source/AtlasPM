@@ -121,3 +121,160 @@ Next: verified live read-only provider smoke, remaining data adapters and
 standardized evidence into research, then decision/plan/risk contracts and
 fixed-input human-approved IBKR Paper round trip. Do not enable automated
 orders or real-data training merely because fixture tests pass.
+
+
+## Designated provider decision — 2026-11-24
+
+This section supersedes the earlier provider comparison: Yahoo Finance issuer
+news; Bloomberg global/deep news and macro events; Unusual Whales options
+flow; IBKR primary market data and sole execution broker. SEC, FRED, Treasury
+and existing HF/local factors remain. Massive only optional historical
+options reference/aggregates; snapshot realtime route rejected. No new
+vendor purchases or duplicate archive downloads. No changes to frozen #94.
+
+Public documentation / entitlement blockers:
+- Yahoo [Terms](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html)
+  restrict automated acquisition without permission. No approved Yahoo Finance
+  news developer endpoint identified for this account. Obtain written feed
+  access, schema/authentication, retention and AI processing permissions.
+- Bloomberg [Event-Driven Feeds](https://professional.bloomberg.com/products/data/enterprise-catalog/event-driven-feeds/)
+  offers licensed machine-readable news and analytics. Obtain the actual
+  licensed delivery mechanism/schema and relevant rights; no web scraping,
+  guessed API endpoint or paywall bypass. Terminal access alone does not
+  prove these rights.
+- [Unusual Whales](https://unusualwhales.com/api_lander) documents flow alerts,
+  dark pool, Greek exposure, net premium, options contracts and IV rank.
+  Public monthly offers: Options Starter $99 (25,000 requests/billing month,
+  1y lookback), Basic $150 (2y), Advanced $375 (2y + additional endpoints);
+  account/endpoint entitlement and rate limits require confirmation.
+  [Terms on API page](https://unusualwhales.com/public-api) restrict
+  personal-use redistribution. No external model egress from this adapter.
+- [IBKR Web API](https://www.interactivebrokers.com/docs/web-api/trading/market-data/top-of-book-snapshots)
+  L1 snapshots require authenticated brokerage session, accounts initialization,
+  derivative secdef preflight and data subscriptions. Initial snapshot may be
+  empty. [Market data lines](https://www.interactivebrokers.com/docs/general/market-data-subscriptions/market-data-lines/introduction)
+  are shared across consumers; default 100 is not a guarantee of available lines.
+  [TWS tick-by-tick](https://www.interactivebrokers.com/docs/tws-api/doc/md/live-ticks)
+  has a 5% line limit, [depth](https://www.interactivebrokers.com/docs/tws-api/doc/md/market-depth)
+  has distinct permissions/limits. Use TWS API through TWS or IB Gateway for
+  true tick-by-tick/depth in a later read-only extension, not a new execution
+  implementation. Do not assume simultaneous Web/TWS sessions or unlimited lines.
+
+### New runnable features
+
+provider_policy supplies designated roles and local operator rights gates.
+An attestation is NOT independent authorization. All feeds default to no
+external AI egress. Existing research_public explicitly rejects recognized
+restricted provider source names even when its caller sets external_use_reviewed.
+It cannot detect an intentionally mislabeled source: do not submit restricted
+content manually. No external model calls originate from these adapters.
+
+options_intelligence uses the same Gateway with UW_TOKEN, a 2s process-local
+minimum interval, explicit rights and 1..1000 operator-defined request cap.
+GET retries count against the cap; counters reset on process restart, not
+a subscription-wide quota or cost guarantee. Flow alert page <=250 rows,
+provider ID dedup/conflict rejection, chronological checks, stale cutoff,
+premium/bid/ask imbalance, Call/Put counts, volume/OI ratio, IV difference,
+sweep/floor/multileg/opening flags and same-contract/minute alert clusters.
+No aggregate alert premium sum (alerts may overlap); no bullish inference,
+block/fill direction, dealer position or multi-leg reconstruction claimed.
+Separate context requests for GEX/DEX, net premium, contracts, IV rank/term
+structure, dark pool. GEX/DEX component fields remain signed provider values,
+not normalized dealer units. Other context raw until actual schema/units
+reconciliation. Historical cursor page only, no complete pagination/stream
+or persistence without licensed retention and reconciliation. No external
+AI or order routes.
+
+news_intelligence imports operator-normalized *licensed* local JSON metadata,
+not vendor proprietary wire format. Input fields id,title,published_at
+(offset-aware),source,url (HTTPS permanent link),symbols (vendor identifiers),
+sectors (vendor categories). Each source isolated; no cross-provider mixing.
+Explicit rights AND retention, bounded 4 MiB/1000-row input, UTC observation-
+month metadata JSONL (16 MiB/10000 rows), content revision dedup within month,
+atomic replace + exclusive single writer lock. Repeated ingestion in a new
+month may duplicate metadata across partitions; no global index or new DB.
+History review checks local observed_at <= cutoff, uses latest visible
+revision within requested month, dedups normalized article URL, classifies
+headline rules, ranks heuristic importance and shows age. Sector and ticker
+matches supplied by feed, not certified security mapping or impact direction.
+No article body, no automatic download, no publisher identity inference.
+Production direct Yahoo/Bloomberg feed connections still require contract
+and actual licensed schema; no invented endpoint.
+
+IBKR market data reuses execution.ibkr_gateway.LocalGatewayTransport with
+verified loopback TLS and existing pacing. Only fixed snapshot GET, historical
+GET and scoped single-conid market unsubscribe POST added. Existing What-If
+and order submission gates unchanged. MarketPool requires explicit dedicated
+session, confirmed available line count 1..100, <=1000 candidate conids,
+operator-provided verified conids, deterministic priority selection,
+subscription reservation before request, confirmed release before rotation,
+1s minimum per-pool polling. Delay/frozen/missing/crossed/stale/future quotes
+do not generate fresh-book candidate. IBKR row timestamp is not field-level
+timestamp. Snapshot fields include bid/ask/last/sizes/volume, option Greeks
+and IV percent/OI, bond yield percent. Quote midpoint/spread only when fresh.
+History bounded period/bar pairs <=1000 rows, validates OHLCV and order;
+raw timestamp and volume factors not guessed. No overwrite of archive.
+On error freeze new allocations; operator reauth and reconcile owned stream
+release, no auto session takeover or unsubscribe-all. No persistence across
+process restarts; operator must resolve orphan streams before restart. No
+tick-by-tick, depth, scanner, complete option chain discovery, automatic
+contract mapping, live subscriptions, real broker validation or autonomous
+orders claimed. Existing account/risk/Paper paths remain unchanged.
+
+### Local configuration checklist (never commit credentials)
+
+| Config | Needed for |
+| --- | --- |
+| ATLASPM_YAHOO_NEWS_RIGHTS + _RETENTION=1 | Licensed local normalized news import; only after authorized retention |
+| ATLASPM_BLOOMBERG_NEWS_RIGHTS + _RETENTION=1 | Licensed Bloomberg local export; contract/wire specs pending |
+| UW_TOKEN, ATLASPM_UW_RIGHTS, ATLASPM_UW_MAX_REQUESTS | UW subscription + local approved request budget |
+| ATLASPM_IBKR_MARKET_DATA_RIGHTS | Confirm API data entitlement, local contract reference |
+| Client Portal Gateway browser login + trusted local CA | Authenticated dedicated read-only session, available line count and verified conids |
+| ATLASPM_SEC_USER_AGENT, FRED_API_KEY | Existing official sources |
+| MASSIVE_API_KEY | Optional historical only |
+| OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY | Optional external research on separately reviewed public evidence |
+
+Rights values are nonsecret contract references, not a way to grant rights.
+Set actual values only after review. No API secret in git, logs or chat.
+External AI is disabled during acceptance. No paid requests by tests.
+
+### Single Windows software acceptance
+
+Use existing review checkout and virtualenv; no downloads of financial data.
+Keep main and #94 unchanged. Run latest feature head only after CI.
+```powershell
+& {
+    $ErrorActionPreference = "Stop"
+    $root = "C:\Users\Kevin\Desktop\AtlasPM"
+    $review = "C:\Users\Kevin\Desktop\AtlasPM-data-review"
+    $py = Join-Path $root ".venv\Scripts\python.exe"
+    Set-Location $review
+    git fetch origin
+    if ($LASTEXITCODE -ne 0) { throw "Fetch failed" }
+    git switch --detach origin/feature/unified-api-gateway
+    if ($LASTEXITCODE -ne 0) { throw "Switch failed" }
+    $env:PYTHONPATH = Join-Path $review "src"
+    Remove-Item Env:ATLASPM_ALLOW_PAPER_ORDERS -ErrorAction SilentlyContinue
+    Remove-Item Env:ATLASPM_ALLOW_EXTERNAL_AI -ErrorAction SilentlyContinue
+    git log -1 --oneline
+    & $py -m pip check
+    if ($LASTEXITCODE -ne 0) { throw "Dependencies failed" }
+    & $py scripts/maintenance/verify_release.py --minimum-passed 1054
+    if ($LASTEXITCODE -ne 0) { throw "Software validation failed" }
+    & $py -m atlaspm.data.api_gateway
+    if ($LASTEXITCODE -ne 0) { throw "Provider inventory failed" }
+    & $py -m atlaspm.research.intelligence --list
+    if ($LASTEXITCODE -ne 0) { throw "Model inventory failed" }
+    Write-Host "DESIGNATED PROVIDER SOFTWARE VALIDATION PASSED"
+}
+```
+1054 is expected baseline 1039 + 15 new test methods, not a measured result.
+Optional authorized read-only UW smoke: python -m
+atlaspm.research.options_intelligence --ticker SPY --limit 5.
+IBKR snapshot smoke: python -m atlaspm.execution.ibkr_market_data
+--conid <verified-conid> --available-lines <confirmed-free-lines>
+--dedicated-session --ca-file <trusted-ca-file> --polls 2.
+No live smoke executed here. No account data, proprietary payloads or
+credentials should be shared. True API connectivity, data rights,
+publication time, normalized units, performance, and release approval are
+separate from software tests. All formal training/backtest/live remain disabled.

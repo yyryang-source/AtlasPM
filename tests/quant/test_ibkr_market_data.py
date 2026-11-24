@@ -28,6 +28,11 @@ class Transport:
         return [{"conid":c,"6509":"RpB","_updated":int(datetime.now(UTC).timestamp()*1000),
                  "84":"99.9","86":"100.1","31":"100","7762":"12345"} for c in ids]
 
+    def market_history(self, conid, period, bar):
+        self.calls.append(("history",conid))
+        return {"barLength":300,"volumeFactor":100,"data":[
+            {"t":1700000000000,"o":100,"h":102,"l":99,"c":101,"v":10}]}
+
     def market_unsubscribe(self, c):
         self.calls.append(("release",c))
         return {"success":not self.fail_release}
@@ -86,6 +91,17 @@ class MarketPoolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_snapshot([raw[0],raw[0]],[1,2],received_at=now)
 
+    def test_history_uses_existing_transport_and_preserves_unverified_units(self):
+        self.pool.set_universe({1:1})
+        self.pool.connect()
+        report=self.pool.history(1)
+        self.assertEqual(report["rows"][0]["v"],10)
+        self.assertEqual(report["provider_metadata"]["volumeFactor"],100)
+        self.assertFalse(report["timestamp_and_volume_units_verified"])
+        self.assertFalse(report["approved_for_model_training"])
+        with self.assertRaises(ValueError):
+            self.pool.history(2)
+
     def test_transport_only_scoped_market_post_and_get(self):
         transport = LocalGatewayTransport()
         with patch.object(transport,"_send_json",return_value={"success":True}) as send:
@@ -100,4 +116,6 @@ class MarketPoolTests(unittest.TestCase):
             self.assertIn("/iserver/marketdata/snapshot?",req.full_url)
             with self.assertRaises(ValueError):
                 transport._request("/iserver/account/DU123/orders",preview={"orders":[]})
-            self.assertEqual(send.call_count,2)
+            transport.market_history(123,"1d","5min")
+            self.assertIn("/iserver/marketdata/history?",send.call_args.args[0].full_url)
+            self.assertEqual(send.call_count,3)
