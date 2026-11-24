@@ -13,6 +13,7 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha256
 import json
 import os
+import re
 from threading import Lock
 import time
 from types import MappingProxyType
@@ -38,6 +39,14 @@ PROVIDERS = MappingProxyType({
     "treasury": Provider("api.fiscaldata.treasury.gov", 0.5, None, "public_government_data", True),
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
+})
+
+
+# Fixed destinations; no model-provided URL, tool, or broker route.
+MODEL_ENDPOINTS = MappingProxyType({
+    "openai": ("https://api.openai.com/v1/responses", "OPENAI_API_KEY"),
+    "anthropic": ("https://api.anthropic.com/v1/messages", "ANTHROPIC_API_KEY"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/models/", "GEMINI_API_KEY"),
 })
 
 
@@ -71,7 +80,8 @@ class Response:
             "provider": self.provider, "request_id": self.request_id,
             "retrieved_at_utc": self.fetched_at, "sha256": sha256(self.body).hexdigest(),
             "bytes": len(self.body), "cache_hit": self.cached,
-            "rights_status": PROVIDERS[self.provider].rights,
+            "rights_status": (PROVIDERS[self.provider].rights if self.provider in PROVIDERS
+                              else "external_processing_review_required"),
             "point_in_time_verified": False, "approved_for_model_training": False,
             "approved_for_backtest": False, "live_execution_enabled": False,
         }
@@ -99,7 +109,7 @@ class Gateway:
         self._open = opener if opener is not None else build_opener(_NoRedirect()).open
         self._clock, self._sleep = clock, sleep
         self._max_bytes, self._cache_bytes, self._attempts = max_bytes, cache_bytes, attempts
-        self._states = {name: _State() for name in PROVIDERS}
+        self._states = {name: _State() for name in (*PROVIDERS, *MODEL_ENDPOINTS)}
         self._cache = OrderedDict()
         self._cache_lock = Lock()
         self._cache_size = 0
@@ -240,6 +250,84 @@ class Gateway:
                 state.next_request = max(state.next_request, self._clock() + retry_delay)
             raise GatewayError(f"{provider}: {state.last_status}; retry budget exhausted") from None
 
+    def post_model(self, provider, model, payload, *, allow_external=False):
+        """One explicitly approved inference POST. Never retry an ambiguous billable call."""
+        if allow_external is not True or os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI") != "1":
+            raise GatewayError("External AI requires explicit local egress approval")
+        if provider not in MODEL_ENDPOINTS:
+            raise GatewayError("Unsupported external model provider")
+        if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", model):
+            raise GatewayError("Invalid configured model identifier")
+        allowed = {
+            "openai": {"model", "instructions", "input", "max_output_tokens", "store", "text"},
+            "anthropic": {"model", "system", "messages", "max_tokens"},
+            "gemini": {"systemInstruction", "contents", "generationConfig"},
+        }[provider]
+        if not isinstance(payload, dict) or not set(payload) <= allowed:
+            raise GatewayError("Unexpected model request fields; tools are not supported")
+        if provider != "gemini" and payload.get("model") != model:
+            raise GatewayError("Model request identifier mismatch")
+        if provider == "openai" and payload.get("store") is not False:
+            raise GatewayError("OpenAI response storage must be disabled")
+        url, key_env = MODEL_ENDPOINTS[provider]
+        token = os.environ.get(key_env, "").strip()
+        if not token or any(not 33 <= ord(c) <= 126 for c in token):
+            raise GatewayError(f"{key_env} missing or invalid")
+        headers = {"Content-Type": "application/json", "Accept": "application/json",
+                   "Accept-Encoding": "identity", "User-Agent": "AtlasPM research gateway"}
+        if provider == "gemini":
+            url += model + ":generateContent"
+            headers["x-goog-api-key"] = token
+        else:
+            headers["Authorization"] = "Bearer " + token
+            if provider == "anthropic":
+                version = os.environ.get("ATLASPM_ANTHROPIC_API_VERSION", "2026-10-21")
+                if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", version):
+                    raise GatewayError("Invalid Anthropic API version")
+                headers["anthropic-version"] = version
+        try:
+            body = json.dumps(payload, ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":")).encode("utf-8")
+        except (ValueError, TypeError, UnicodeError):
+            raise GatewayError("Invalid model request JSON") from None
+        if len(body) > 65536:
+            raise GatewayError("Model request exceeds 64 KiB")
+        request_id = sha256(provider.encode() + b"\n" + body).hexdigest()
+        state = self._states[provider]
+        with state.lock:
+            if self._clock() < state.blocked_until:
+                raise GatewayError(f"{provider}: circuit open")
+            # Conservative per-process call cap, not a monetary limit.
+            if state.calls >= 8:
+                raise GatewayError(f"{provider}: process model call budget exhausted")
+            wait = state.next_request - self._clock()
+            if wait > 0:
+                self._sleep(wait)
+            state.next_request = self._clock() + 2
+            state.calls += 1
+            try:
+                with self._open(Request(url, data=body, headers=headers, method="POST"), timeout=45) as response:
+                    raw = response.read(min(self._max_bytes, 2 * 1024 * 1024) + 1)
+                state.received_bytes += len(raw)
+                if len(raw) > min(self._max_bytes, 2 * 1024 * 1024):
+                    raise GatewayError("Model response exceeds size limit")
+                _strict_json(raw)
+            except HTTPError as exc:
+                code = exc.code
+                delay = self._retry_after(exc.headers)
+                exc.close()
+                state.failures += 1
+                state.last_status = f"HTTP_{code}"
+                state.blocked_until = self._clock() + max(60, delay)
+                raise GatewayError(f"{provider}: HTTP {code}; no automatic retry") from None
+            except (OSError, ValueError, RecursionError):
+                state.failures += 1
+                state.last_status = "MODEL_RESPONSE_ERROR"
+                state.blocked_until = self._clock() + 60
+                raise GatewayError(f"{provider}: model request failed; billing status unknown") from None
+            state.last_status = "SUCCESS"
+            return Response(provider, request_id, datetime.now(UTC).isoformat(), raw)
+
     async def fetch_many(self, requests):
         """At most 32 GETs, at most three active worker threads for this batch.
 
@@ -260,15 +348,16 @@ class Gateway:
         result = {}
         for name, state in self._states.items():
             with state.lock:
-                spec = PROVIDERS[name]
+                spec = PROVIDERS.get(name)
+                key_env = spec.key_env if spec else MODEL_ENDPOINTS[name][1]
                 result[name] = {
                     "calls": state.calls, "failed_attempts": state.failures,
                     "cache_hits": state.cache_hits, "received_bytes": state.received_bytes,
                     "last_status": state.last_status,
                     "circuit_open": self._clock() < state.blocked_until,
-                    "credential_configured": bool(os.environ.get(spec.key_env)) if spec.key_env else
+                    "credential_configured": bool(os.environ.get(key_env)) if key_env else
                         (bool(os.environ.get("ATLASPM_SEC_USER_AGENT")) if name == "sec" else True),
-                    "rights_status": spec.rights,
+                    "rights_status": spec.rights if spec else "external_processing_review_required",
                     "cost_usd": None,  # do not infer subscription/overage costs
                 }
         return result
