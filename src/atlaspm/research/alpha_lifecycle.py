@@ -139,9 +139,16 @@ def compare_versions(path, champion, challenger):
         report=evidence["report"]
         records.append((life,evidence,report))
     left,right=records
+    # Seed/model hyperparameters may differ (otherwise deterministic versions
+    # cannot be compared). Evaluation dates, cost and risk policy must match.
+    policy_keys=("validation_start","holdout_start","cost_bps","minimum_sessions","max_drawdown","sequence_length")
+    policies=[{k:report["config"][k] for k in policy_keys} for _,_,report in records]
     comparable=(left[2]["dataset_sha256"]==right[2]["dataset_sha256"]
-                and left[2]["config"]==right[2]["config"])
-    return {**FLAGS,"comparable":comparable,
+                and policies[0]==policies[1]
+                and all(report["holdout"] is not None and report["holdout_mode"]=="locked_candidate_walk_forward_refit"
+                        for _,_,report in records))
+    return {**FLAGS,"comparable":comparable,"evaluation_policies":policies,
+            "holdout_reuse_for_model_selection_allowed":False,
             "versions":[{"version":life["version"],"state":life["state"],
                          "registry_run_id":ev["run_id"],"report_sha256":ev["report_sha256"],
                          "holdout":report["holdout"] if comparable else None}

@@ -288,6 +288,13 @@ class ContinuousTests(unittest.TestCase):
         out=rank_synthetic_baskets(ledger,[plan],rows=rows[:-2],as_of=stamp,weights={"m1":2,"m2":1},
             horizon_days=1,annual_financing_rate=.06,risk_penalty=0)
         self.assertEqual(out["decision"],"NO_TRADE")
+        from copy import deepcopy
+        other=deepcopy(plan)
+        other["batch_id"]="OTHER"
+        other["policy"]["max_gross_leverage"]=2.0
+        with self.assertRaisesRegex(ValueError,"BASKET_RISK_POLICY_MISMATCH"):
+            rank_synthetic_baskets(ledger,[plan,other],rows=rows,as_of=stamp,weights={"m1":2,"m2":1},
+                horizon_days=1,annual_financing_rate=.06,risk_penalty=0)
 
     def test_process_death_after_commit_leaves_recoverable_queue(self):
         import subprocess,sys
@@ -363,3 +370,13 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(before,event_queue.PATH.read_bytes())
         self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
         self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],1)
+
+
+    def test_local_artifact_cutoff_blocks_before_loading(self):
+        from atlaspm.research.intelligence import local_specialist_tasks
+        task={"route":"local_artifact","params":{"artifact_db":"local_data/a.sqlite3","artifact_id":"a"*64,
+              "payload":{"sessions":[{"close_at":"2020-01-03T21:00:00Z"}]}}}
+        with patch("atlaspm.research.intelligence.predict_local_artifact") as loader:
+            result=local_specialist_tasks([task],as_of="2020-01-02T21:00:00Z")
+            loader.assert_not_called()
+        self.assertTrue(result["tasks"][0]["status"].startswith("BLOCKED"))

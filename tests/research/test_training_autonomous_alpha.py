@@ -134,6 +134,11 @@ class AlphaTests(unittest.TestCase):
             from atlaspm.research.alpha_lifecycle import compare_versions
             with self.assertRaisesRegex(ValueError,"DISTINCT_ALPHA"):
                 compare_versions(db,version,version)
+            challenger=research(p,**options(p),models=["historical_mean"],cost_bps=0,seed=43,registry_path=db)
+            comparison=compare_versions(db,version,challenger["strategy_version"])
+            self.assertTrue(comparison["comparable"])
+            self.assertFalse(comparison["automatic_promotion_enabled"])
+            self.assertFalse(comparison["holdout_reuse_for_model_selection_allowed"])
             self.assertEqual(load(db,a["registry_run_id"])["report"]["strategy_version"],version)
             with self.assertRaisesRegex(ValueError,"ALPHA_ONLY_DE_RISK"):
                 transition(db,version,"PAPER_ACTIVE","untrusted promotion")

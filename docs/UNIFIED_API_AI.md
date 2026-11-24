@@ -749,3 +749,76 @@ Real data/PIT/rights, actual AI and IBKR Paper connections, production recovery,
 generalized cross-asset optimization/expiry and independent operational model
 approval remain explicit blockers. #94 unchanged. Formal training, formal
 backtest and automatic live remain disabled; real Paper manual only.
+
+
+## Final bounded completion batch (after verified e46d83c)
+
+Independently checked e46d83c430379b06266d6f5d6265a56318b356f6:
+all 7 workflows passed; Windows full 1112/1112, no failures/errors/skips,
+zero source errors or duplicate body candidates, tests 63.075 s.
+Offline PASS: 1.5849976 s wall, 1.5625 s CPU, 152707072 B peak RSS,
+22585765 B read / 288339 B written process I/O. Linux full 1112 tests
+39.879 s; offline PASS 1.670723918 s wall, 1.670130473 s CPU,
+220344320 B peak RSS, 0 read / 339968 B written OS IO counters.
+Both fixtures: 16 queued events, 20 joint events, 5 replay sessions,
+13 mixed journal events. Windows 10.09465 queued events per total wall
+second, Linux 9.57669. Not production throughput or physical disk traffic.
+Windows evidence https://github.com/yyryang-source/AtlasPM/actions/runs/45512442516/job/138863313061
+Linux evidence https://github.com/yyryang-source/AtlasPM/actions/runs/45512442401/job/138863313285
+
+New local routes use existing unified reader: technical_local (existing
+stock screener), fundamental_local (existing provenance-bearing reader),
+sec_local, bond_local, factor_local (descriptive evidence hashes).
+Require prior NY date, <=367 days, <=8 symbols, <=4096 selected rows.
+Fundamental file <=64MiB. Technical source mixing rejected. These are
+exploratory source receipts, not verified permanent identity, PIT,
+numerical forecast, or licensed external-model evidence.
+No new DB or raw commercial data retained by dispatcher.
+
+Optional operator-defined event-to-local-research bindings:
+```json
+[{"kind":"volume_anomaly","subject":"SYN:AAA","task":{"route":"technical_local","params":{"start":"2019-01-10","end":"2020-01-09","symbols":["AAA"]}}}]
+```
+Save under local_data, then run:
+```powershell
+python -m atlaspm.framework.orchestrator run --file local_data/research_bindings.json --cycles 10 --interval 60
+```
+Example dates/IDs only; actual bound task params must match local data
+and desired decision cutoff. Max 16 bindings, 4 per event category and
+4 local calls/tick; no automatic identity mapping, no paid access.
+Only report hash/status are committed into existing event queue.
+Unavailable input produces explicit blocked receipt; completed metadata
+is not evidence of completed specialist analysis. Fixed binding ranges
+need operator maintenance. Real data licensing and identity remain
+uncertified. Local artifact route rejects future session timestamps.
+
+Existing long-option and Treasury holding replay engines now run in
+unified offline gate, separate synthetic accounts: physical long put,
+cash-settled long call, explicit reference availability, delivery
+receivable, cash reconciliation; coupon accrual/receivable/principal
+maturity and NAV conservation. No uncovered short assignment, early
+exercise, corporate bond default, or general cross-asset OMS settlement.
+Existing mixed basket OMS remains independently tested.
+Queue/checkpoint temporary file flush+fsync before atomic replace;
+injected fsync failure leaves old state. Directory metadata power-loss
+durability and broker recovery not independently verified.
+Candidate basket risk policy/stress/account snapshot must match across
+plans. Registry comparison allows different seeds/models with matching
+dataset/evaluation dates and cost/risk policy; descriptive only, holdout
+reuse for selection prohibited; positive comparison added to synthetic
+registry test. No operational model promotion or reactivation.
+
+Expected 1116 tests = 1112 + 4, not measured yet. Final gate:
+```powershell
+python scripts/maintenance/verify_release.py --minimum-passed 1116
+python scripts/maintenance/benchmark_unified_data.py --offline
+```
+Stop feature expansion after this batch; only correct actual defects
+before local Windows acceptance. Full latest CI pending; no release tag
+or merge, #94 frozen. Formal training/backtest/live disabled.
+Remaining blockers: generalized cross-asset covariance/allocation and
+OMS maturity/assignment, complete automated specialist generation and
+actual provider inference, licensed data/identity/PIT, real broker
+recovery/kill switch, independent operational approval, current exact
+SHA CI and Windows local acceptance. Existing provider configuration
+and staged actual API/AI/Paper smoke instructions remain canonical.

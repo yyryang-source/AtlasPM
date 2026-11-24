@@ -203,6 +203,12 @@ def rank_synthetic_baskets(ledger, plans, *, rows, as_of, weights, horizon_days,
         raise ValueError("SYNTHETIC_BASKET_FIXTURES_REQUIRED")
     if any(p["account_id"]!=plans[0]["account_id"] for p in plans):
         raise ValueError("BASKET_ACCOUNT_MISMATCH")
+    # A comparison must not reward a candidate for weakening its risk policy.
+    common=("policy","stress_assumptions","broker_snapshot","allow_margin_borrowing")
+    if any(any(p.get(k)!=plans[0].get(k) for k in common) for p in plans):
+        raise ValueError("BASKET_RISK_POLICY_MISMATCH")
+    if len({p["batch_id"] for p in plans})!=len(plans):
+        raise ValueError("DUPLICATE_BASKET_ID")
     if timestamp(ledger["valuation_at"],"valuation_at")!=timestamp(as_of,"as_of"):
         raise ValueError("BASKET_VALUATION_MISMATCH")
     if any(r.get("synthetic_fixture") is not True for r in rows):
