@@ -244,6 +244,58 @@ finished without failures. The output always has
 `live_execution_enabled=false`. Never translate `REVIEW_REQUIRED` into
 a model-training or trading authorization.
 
+## Historical NYSE sub-five-minute session boundaries
+
+Some historic NYSE sessions start or end between the fixed 5-minute
+boundaries used by the DuckDB aggregator. Six examples found during the
+315-month audit (NYSE/ET): 2001-09-17 09:33 open, 2001-10-08 09:31
+open, 2003-03-20 09:32 open, 2004-06-07 09:32 open, 2005-06-01
+15:56 close, and 2006-12-27 09:32 open. Rejecting any session whose
+duration was not divisible by 5 minutes caused `AUDIT_ERROR`, even though
+these are valid market-calendar boundaries.
+
+The audit now counts all fixed UTC 5m slots **overlapping** the actual
+[open, close) session, while still flagging whole buckets completely
+outside the exchange schedule. For the first/last partial bucket it
+compares the number of source 1m records with the number of 1m slots
+actually available during the session. If the source has more minute
+records than the calendar allows, it reports
+`NYSE_BOUNDARY_MINUTE_COUNT_EXCEEDED` as a structural issue. Otherwise
+it reports `PARTIAL_NYSE_BOUNDARY_5M_BARS_REQUIRE_SOURCE_REVIEW`:
+the 5m aggregate alone cannot prove which specific source minutes were
+included, so it is **not** an approval of the bar. The full set of
+irregular NYSE sessions is listed in `non_5m_aligned_nyse_sessions`.
+
+The monthly audit JSON schema was updated to `atlaspm_hf_5m_research_qc_v2`.
+Existing V1 batch checkpoints are invalidated automatically, so the next
+batch pass revisits the 315 monthly partitions; this does not redownload
+any market data and preserves all original Parquet. To inspect only the
+six previously errored months first:
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+foreach ($m in @("2001-09","2001-10","2003-03","2004-06","2005-06","2006-12")) {
+    & $py -m atlaspm.cli market-db hf-5m-audit --month $m --session rth |
+        Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Audit failed: $m"; continue }
+    $a = Get-Content "local_data\stock_5m\huggingface\quality\audits\session=rth\$m.json" -Raw | ConvertFrom-Json
+    [PSCustomObject]@{
+        Month = $m
+        Status = $a.quality_status
+        BoundaryBars = $a.partial_nyse_boundary_5m_bars
+        MinuteOverflow = $a.nyse_boundary_minute_count_exceeded
+        StructuralIssues = ($a.structural_issues -join ";")
+    }
+}
+~~~
+
+Remember that the lake spans many US-listed symbols, while this calendar
+audit uses NYSE as its reference. Venue-specific histories and individual
+ticker point-in-time identity are NOT certified by this check. Existing
+structural-failure months may still require inspecting source, dates,
+and vendor data; do not suppress legitimate calendar anomalies simply to
+obtain an apparently green batch report.
+
 ## Independent daily reference comparison
 
 This next check compares selected liquid symbols' local RTH 5m-derived
