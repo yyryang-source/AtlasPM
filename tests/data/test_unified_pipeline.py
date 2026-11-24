@@ -98,6 +98,15 @@ class UnifiedPipelineTests(unittest.TestCase):
         self.assertEqual(result["months"][0]["factor_rows"], 1)
         self.assertEqual(result["evidence_id"],
                          data_admission.inspect_real_factors("2020-01", "2020-01")["evidence_id"])
+        if find_spec("pandas_market_calendars"):
+            dataset = data_admission.build_research_dataset(
+                "2020-01", "2020-01", features=["mom_5d"], horizons=[1],
+                minimum_train_sessions=1, test_sessions=1, embargo_sessions=0)
+            self.assertEqual(dataset["lineage_id"], result["evidence_id"])
+            self.assertEqual(dataset["rows"], 1)
+            preflight = data_admission.inspect_research_dataset(dataset["dataset_id"])
+            self.assertTrue(preflight["feature_source_reconciled"])
+            self.assertFalse(preflight["approved_for_model_training"])
         # Change an actual recorded source (even if content is unchanged);
         # the existing builder's lineage signature must now be stale.
         old = bars.stat()

@@ -112,19 +112,23 @@ local report or receipt grants real training. Research inspect_real_factors
 is a diagnostic interface, not a model panel builder. Existing synthetic
 training behavior remains unchanged.
 
+## Final integration candidate (#94)
+
+The final integration branch retains all eight specified PR histories, reconciles ledger read-only/integrity logic, Paper safeguards, 39 retired aliases, shared rolling labels, entry-lag semantics, model parameters and the new autonomous-alpha CLI. Combined CI and local data validation are required; branch inclusion is not acceptance.
+
+The existing `market-db training-dataset-v6` CLI now calls the canonical `research.data_admission.build_research_dataset` entrypoint. It verifies factor lineage before and after construction and binds its evidence ID into the existing dataset manifest identity. `training-dataset-inspect-v6` can still inspect older manifests; `training-preflight-v61` now requires unified lineage, so old exploratory datasets must be rebuilt for this gate. The same V6 writer, partitions and exact-session label implementation are used. Preflight compares every source observation and requested feature against sample values, rejects modified inputs, rechecks labels and purged folds, and does not fit models. No new registry database.
+
+`python -m atlaspm.data.quality_review --month 2000-02` checks each historical session's observed factor symbols against the reviewed ledger available strictly before that session. It counts missing/unknown memberships, unresolved actions and session gaps, hashes logical claim rows rather than SQLite file bytes, and can run the existing bounded price comparison with `--reference-csv local_data/reference.csv --reference-symbol AAPL`. This is a reviewer report, not proof of complete IPO/delisting, vendor publication times, rights or total-return data. No self-authored report can grant training.
+
 ## Release blockers
 
 - Independent data rights and source authenticity, exact historical release
   availability, venue calendars, survivorship/IPO/delisting/identity coverage,
   complete corporate actions, price adjustment semantics and independent
   price reconciliation are not yet certified.
-- PR #89 real dataset bridge, #90 evidence additions, #91 safety/relocation,
-  #92 lifecycle, #74 cumulative research and #66/#67 algorithm integration
-  require current-base review and CI before main merge.
-- True end-to-end real-data panel integration, controlled automatic downloads,
-  trusted immutable version baselines, global resource limits and full
-  dependency-safe legacy cleanup are pending. No raw data or compatibility
-  modules removed by this PR.
+- All eight PRs are integrated into the candidate tree; their combined behavior requires current-head CI, code review and local acceptance before main merge.
+- Certified real-data panel admission, controlled automatic downloads,
+  independently trusted immutable baselines, and global resource limits remain pending. The candidate removes the 39 aliases already reviewed in #92; no raw data or historical benchmark implementations are removed.
 - Full Linux/Windows CI and local real-data performance validation required.
 
 ## Windows acceptance and performance
@@ -135,17 +139,15 @@ interrupt current raw downloads or run maintenance concurrently.
 ```powershell
 cd C:\Users\Kevin\Desktop\AtlasPM-data-review
 git fetch origin
-git switch --detach origin/integration/unified-data-engine
+git switch --detach origin/integration/final-data-research
 $py = "C:\Users\Kevin\Desktop\AtlasPM\.venv\Scripts\python.exe"
 $env:PYTHONPATH = (Join-Path (Get-Location) "src")
 & $py -c "import duckdb,pandas_market_calendars"
 if ($LASTEXITCODE -ne 0) { throw "Missing lake/calendar dependencies" }
-& $py -m unittest discover -s tests -p "test_unified*.py" -v
-if ($LASTEXITCODE -ne 0) { throw "Unified tests failed" }
-& $py scripts/maintenance/audit_source.py
-if ($LASTEXITCODE -ne 0) { throw "Source audit failed" }
-& $py -m unittest discover -s tests -v
-if ($LASTEXITCODE -ne 0) { throw "Regression failed" }
+& $py -m pip check
+if ($LASTEXITCODE -ne 0) { throw "Dependency check failed" }
+& $py scripts/maintenance/verify_release.py --minimum-passed 742
+if ($LASTEXITCODE -ne 0) { throw "Full release gate failed" }
 ```
 
 For real-data read-only measurement, run the review code from the original

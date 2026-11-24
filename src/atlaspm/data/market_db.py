@@ -392,7 +392,7 @@ def register_parser(sub):
     h.add_argument('--memory',default='2GB')
     h.add_argument('--threads',type=int,default=2)
     h.add_argument('--fetch',action='store_true')
-    t=actions.add_parser('training-dataset-v6',help='Build real-data research samples; training remains blocked')
+    t=actions.add_parser('training-dataset-v6',help='Build lineage-checked real-data research samples; training remains blocked')
     t.add_argument('--start-month',required=True)
     t.add_argument('--end-month',required=True)
     t.add_argument('--features',nargs='+',default=['mom_5d','mom_21d','volatility_21d','price_vs_sma_20d','volume_ratio_20d'])
@@ -598,13 +598,14 @@ def run(args):
         from atlaspm.research import real_dataset_v6 as dataset
         if args.db_action == 'training-dataset-inspect-v6':
             return dataset.inspect(args.dataset_id)
-        return dataset.build(args.start_month,args.end_month,features=args.features,
+        from atlaspm.research.data_admission import build_research_dataset
+        return build_research_dataset(args.start_month,args.end_month,features=args.features,
                              horizons=args.horizons,minimum_train_sessions=args.minimum_train_sessions,
                              test_sessions=args.test_sessions,embargo_sessions=args.embargo_sessions,
                              memory=args.memory,threads=args.threads,plan_only=args.plan_only)
     if args.db_action == 'training-preflight-v61':
-        from atlaspm.research import real_dataset_preflight_v61 as preflight
-        return preflight.run(args.dataset_id,minimum_train_rows=args.minimum_train_rows,
+        from atlaspm.research.data_admission import inspect_research_dataset
+        return inspect_research_dataset(args.dataset_id,minimum_train_rows=args.minimum_train_rows,
                              minimum_test_rows=args.minimum_test_rows,memory=args.memory,threads=args.threads)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
