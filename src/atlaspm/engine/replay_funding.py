@@ -70,7 +70,7 @@ class MarginFunding:
         self.borrowed_total+=borrowed
         return max(0.,cash-amount)
 
-    def buy_budget(self,*,cash,pending,gross,equity,adverse_cost_ratio):
+    def buy_budget(self,*,cash,pending,gross,equity,adverse_cost_ratio,gross_limit=None):
         """Maximum purchase cash outlay under both gross and debt bounds.
 
         Exclude unsettled receivables from the equity used to fund new risk.
@@ -84,6 +84,8 @@ class MarginFunding:
         if k>=1:
             raise ValueError("INVALID_MARGIN_COST_BOUND")
         cap=self.initial_gross_cap
+        if gross_limit is not None:
+            cap=min(cap,finite(gross_limit,"gross_limit",minimum=1.))
         e=max(0.,equity-pending)
         gross_bound=(cap*e-gross)/(1+cap*k)
         debt_bound=(cash+(cap-1)*e-self.liability)/(1+(cap-1)*k)
