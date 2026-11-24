@@ -27,7 +27,9 @@ def _shims() -> dict[str, str]:
 class DeprecatedShimTests(unittest.TestCase):
     def test_all_shims_target_final_modules_and_warn_with_correct_stacklevel(self):
         targets = _shims()
-        self.assertEqual(len(targets), 98)
+        self.assertEqual(len(targets), 105)
+        for name in ["ibkr_equity_snapshot","ibkr_next_day","ibkr_paper_orders","ibkr_whatif","market_close","paper_order_journal","close_drafts"]:
+            self.assertEqual(targets["atlaspm." + name], "atlaspm.execution." + name)
         for old, final in targets.items():
             with self.subTest(shim=old):
                 self.assertNotIn(final, targets)

@@ -14,11 +14,11 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from atlaspm.ibkr_paper_orders import PaperTransport, cancel, main, reconcile, submit, _paper_order_notional, _check_paper_batch
-from atlaspm.close_drafts import draft_after_close
-from atlaspm.ibkr_next_day import next_day_review
-from atlaspm.market_close import prepare_close
-from atlaspm.paper_order_journal import PaperJournal
+from atlaspm.execution.ibkr_paper_orders import PaperTransport, cancel, main, reconcile, submit, _paper_order_notional, _check_paper_batch
+from atlaspm.execution.close_drafts import draft_after_close
+from atlaspm.execution.ibkr_next_day import next_day_review
+from atlaspm.execution.market_close import prepare_close
+from atlaspm.execution.paper_order_journal import PaperJournal
 from atlaspm.execution.ibkr_gateway import GatewayHTTPError
 from atlaspm.rebalance_workbench import Policy, RunStore, exchange_window
 
@@ -90,11 +90,11 @@ class PaperLifecycleTests(unittest.TestCase):
                          "captured_at": self.time.isoformat()}
 
     def submit(self):
-        with patch("atlaspm.ibkr_paper_orders.next_day_review", return_value=self.fresh):
+        with patch("atlaspm.execution.ibkr_paper_orders.next_day_review", return_value=self.fresh):
             return submit(self.gateway, self.journal, self.reviewed, self.original, self.account, {}, now=self.time)
 
     def sync(self):
-        with patch("atlaspm.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
+        with patch("atlaspm.execution.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
             return reconcile(self.gateway, self.journal, self.reviewed["id"], self.account)
 
     def order(self, filled, status):
@@ -113,7 +113,7 @@ class PaperLifecycleTests(unittest.TestCase):
                 "order_time": self.time.strftime("%y%m%d%H%M%S")}
 
     def test_submission_rejections_leave_no_journal_or_writes(self):
-        with patch("atlaspm.ibkr_paper_orders.next_day_review") as preview:
+        with patch("atlaspm.execution.ibkr_paper_orders.next_day_review") as preview:
             for account in ("U1234567", "DU", "du123", "DU12X", "DU１２３", " DU123"):
                 with self.subTest(account=account), self.assertRaisesRegex(ValueError, "DU account"):
                     submit(self.gateway, self.journal, self.reviewed, self.original, account, {}, now=self.time)
@@ -153,7 +153,7 @@ class PaperLifecycleTests(unittest.TestCase):
 
     def test_fresh_batch_rechecked_before_claim(self):
         self.fresh["broker_estimates"][0]["ticket"].update(quantity=1001, price=1)
-        with patch("atlaspm.ibkr_paper_orders._within_review", return_value=True):
+        with patch("atlaspm.execution.ibkr_paper_orders._within_review", return_value=True):
             with self.assertRaisesRegex(ValueError, "share limit"):
                 self.submit()
         self.assertIsNone(self.journal.get(self.reviewed["id"]))
@@ -196,7 +196,7 @@ class PaperLifecycleTests(unittest.TestCase):
         self.gateway.open_orders = [self.order(0, "Submitted")]
         with patch.dict(os.environ, {"ATLASPM_ALLOW_PAPER_ORDERS": "0"}):
             self.assertEqual(self.sync()["status"], "pending")
-            with patch("atlaspm.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
+            with patch("atlaspm.execution.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
                 self.assertEqual(cancel(self.gateway,self.journal,batch["id"],self.account,self.ref)["status"],"cancel_requested")
 
     def test_partial_fill_cancel_and_reconciliation_are_persisted(self):
@@ -210,7 +210,7 @@ class PaperLifecycleTests(unittest.TestCase):
         self.snapshot.update(positions={"XYZ": 6}, total_cash=9700.05)
         self.assertEqual(self.sync()["status"], "pending")
         self.assertEqual(self.journal.get(batch["id"])["orders"][0]["state"], "partial")
-        with patch("atlaspm.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
+        with patch("atlaspm.execution.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
             self.assertEqual(cancel(self.gateway, self.journal, batch["id"], self.account, self.ref)["status"],
                              "cancel_requested")
             self.assertEqual(self.sync()["status"], "pending")
@@ -233,10 +233,10 @@ class PaperLifecycleTests(unittest.TestCase):
                      {"status": "matched", "position_differences": {}}]
         output = io.StringIO()
         with (patch("sys.argv", arguments), redirect_stdout(output),
-              patch("atlaspm.ibkr_paper_orders.PaperJournal", return_value=self.journal),
-              patch("atlaspm.ibkr_paper_orders.PaperTransport", return_value=self.gateway),
-              patch("atlaspm.ibkr_paper_orders.reconcile", side_effect=responses) as sync,
-              patch("atlaspm.ibkr_paper_orders.time.sleep") as wait):
+              patch("atlaspm.execution.ibkr_paper_orders.PaperJournal", return_value=self.journal),
+              patch("atlaspm.execution.ibkr_paper_orders.PaperTransport", return_value=self.gateway),
+              patch("atlaspm.execution.ibkr_paper_orders.reconcile", side_effect=responses) as sync,
+              patch("atlaspm.execution.ibkr_paper_orders.time.sleep") as wait):
             self.assertEqual(main(), 0)
         self.assertEqual(sync.call_count, 3)
         self.assertEqual(wait.call_count, 2)
@@ -268,7 +268,7 @@ class PaperLifecycleTests(unittest.TestCase):
         self.gateway.open_orders = [self.order(0, "Submitted")]
         self.assertEqual(self.sync()["observed_working_client_ids"], [self.ref])
         self.gateway.open_orders.clear()
-        with (patch("atlaspm.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot),
+        with (patch("atlaspm.execution.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot),
               self.assertRaisesRegex(ValueError, "No matching working broker order")):
             cancel(self.gateway, self.journal, batch_id, self.account, self.ref)
         self.assertNotIn("cancel", [call[0] for call in self.gateway.calls])
