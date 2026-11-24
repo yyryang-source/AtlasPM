@@ -513,3 +513,68 @@ The independent daily reconciliation tool remains separate. Rights,
 true historical universe, action coverage, adjustment semantics and
 source provenance require independently reviewed evidence before any
 training approval. No new external data source is bundled.
+
+
+## V5.1 public evidence collector
+
+Default CLI is a zero-network plan. Explicit collection keeps original
+response bytes, SHA-256 content-addressed objects, dated current snapshots,
+normalized candidate files and local manifests. Old quarterly indices are
+reused unless --refresh is requested (SEC may revise older indices).
+The API key is read from the environment and never stored in manifest URLs.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-evidence-v51
+# Replace with your actual contact information, not an example address.
+$env:ATLASPM_SEC_USER_AGENT = "YOUR NAME YOUR CONTACT EMAIL"
+& $py -m atlaspm.cli market-db hf-5m-evidence-v51 --fetch
+~~~
+
+Default range 2000-Q1..2026-Q1 contains 105 completed SEC quarters plus
+three current directory requests. Use --max-requests N for a bounded
+resumable network batch (cached tasks do not consume the budget).
+Use --no-current to skip current directories. Provider errors stop that
+provider, not the other independent providers. No automatic retry of
+rate-limit errors. Do not run parallel collectors.
+
+Optional Alpha Vantage LISTING_STATUS snapshots require your own API key
+in ALPHAVANTAGE_API_KEY and the provider's applicable entitlement/terms.
+--listing-dates accepts explicit dates after 2010-01-01; two requests per
+date (active and delisted). This does not fill 2000..2009, does not infer
+continuous membership between snapshots and cannot resolve stable IDs
+by ticker alone. Quota and empty/error responses are not passed as data.
+
+Sources:
+- https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data
+- https://www.nasdaqtrader.com/Trader.aspx?id=SymbolDirDefs
+- https://www.alphavantage.co/documentation/#listing-status
+
+SEC quarterly master indices identify candidate filings (8-K, 25, S-1
+and others), not actual corporate-action terms. The collector does not
+download filing contents or infer split/dividend ratios. SEC CIK identifies
+an issuer, not a share class. Current SEC/Nasdaq mapping is never backdated.
+Candidate output is deliberately NOT a V5 certified identity/action CSV.
+Manual or separately verified evidence extraction and stable security
+identity resolution are required before V5 ingestion. There is no blanket
+permission for market-data training or redistribution.
+
+Local report: local_data/stock_5m/huggingface/quality/certification_v5/collector/latest.json.
+No canonical price partitions scanned or changed, no training or order
+permission granted.
+
+
+### V5.1 SEC index anomaly handling
+
+A quarterly SEC index can contain isolated records that fail date, field,
+or path validation. The collector now retains the original response bytes
+and omits those records from normalized candidates. Rejection counts,
+categories and up to 25 line-numbered examples appear in manifest stats.
+The conservative provisional threshold is at most 100 rejected rows and
+at most 0.1% of observed rows, with at least one valid row. A run containing
+such a quarter reports CANDIDATES_COLLECTED_WITH_REVIEW, not clean coverage.
+Larger anomalies or missing headers fail that quarter, store a rejection
+manifest under collector/rejected, and continue independent quarters.
+HTTP/access and network failures still stop that provider for the run.
+This is a collection policy, not proof that rejected records are corrupt.
+The original raw bytes remain the evidence of every omitted row.

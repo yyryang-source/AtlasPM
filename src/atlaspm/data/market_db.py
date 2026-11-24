@@ -336,6 +336,14 @@ def register_parser(sub):
     h.add_argument('--identity-csv',type=Path,default=None)
     h.add_argument('--actions-csv',type=Path,default=None)
     h.add_argument('--scan',action='store_true')
+    h=actions.add_parser('hf-5m-evidence-v51',help='Plan or explicitly collect public evidence candidates')
+    h.add_argument('--start-quarter',default='2000-Q1')
+    h.add_argument('--end-quarter',default='2026-Q1')
+    h.add_argument('--listing-dates',nargs='+',default=None)
+    h.add_argument('--no-current',action='store_true')
+    h.add_argument('--fetch',action='store_true')
+    h.add_argument('--refresh',action='store_true')
+    h.add_argument('--max-requests',type=int,default=0)
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -481,6 +489,12 @@ def run(args):
         return hf_stock5m_certification_v5.run(
             args.start_month,args.end_month,identity_csv=args.identity_csv,
             actions_csv=args.actions_csv,scan=args.scan)
+    if args.db_action == 'hf-5m-evidence-v51':
+        from atlaspm.data import hf_stock5m_evidence_v51
+        return hf_stock5m_evidence_v51.run(
+            args.start_quarter,args.end_quarter,listing_dates=args.listing_dates,
+            current=not args.no_current,fetch=args.fetch,refresh=args.refresh,
+            max_requests=args.max_requests)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
