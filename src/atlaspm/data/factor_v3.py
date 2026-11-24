@@ -184,14 +184,18 @@ def _normalize(con, config: dict) -> list[dict]:
         con.execute(f"""UPDATE v3_norm AS n SET {col}=s.z FROM {stage} AS s
             WHERE n.symbol=s.symbol AND n.trade_date=s.trade_date""")
         con.execute(f"DROP TABLE {stage}")
-        raw, norm, active_dates = con.execute(
+        raw, norm, active_dates, pre_holdout_dates = con.execute(
             f"""SELECT count({name}), count({col}),
-                count(DISTINCT trade_date) FILTER (WHERE {col} IS NOT NULL)
+                count(DISTINCT trade_date) FILTER (WHERE {col} IS NOT NULL),
+                count(DISTINCT trade_date) FILTER (
+                    WHERE {col} IS NOT NULL AND trade_date < ?)
                 FROM v3_norm WHERE trade_date BETWEEN ? AND ?""",
-            [config["start"], config["end"]]).fetchone()
+            [config["holdout_start"] or "9999-12-31",
+             config["start"], config["end"]]).fetchone()
         counts.append({"factor": name, "raw_non_null_rows": int(raw),
                        "standardized_rows": int(norm),
                        "standardized_dates": int(active_dates),
+                       "pre_holdout_standardized_dates": int(pre_holdout_dates),
                        "constant_or_small_cross_section_is_null": True})
     return counts
 
@@ -338,7 +342,9 @@ def _correlations(con, c: dict) -> list[dict]:
 def _select(c: dict, diagnostics: list[dict], corr: list[dict],
             coverage: list[dict]) -> dict:
     # No test/holdout labels can determine factor redundancy selection.
-    active = {r["factor"]: r["standardized_dates"] for r in coverage}
+    active = {r["factor"]: (r["pre_holdout_standardized_dates"]
+                            if c["holdout_start"] else r["standardized_dates"])
+              for r in coverage}
     unusable = [n for n in c["factors"] if active[n] < c["min_dates"]]
     train = {d["factor"]: d["ic_stability"]["train_matured"] for d in diagnostics}
     means = {n: train[n]["rank_ic_mean"] if train[n] is not None else None
