@@ -184,12 +184,14 @@ def _normalize(con, config: dict) -> list[dict]:
         con.execute(f"""UPDATE v3_norm AS n SET {col}=s.z FROM {stage} AS s
             WHERE n.symbol=s.symbol AND n.trade_date=s.trade_date""")
         con.execute(f"DROP TABLE {stage}")
-        raw, norm = con.execute(
-            f"""SELECT count({name}), count({col}) FROM v3_norm
-                WHERE trade_date BETWEEN ? AND ?""",
+        raw, norm, active_dates = con.execute(
+            f"""SELECT count({name}), count({col}),
+                count(DISTINCT trade_date) FILTER (WHERE {col} IS NOT NULL)
+                FROM v3_norm WHERE trade_date BETWEEN ? AND ?""",
             [config["start"], config["end"]]).fetchone()
         counts.append({"factor": name, "raw_non_null_rows": int(raw),
                        "standardized_rows": int(norm),
+                       "standardized_dates": int(active_dates),
                        "constant_or_small_cross_section_is_null": True})
     return counts
 
@@ -333,8 +335,11 @@ def _correlations(con, c: dict) -> list[dict]:
     return result
 
 
-def _select(c: dict, diagnostics: list[dict], corr: list[dict]) -> dict:
+def _select(c: dict, diagnostics: list[dict], corr: list[dict],
+            coverage: list[dict]) -> dict:
     # No test/holdout labels can determine factor redundancy selection.
+    active = {r["factor"]: r["standardized_dates"] for r in coverage}
+    unusable = [n for n in c["factors"] if active[n] < c["min_dates"]]
     train = {d["factor"]: d["ic_stability"]["train_matured"] for d in diagnostics}
     means = {n: train[n]["rank_ic_mean"] if train[n] is not None else None
              for n in c["factors"]}
@@ -347,6 +352,8 @@ def _select(c: dict, diagnostics: list[dict], corr: list[dict]) -> dict:
     edges = {(row["a"], row["b"]): row["mean_absolute_spearman"] for row in corr}
     selected, dropped, untested = [], [], []
     for n in ranked:
+        if n in unusable:
+            continue
         conflict = None
         for earlier in selected:
             strength = edges.get((n, earlier), edges.get((earlier, n)))
@@ -360,6 +367,7 @@ def _select(c: dict, diagnostics: list[dict], corr: list[dict]) -> dict:
         else:
             selected.append(n)
     return {"selected_factors": selected, "redundant_factors": dropped,
+            "excluded_insufficient_standardized_dates": unusable,
             "pairs_insufficient_for_redundancy_decision": untested,
             "selection_order": ranked,
             "selection_information": (
@@ -474,7 +482,7 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
                 "ic_stability": _periods(dated, c),
                 "daily_ic_preview": dated[:10],
             })
-        selection = _select(c, diagnostics, correlations)
+        selection = _select(c, diagnostics, correlations, coverage)
         weights, weighting_state = _weights(c, selection["selected_factors"], diagnostics)
         composite, composite_dated = (
             _score(con, weights, c) if weights is not None else (None, [])
@@ -532,7 +540,15 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
                 try:
                     # Only research-only local output, no broker/signal handoff.
                     con.execute(f"""COPY (
-                      SELECT symbol,trade_date,composite_score FROM v3_combo
+                      SELECT symbol,trade_date,composite_score,
+                          '{source}'::VARCHAR AS source,
+                          '{session}'::VARCHAR AS session,
+                          '{VERSION}'::VARCHAR AS schema_version,
+                          TRUE::BOOLEAN AS research_only,
+                          FALSE::BOOLEAN AS approved_for_model_training,
+                          FALSE::BOOLEAN AS point_in_time_validated,
+                          FALSE::BOOLEAN AS live_execution_enabled
+                      FROM v3_combo
                       WHERE trade_date BETWEEN DATE '{c['start']}' AND DATE '{c['end']}'
                       ORDER BY trade_date,symbol
                     ) TO {factor_db._quoted(tmp)} (FORMAT PARQUET,COMPRESSION ZSTD)""")
