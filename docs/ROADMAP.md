@@ -29,6 +29,12 @@ cross-cutting controls at every stage.
 
 ## Later — multi-asset strategy research
 
+Existing options, Treasury and multi-asset hedge research modules remain in
+`src/atlaspm/strategies/options/`, `src/atlaspm/strategies/bonds/` and
+`src/atlaspm/hedging/`. These are research implementations, not live authorization.
+Further portfolio research is planned in the existing engine modules; the empty
+`src/atlaspm/portfolio/` placeholder directory is not needed.
+
 - Build separate options volatility/Greeks and bond curve/duration/credit
   research pipelines with honest contract-level data and cost models.
 - Design a common risk exposure schema for equity beta, option Greeks,
@@ -44,4 +50,4 @@ cross-cutting controls at every stage.
 
 ## Maintenance
 
-`README.md` is the single current entry point. Topic-specific quantitative and selection methods stay in `docs/quant` and `docs/selection`; historical experiments remain in Git history or method notes. All new modules use canonical `atlaspm.quant` / `atlaspm.selection` paths. Legacy import shims will be removed only in a documented breaking change after tests and CLI consumers migrate.
+`README.md` is the single current entry point. Topic-specific quantitative and selection methods stay in `docs/quant` and `docs/selection`; historical experiments remain in Git history or method notes. All new modules use their canonical domain paths (for example, `atlaspm.engine`, `atlaspm.research`, `atlaspm.risk`, `atlaspm.data` and `atlaspm.strategies.equity`). The former `atlaspm.quant` and `atlaspm.selection` module aliases remain compatibility paths. Legacy import shims will be removed only in a documented breaking change after tests and CLI consumers migrate.

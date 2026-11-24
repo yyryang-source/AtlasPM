@@ -29,7 +29,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Smoke test CLI
         run: python -m atlaspm.cli analyze --file examples/portfolio.json
-      - name: Smoke test v0.5.0 supervised ML risk forecasts and autonomous cash-only rebalancing (offline)
+      - name: Smoke test supervised ML risk forecasts and autonomous cash-only rebalancing (offline)
         run: python -m atlaspm.cli ml-rebalance-backtest --file examples/synthetic_prices.csv --feature-days 20 --forecast-days 5 --min-train 30 --rebalance-days 10 --max-exposure 1 --output local_data/ci_ml_dynamic_rebalance.json
 
       - name: Smoke test optimizer
@@ -62,19 +62,19 @@ jobs:
         run: python -m atlaspm.cli ibkr-financing-check --capture local_data/ci_ibkr_private_capture.json --mapping examples/ibkr_mapping_synthetic.json --statement examples/ibkr_financing_synthetic.json --output local_data/ci_ibkr_financing.json
       - name: Smoke test read-only IBKR securities margin monitor (synthetic, no network)
         run: python -m atlaspm.cli ibkr-margin-monitor --fixture examples/ibkr_gateway_synthetic.json --account DU1234567 --output local_data/ci_ibkr_margin_monitor.json
-      - name: Smoke test v0.4.11 static financing and margin stress (synthetic, no network)
+      - name: Smoke test static financing and margin stress (synthetic, no network)
         run: python -m atlaspm.cli ibkr-stress --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --scenarios examples/ibkr_margin_stress_synthetic.json --output local_data/ci_ibkr_margin_stress.json
-      - name: Smoke test v0.4.12 multiasset correlation budget (synthetic, no network)
+      - name: Smoke test multiasset correlation budget (synthetic, no network)
         run: python -m atlaspm.cli ibkr-multiasset-budget --stress local_data/ci_ibkr_margin_stress.json --assumptions examples/ibkr_multiasset_budget_synthetic.json --output local_data/ci_ibkr_multiasset_budget.json
-      - name: Smoke test v0.4.13 reverse margin stress (synthetic, no network)
+      - name: Smoke test reverse margin stress (synthetic, no network)
         run: python -m atlaspm.cli ibkr-reverse-stress --budget local_data/ci_ibkr_multiasset_budget.json --assumptions examples/ibkr_reverse_stress_synthetic.json --output local_data/ci_ibkr_reverse_stress.json
-      - name: Smoke test v0.4.14 complete private IBKR risk audit chain (synthetic, no network)
+      - name: Smoke test complete private IBKR risk audit chain (synthetic, no network)
         run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --output local_data/ci_ibkr_risk_audit.json
-      - name: Smoke test v0.4.14 audit baseline SHA-256 comparison
+      - name: Smoke test audit baseline SHA-256 comparison
         run: python -m atlaspm.cli ibkr-risk-audit --monitor local_data/ci_ibkr_margin_monitor.json --financing local_data/ci_ibkr_financing.json --stress local_data/ci_ibkr_margin_stress.json --multiasset local_data/ci_ibkr_multiasset_budget.json --reverse local_data/ci_ibkr_reverse_stress.json --compare local_data/ci_ibkr_risk_audit.json --output local_data/ci_ibkr_risk_audit_second.json
-      - name: Smoke test v0.4.15 comparison of two local unsigned risk audits
+      - name: Smoke test comparison of two local unsigned risk audits
         run: python -m atlaspm.cli ibkr-audit-diff --previous local_data/ci_ibkr_risk_audit.json --current local_data/ci_ibkr_risk_audit_second.json --output local_data/ci_ibkr_risk_audit_diff.json
-      - name: Smoke test offline HTML dashboard (v0.4.16, synthetic no network)
+      - name: Smoke test offline HTML dashboard (synthetic no network)
         run: |
           cp local_data/ci_ibkr_margin_monitor.json local_data/margin_monitor_fixture.json
           cp local_data/ci_ibkr_financing.json local_data/ibkr_financing_check.json
@@ -168,3 +168,44 @@ jobs:
         run: python -m atlaspm.cli atlas-native-backtest --architecture fusion --return-head-strength 0 --fusion-allocator-mode shrinkage --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_fusionnet.json
       - name: Exercise alternate FusionNet inverse-risk ablation mode
         run: python -m atlaspm.cli atlas-native-backtest --architecture fusion --return-head-strength 0 --fusion-allocator-mode inverse_risk --file examples/synthetic_prices.csv --min-train 60 --train-window 70 --epochs 12 --rebalance-days 10 --no-trade-band 0.05 --max-exposure 1 --output local_data/ci_atlas_fusion_inverse.json
+
+  full-optional-dependencies:
+    name: Full optional dependency tests (Python 3.12, CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install CPU PyTorch
+        run: python -m pip install "torch>=2.6,<3.0" --index-url https://download.pytorch.org/whl/cpu
+      - name: Install every optional dependency group
+        run: python -m pip install -e ".[market,calendar,ml,native,research-io,research-deep,research-ml,portfolio,lake,hf,workbench]"
+      - name: Check installed dependencies
+        run: python -m pip check
+      - name: Run complete test suite with all optional dependencies
+        run: python -m unittest discover -s tests -v
+      - name: Audit repository source structure
+        run: python scripts/maintenance/audit_source.py
+
+  ruff:
+    name: Ruff source checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ruff
+        run: python -m pip install "ruff>=0.9,<1.0"
+      - name: Check unused imports, variables and deprecated module imports
+        run: python -m ruff check src/atlaspm --select F401,F841,TID251
