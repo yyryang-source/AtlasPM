@@ -60,7 +60,7 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu'):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -125,9 +125,18 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                           feature_mean=mean.tolist(),feature_scale=scale.tolist(),
                           coefficients=coef.tolist(),intercept=intercept,
                           model_settings=dict(model_settings)))
+    ensemble_audit=None
+    if ensemble is not None:
+        if not isinstance(ensemble,dict):
+            raise ValueError("INVALID_ENSEMBLE_CONFIG")
+        from atlaspm.research.training_ensemble import adaptive_ensemble
+        combined=adaptive_ensemble(predictions,**ensemble)
+        predictions["adaptive_ensemble"]=combined["predictions"]
+        ensemble_audit=combined["weight_history"]
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
     return dict(version="synthetic_return_research_v3",dataset_sha256=fingerprint,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
+                ensemble_weight_history=ensemble_audit,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
