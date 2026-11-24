@@ -1,53 +1,49 @@
-"""Adaptive synthetic ensemble: weights depend only on matured past OOS labels."""
+"""Adaptive synthetic ensemble with bounded daily working memory."""
 from __future__ import annotations
-from collections import defaultdict, deque
+from collections import deque
+from itertools import zip_longest,groupby
 from math import exp
 from statistics import fmean
 from atlaspm.engine.contracts import finite
 
 
-def adaptive_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01):
+def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01):
+    """Input streams must be ordered by (date, security_id); yield daily rows."""
     if type(window_dates) is not int or type(minimum_dates) is not int or not 1<=minimum_dates<=window_dates:
         raise ValueError("INVALID_ENSEMBLE_WINDOW")
     temp=finite(temperature,"temperature",minimum=.000001)
     names=sorted(predictions)
     if len(names)<2:
         raise ValueError("ENSEMBLE_REQUIRES_TWO_MODELS")
-    tables={}
-    for name in names:
-        table={}
-        for row in predictions[name]:
-            key=(row["date"],row["security_id"])
-            if key in table or row["label_end_date"]<=row["date"]:
-                raise ValueError("DUPLICATE_OR_INVALID_FORECAST")
-            finite(row["prediction"],"prediction")
-            if row["actual"] is not None:
-                finite(row["actual"],"actual")
-            table[key]=row
-        tables[name]=table
-    keys=sorted(tables[names[0]])
-    if not keys or any(set(tables[n])!=set(keys) for n in names):
-        raise ValueError("UNALIGNED_ENSEMBLE_FORECASTS")
-    grouped=defaultdict(list)
-    for key in keys:
-        rows=[tables[n][key] for n in names]
-        if any((r["actual"],r["label_end_date"])!=(rows[0]["actual"],rows[0]["label_end_date"]) for r in rows):
-            raise ValueError("INCONSISTENT_ENSEMBLE_LABEL")
-        grouped[key[0]].append(key)
-    # A whole cross-sectional date matures at its last label end. This avoids
-    # partial cross-section weighting and gives every observed date equal weight.
+    def aligned():
+        previous=None
+        for rows in zip_longest(*(iter(predictions[n]) for n in names)):
+            if any(r is None for r in rows):
+                raise ValueError("UNALIGNED_ENSEMBLE_FORECASTS")
+            base=rows[0]
+            key=(base["date"],base["security_id"])
+            if previous is not None and key<=previous:
+                raise ValueError("DUPLICATE_OR_UNSORTED_FORECAST")
+            previous=key
+            for row in rows:
+                if (row["date"],row["security_id"])!=key:
+                    raise ValueError("UNALIGNED_ENSEMBLE_FORECASTS")
+                if (row["actual"],row["label_end_date"])!=(base["actual"],base["label_end_date"]):
+                    raise ValueError("INCONSISTENT_ENSEMBLE_LABEL")
+                if row["label_end_date"]<=row["date"]:
+                    raise ValueError("INVALID_LABEL_MATURITY")
+                finite(row["prediction"],"prediction")
+                if row["actual"] is not None:
+                    finite(row["actual"],"actual")
+            yield rows
     pending=deque()
     matured=deque(maxlen=window_dates)
-    output, audit=[],[]
-    for day,day_keys in sorted(grouped.items()):
+    seen=False
+    for day,group in groupby(aligned(),key=lambda rows:rows[0]["date"]):
+        seen=True
         while pending and pending[0][0]<day:
-            _,past=pending.popleft()
-            errors={}
-            for name in names:
-                rows=[tables[name][k] for k in past if tables[name][k]["actual"] is not None]
-                if rows:
-                    errors[name]=fmean(abs(r["prediction"]-r["actual"]) for r in rows)
-            if len(errors)==len(names):
+            _,errors=pending.popleft()
+            if errors is not None:
                 matured.append(errors)
         if len(matured)>=minimum_dates:
             loss={n:fmean(d[n] for d in matured) for n in names}
@@ -56,14 +52,32 @@ def adaptive_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperat
             weights={n:raw[n]/sum(raw.values()) for n in names}
         else:
             weights={n:1/len(names) for n in names}
-        audit.append(dict(date=day,matured_dates=len(matured),weights=weights))
-        for key in day_keys:
-            base=tables[names[0]][key]
-            output.append({**base,"prediction":sum(weights[n]*tables[n][key]["prediction"] for n in names)})
-        maturity=max(tables[names[0]][k]["label_end_date"] for k in day_keys)
+        output=[]
+        errors={n:[] for n in names}
+        maturity=day
+        for rows in group:
+            base=rows[0]
+            output.append({**base,"prediction":sum(weights[n]*row["prediction"] for n,row in zip(names,rows))})
+            maturity=max(maturity,base["label_end_date"])
+            if base["actual"] is not None:
+                for n,row in zip(names,rows):
+                    errors[n].append(abs(row["prediction"]-row["actual"]))
         if pending and maturity<pending[-1][0]:
             raise ValueError("NONMONOTONIC_LABEL_MATURITY")
-        pending.append((maturity,day_keys))
+        # Only scalar daily loss summaries are queued until label maturity.
+        pending.append((maturity,{n:fmean(v) for n,v in errors.items()} if errors[names[0]] else None))
+        yield output,dict(date=day,matured_dates=len(matured),weights=weights)
+    if not seen:
+        raise ValueError("EMPTY_ENSEMBLE_FORECASTS")
+
+
+def adaptive_ensemble(predictions, **kwargs):
+    # Compatibility entry point accepts unsorted in-memory lists.
+    ordered={n:sorted(rows,key=lambda r:(r["date"],r["security_id"])) for n,rows in predictions.items()}
+    output,audit=[],[]
+    for rows,weights in iter_ensemble(ordered,**kwargs):
+        output.extend(rows)
+        audit.append(weights)
     return dict(predictions=output,weight_history=audit,research_only=True,
                 approved_for_model_training=False,live_execution_enabled=False,
                 broker_order_submission_enabled=False,model_registry_admission=False)
