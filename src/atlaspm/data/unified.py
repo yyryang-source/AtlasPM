@@ -150,6 +150,23 @@ def _finite_numeric(value):
     return False
 
 
+_POSITIVE_FIELDS = frozenset({"open", "high", "low", "close", "adjusted_close"})
+_NONNEGATIVE_FIELDS = frozenset({"volume", "volume_shares", "bid", "ask", "bid_size", "ask_size"})
+
+
+def _validate_field(field, value):
+    if isinstance(value, (float, Decimal)) and not _finite_numeric(value):
+        raise DataQualityError(f"Non-finite value in {field}")
+    if field in _POSITIVE_FIELDS:
+        if not _finite_numeric(value) or value <= 0:
+            raise DataQualityError(f"Invalid price in {field}")
+    elif field in _NONNEGATIVE_FIELDS:
+        if value is not None and (not _finite_numeric(value) or value < 0):
+            raise DataQualityError(f"Invalid nonnegative field: {field}")
+    elif field == "source" and (not isinstance(value, str) or not value.strip()):
+        raise DataQualityError("Missing source")
+
+
 def _batches(cursor, *, name, spec, columns, path, batch_size, version):
     previous = None
     while True:
@@ -162,16 +179,7 @@ def _batches(cursor, *, name, spec, columns, path, batch_size, version):
                 raise DataQualityError("Missing or duplicate/unordered observation key")
             previous = key
             for field, value in zip(columns, row):
-                if isinstance(value, (float, Decimal)) and not _finite_numeric(value):
-                    raise DataQualityError(f"Non-finite value in {field}")
-                if field in {"open", "high", "low", "close", "adjusted_close"}:
-                    if not _finite_numeric(value) or value <= 0:
-                        raise DataQualityError(f"Invalid price in {field}")
-                if field in {"volume", "volume_shares", "bid", "ask", "bid_size", "ask_size"}:
-                    if value is not None and (not isinstance(value, (int, float)) or value < 0):
-                        raise DataQualityError(f"Invalid nonnegative field: {field}")
-                if field == "source" and (not isinstance(value, str) or not value.strip()):
-                    raise DataQualityError("Missing source")
+                _validate_field(field, value)
         yield Batch(name, columns, tuple(rows), str(path.relative_to(Path.cwd().resolve())), version)
 
 

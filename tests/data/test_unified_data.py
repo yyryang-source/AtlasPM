@@ -149,3 +149,25 @@ class UnifiedTests(unittest.TestCase):
                 else:
                     with self.assertRaises(unified.DataQualityError):
                         list(self.query("equity_5m", columns=("close",)))
+
+    def test_all_price_and_nonnegative_fields_share_numeric_rules(self):
+        for field in ("open", "high", "low", "close", "adjusted_close",
+                      "volume", "volume_shares", "bid", "ask", "bid_size", "ask_size"):
+            for value in (1, 1.25, Decimal("1.234567890123456789")):
+                with self.subTest(field=field, value=value):
+                    unified._validate_field(field, value)
+            for value in (-1, -1.25, Decimal("-0.01"), True, "1",
+                          float("nan"), float("inf"), Decimal("NaN"),
+                          Decimal("sNaN"), Decimal("-Infinity")):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(unified.DataQualityError):
+                        unified._validate_field(field, value)
+        for field in ("open", "high", "low", "close", "adjusted_close"):
+            for value in (0, 0., Decimal("0.00"), None):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(unified.DataQualityError):
+                        unified._validate_field(field, value)
+        for field in ("volume", "volume_shares", "bid", "ask", "bid_size", "ask_size"):
+            for value in (0, 0., Decimal("0.00"), None):
+                with self.subTest(field=field, value=value):
+                    unified._validate_field(field, value)
