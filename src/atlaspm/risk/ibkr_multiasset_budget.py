@@ -7,7 +7,11 @@ a broker What-If, or an authorization to trade.
 
 from __future__ import annotations
 
-from math import isfinite, sqrt
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
+from math import sqrt
 from typing import Any, Mapping
 
 TRADING_DAYS = 252
@@ -19,22 +23,14 @@ MAX_SCENARIOS = 20
 
 
 def _obj(value: Any, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{field} must be an object")
-    return value
-
+    return validated_object(value, field, invalid_message=f"{field} must be an object")
 
 def _num(value: Any, field: str, low: float | None = None,
          high: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{field} must be a finite number")
-    result = float(value)
-    if low is not None and result < low:
-        raise ValueError(f"{field} below allowed range")
-    if high is not None and result > high:
-        raise ValueError(f"{field} above allowed range")
-    return result
-
+    return finite_number(value, field, minimum=low, maximum=high,
+    invalid_message=f"{field} must be a finite number",
+    minimum_message=f"{field} below allowed range",
+    maximum_message=f"{field} above allowed range")
 
 def _integer(value: Any, field: str, minimum: int, maximum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:

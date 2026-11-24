@@ -7,17 +7,18 @@ fails closed on mismatched accounts, positions, values, age, and liabilities.
 
 from __future__ import annotations
 
-from math import isfinite
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
+
 from typing import Any, Mapping
 
 from atlaspm.execution.institutional_ledger import build_institutional_ledger, _timestamp
 
 
 def _obj(value: Any, name: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be a JSON object")
-    return value
-
+    return validated_object(value, name, invalid_message=f"{name} must be a JSON object")
 
 def _str(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -26,10 +27,7 @@ def _str(value: Any, name: str) -> str:
 
 
 def _num(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{name} must be a finite number")
-    return float(value)
-
+    return finite_number(value, name, invalid_message=f"{name} must be a finite number")
 
 def _nonnegative(value: Any, name: str) -> float:
     number = _num(value, name)

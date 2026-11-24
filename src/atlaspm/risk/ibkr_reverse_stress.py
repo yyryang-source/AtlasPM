@@ -6,7 +6,11 @@ The derived shock boundaries are *assumptions*, not liquidation prices.
 
 from __future__ import annotations
 
-from math import isfinite
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
+
 from typing import Any, Mapping
 
 MAX_ASSETS = 12
@@ -15,22 +19,14 @@ SUM_TOLERANCE_USD = 0.01
 
 
 def _object(value: Any, name: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be an object")
-    return value
-
+    return validated_object(value, name, invalid_message=f"{name} must be an object")
 
 def _number(value: Any, name: str, minimum: float | None = None,
             maximum: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{name} requires finite numeric data")
-    number = float(value)
-    if minimum is not None and number < minimum:
-        raise ValueError(f"{name} below range")
-    if maximum is not None and number > maximum:
-        raise ValueError(f"{name} above range")
-    return number
-
+    return finite_number(value, name, minimum=minimum, maximum=maximum,
+    invalid_message=f"{name} requires finite numeric data",
+    minimum_message=f"{name} below range",
+    maximum_message=f"{name} above range")
 
 def _boundary(initial: float, loss_per_unit_decline: float,
               cap: float) -> float | None:

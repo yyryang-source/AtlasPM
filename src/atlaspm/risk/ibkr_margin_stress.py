@@ -7,7 +7,11 @@ broker liquidation threshold, a margin loan balance, or an order preflight.
 
 from __future__ import annotations
 
-from math import isfinite
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
+
 from typing import Any, Mapping
 
 USD_TOL = 1.0
@@ -22,22 +26,14 @@ FIELD_PAIR = {
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be a JSON object")
 
 def _number(value: Any, label: str, *, minimum: float | None = None,
             maximum: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{label} must be finite numeric data")
-    result = float(value)
-    if minimum is not None and result < minimum:
-        raise ValueError(f"{label} is below the allowed range")
-    if maximum is not None and result > maximum:
-        raise ValueError(f"{label} exceeds the allowed range")
-    return result
-
+    return finite_number(value, label, minimum=minimum, maximum=maximum,
+    invalid_message=f"{label} must be finite numeric data",
+    minimum_message=f"{label} is below the allowed range",
+    maximum_message=f"{label} exceeds the allowed range")
 
 def run_margin_stress(
     monitor_data: Mapping[str, Any],

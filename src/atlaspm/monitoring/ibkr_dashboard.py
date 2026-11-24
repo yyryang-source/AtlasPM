@@ -7,6 +7,8 @@ IDs, private labels, file paths or digests enter HTML. No scripts or remote asse
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
 from datetime import datetime, timezone
 from html import escape
 from typing import Any, Mapping
@@ -85,10 +87,7 @@ COUNT_FIELDS = (
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be an object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be an object")
 
 def _safe_state(value: Any, allowed: set[str], errors: list[str], code: str) -> str:
     if not isinstance(value, str) or value not in allowed:

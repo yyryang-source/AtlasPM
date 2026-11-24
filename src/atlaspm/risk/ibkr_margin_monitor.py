@@ -6,6 +6,8 @@ risk alerts are NOT order approvals, financing statements or a broker What-If.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Mapping
@@ -34,10 +36,7 @@ USD_TOLERANCE = 1.0
 
 
 def _number(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{name} must be a finite JSON number")
-    return float(value)
-
+    return finite_number(value, name, invalid_message=f"{name} must be a finite JSON number")
 
 def _metric(
     summary: Mapping[str, Any], key: str, *,

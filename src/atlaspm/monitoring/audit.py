@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 import json
 from datetime import date
-from math import isclose, isfinite
+from math import isclose
 from pathlib import Path
 from typing import Any
 
 
 def _number(value: object, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (float, int)):
-        raise ValueError(f"{label} must be a finite number")
-    value = float(value)
-    if not isfinite(value):
-        raise ValueError(f"{label} must be finite")
-    return value
-
+    return finite_number(value, label,
+    invalid_message=f"{label} must be a finite number",
+    nonfinite_message=f"{label} must be finite")
 
 def _load(path: Path) -> dict[str, Any]:
     raw = json.loads(path.read_text(encoding="utf-8"))

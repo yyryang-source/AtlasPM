@@ -7,9 +7,11 @@ are unverified JSON and cannot authorize live execution.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 from copy import deepcopy
 from datetime import datetime
-from math import isfinite
+
 from typing import Any, Mapping
 
 from atlaspm.execution.institutional_batch import propose_multi_asset_batch
@@ -30,13 +32,9 @@ def _text(x: object, name: str) -> str:
 
 
 def _number(x: object, name: str, *, positive: bool = False) -> float:
-    if isinstance(x, bool) or not isinstance(x, (int, float)) or not isfinite(x):
-        raise ValueError(f"{name} must be finite and numeric")
-    v = float(x)
-    if v < 0 or (positive and v == 0):
-        raise ValueError(f"{name} must be positive" if positive else f"{name} must be nonnegative")
-    return v
-
+    return finite_number(x, name, minimum=0, strict_minimum=positive,
+    invalid_message=f"{name} must be finite and numeric",
+    minimum_message=f"{name} must be positive" if positive else f"{name} must be nonnegative")
 
 def _order_quantity(leg: dict[str, Any]) -> float:
     action = leg["action"]

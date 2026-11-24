@@ -1,6 +1,8 @@
 """Pre-trade hypothetical risk-budget checks; read-only, never submits orders."""
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 from math import isfinite, sqrt
 from typing import Any, Mapping, Sequence
 
@@ -8,13 +10,12 @@ from atlaspm.engine.mean_variance import _validate_covariance
 
 
 def _finite(value: object, label: str, *, lo: float = 0, hi: float | None = None, strict: bool = False) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{label} must be a finite number")
-    f = float(value)
-    if not isfinite(f) or f < lo or (strict and f == lo) or (hi is not None and f > hi):
-        raise ValueError(f"{label} outside permitted range")
-    return f
-
+    return finite_number(value, label, minimum=lo, maximum=hi,
+    strict_minimum=strict,
+    invalid_message=f"{label} must be a finite number",
+    nonfinite_message=f"{label} outside permitted range",
+    minimum_message=f"{label} outside permitted range",
+    maximum_message=f"{label} outside permitted range")
 
 def check_risk_budget(
     weights: Mapping[str, float],

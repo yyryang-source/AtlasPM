@@ -8,10 +8,12 @@ optimize parameters, certify a final holdout or execute orders.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 import json
 import random
 from datetime import date
-from math import isfinite, sqrt
+from math import sqrt
 from pathlib import Path
 from statistics import fmean
 from typing import Any
@@ -42,10 +44,7 @@ DATA_KEYS = (
 
 
 def _number(v: Any, name: str) -> float:
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v):
-        raise ValueError(f"Invalid nonfinite metric {name}")
-    return float(v)
-
+    return finite_number(v, name, invalid_message=f"Invalid nonfinite metric {name}")
 
 def _load(path: Path) -> dict[str, Any]:
     if path.suffix.lower() != ".json":

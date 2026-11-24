@@ -7,6 +7,8 @@ a margin loan, collateral eligibility, or permission to route orders.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
 from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Mapping
@@ -24,10 +26,7 @@ TOLERANCE_USD = 1.0
 
 
 def _object(value: Any, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{field} must be an object")
-    return value
-
+    return validated_object(value, field, invalid_message=f"{field} must be an object")
 
 def _money(value: Any, field: str, *, nonnegative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (float, int)) or not isfinite(value):
