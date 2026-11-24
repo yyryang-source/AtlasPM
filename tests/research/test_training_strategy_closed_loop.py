@@ -109,7 +109,7 @@ class ClosedLoopTests(unittest.TestCase):
             margin_policy={"target_gross":1.5,"initial_fraction":.5,"maintenance_fraction":.3,"annual_apr":.06},
             risk_policy={"max_gross_leverage":2,"max_drawdown":.25,"max_stress_loss_fraction":.5})
         r=loop.run(p,m,**config)
-        self.assertEqual(r["status"],"SYNTHETIC_CASH_CLOSED_LOOP_COMPLETE",r)
+        self.assertEqual(r["status"],"SYNTHETIC_MARGIN_CLOSED_LOOP_COMPLETE",r)
         h=r["holdout"]
         self.assertEqual(h["execution_model"],"synthetic_next_open_assumed_margin")
         self.assertGreater(h["assumed_financing"]["borrowed_total"],0)
