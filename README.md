@@ -1,8 +1,8 @@
 # AtlasPM
 
-**Open-source, local-first portfolio research for cash and margin accounts.** AtlasPM includes stock screening, experimental AI risk models, historical backtesting, portfolio risk audits, and **read-only / synthetic** IBKR workflows.
+**Open-source, local-first portfolio research for cash and margin accounts.** AtlasPM includes stock screening, experimental AI risk models, historical backtesting, portfolio risk audits, and a local end-of-day rebalance workbench for cash equities.
 
-> **Status: v0.7.0 research preview.** This is not a robo-adviser or a live-trading application. **Live orders, broker-driven rebalancing, automated stock-to-portfolio handoff, and verified margin authorization are disabled.** Do not treat historical backtests as investable performance or investment advice.
+> **Status: v0.7.0 research preview.** Broker operations are scoped to read-only account capture and an explicitly approved IBKR Paper workflow for a dedicated USD cash-equity account. Historical backtests are research results. Authenticated Paper account, What-If and order-lifecycle acceptance are tracked in [TODO.md](docs/TODO.md).
 
 ## Start here (Windows PowerShell)
 
@@ -18,25 +18,34 @@ py -3.13 -m venv .venv
 
 For existing clones, run `git pull --ff-only origin main` instead of cloning again. Optional market data ingestion needs `pip install -e ".[market]"` (or include `market` with the extras above).
 
+## Local research and rebalance workbench
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[workbench]"
+.\.venv\Scripts\python.exe -m streamlit run .\src\atlaspm\research_dashboard.py --server.headless true
+```
+
+Open the local workbench to run equity screening, compare equal-weight and Quant backtests, read historical option and Treasury reports, and review cash-equity rebalance drafts. [Workbench guide](docs/quant/RESEARCH_WORKBENCH.md) · [Close and Paper workflow](docs/quant/MARKET_CLOSE_REBALANCE.md)
+
 ## Where things live
 
 ```text
 src/atlaspm/
   cli.py            # public entry point (offline research)
-  commands/         # 3 public *_cli facades + 11 focused command families
+  commands/         # focused CLI adapters and domain dispatch
   framework/        # 8-stage quant workflow registry (inspection only)
   data/            # stock quotes, history, universe and quality (migrated)
   research/        # AI ranking, model validation and walk-forward (migrated)
   strategies/
     equity/         # stock screener, candidate gate, monthly strategy (migrated)
-    options/        # planned: options research (no implementation)
-    bonds/          # planned: bond research (no implementation)
+    options/        # historical listed-option replay and protective puts
+    bonds/          # historical Treasury marks and cash-flow replay
   risk/             # risk models, stress scenarios and margin controls (migrated)
   execution/        # synthetic OMS, read-only IBKR and ledger (migrated)
   monitoring/       # historical reports, audits and local dashboard (migrated)
   portfolio/        # reserved: root portfolio.py legacy module takes precedence
-  hedging/          # planned: no hedge engine implementation
-  quant/            # core backtest/optimizer + compatible legacy import aliases
+  hedging/          # historical stock, Treasury and protective-put comparisons
+  quant/            # compatible legacy import aliases
   selection/        # compatible legacy import aliases
 tests/
   quant/            # quantitative/risk regression tests
@@ -101,8 +110,7 @@ pretrade controls → OMS & reconciliation → monitoring + research feedback**.
 
 The [GitHub Mermaid flowchart](docs/QUANT_WORKFLOW.md) and read-only
 `python -m atlaspm.framework --format json` command show the current
-research-vs-planned status. **Options/bonds engines, unified hedge optimizer,
-real-time execution and live broker permissions are not implemented.**
+research and deployment boundaries. Separate historical option, Treasury, and hedge models support local replay. A unified cross-asset optimizer and real-time execution are pending.
 
 ## Documentation
 

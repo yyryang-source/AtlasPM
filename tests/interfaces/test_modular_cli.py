@@ -10,15 +10,15 @@ from atlaspm.commands import broker_cli, quant_cli, selection_cli
 
 
 class ModularCLIContractTests(unittest.TestCase):
-    def test_all_45_commands_are_unique_and_registered(self):
+    def test_all_58_commands_are_unique_and_registered(self):
         groups = (quant_cli.COMMANDS, broker_cli.COMMANDS, selection_cli.COMMANDS)
-        self.assertEqual([len(g) for g in groups], [14, 16, 15])
-        self.assertEqual(len(set.union(*(set(g) for g in groups))), 45)
-        self.assertEqual(sum(map(len, groups)), 45)
+        self.assertEqual([len(g) for g in groups], [19, 16, 21])
+        self.assertEqual(len(set.union(*(set(g) for g in groups))), 56)
         parser = build_parser()
         parsers = [action for action in parser._actions
                    if isinstance(action, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
+        self.assertEqual(len(parsers[0].choices), 58)
         self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)) | {'market-db', 'portfolio-engine'})
 
     def test_command_modules_do_not_shadow_algorithm_packages(self):
@@ -38,7 +38,9 @@ class ModularCLIContractTests(unittest.TestCase):
     def test_existing_python_and_windows_cli_shapes(self):
         parser = build_parser()
         for command in ("stock-ai-train-v2", "ibkr-margin-monitor",
-                        "atlas-native-backtest", "analyze", "stock-split-reconcile"):
+                        "atlas-native-backtest", "analyze", "stock-split-reconcile",
+                        "stock-history-audit", "stock-compare", "option-history-replay",
+                        "treasury-replay", "multiasset-hedge-backtest"):
             with self.subTest(command=command):
                 self.assertIn(command, parser.format_help())
         options = parser.parse_args(["stock-ai-train-v2", "--prices", "p.csv",

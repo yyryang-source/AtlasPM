@@ -1,21 +1,24 @@
 """IBKR Client Portal Gateway read-only account collection.
 
-Only loopback HTTPS and GET endpoints are available. No trading endpoints,
-credentials, automatic auth, TLS-bypass, or broker order functionality.
+Public collection uses GET over loopback HTTPS. The shared JSON transport
+also permits the explicitly scoped What-If preview. No order submission.
 Raw snapshots are private, not reconciled normalized broker permissions.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import ssl
+import time
 from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from collections.abc import Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import (
     HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener,
 )
@@ -23,11 +26,21 @@ from urllib.request import (
 
 DEFAULT_GATEWAY_URL = "https://localhost:5000/v1/api"
 MAX_RESPONSE_BYTES = 3_000_000
+SLOW_GETS = frozenset({
+    "/iserver/account/orders", "/iserver/account/trades", "/iserver/account/pnl/partitioned",
+    "/portfolio/accounts", "/portfolio/subaccounts",
+})
 
 
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError("Gateway redirected request; refusing a redirected account endpoint")
+
+
+class GatewayHTTPError(ValueError):
+    def __init__(self, status: int):
+        self.status = status
+        super().__init__(f"Gateway HTTP {status}; verify its browser session and account access")
 
 
 def validate_gateway_url(url: str) -> str:
@@ -57,7 +70,7 @@ def _json_no_nan(data: bytes) -> Any:
 
 
 class LocalGatewayTransport:
-    """Small GET-only HTTPS transport with verified certificates and no proxies."""
+    """Loopback HTTPS client with verified certificates and no proxies."""
 
     def __init__(
         self, base_url: str = DEFAULT_GATEWAY_URL, *, ca_file: str | None = None,
@@ -69,6 +82,9 @@ class LocalGatewayTransport:
         if not isfinite(timeout_seconds) or not (1 <= timeout_seconds <= 30):
             raise ValueError("timeout_seconds must be between 1 and 30")
         self.timeout_seconds = float(timeout_seconds)
+        self._pacing_lock = Lock()
+        self._next_request = 0.0
+        self._next_get: dict[str, float] = {}
         # Never use an unverified TLS context, even on localhost. Users can
         # configure the Gateway with a locally trusted certificate instead.
         context = ssl.create_default_context(
@@ -79,6 +95,12 @@ class LocalGatewayTransport:
         )
 
     def get(self, endpoint: str) -> Any:
+        return self._request(endpoint)
+
+    def _request(
+        self, endpoint: str, *, params: dict[str, str] | None = None,
+        preview: dict[str, Any] | None = None,
+    ) -> Any:
         if not isinstance(endpoint, str) or not endpoint.startswith("/"):
             raise ValueError("Gateway endpoint must be an absolute API subpath")
         if (
@@ -86,18 +108,40 @@ class LocalGatewayTransport:
             or ".." in endpoint or "\\" in endpoint or "://" in endpoint
         ):
             raise ValueError("Gateway endpoint contains invalid characters")
+        if preview is not None and (
+            params is not None
+            or not re.fullmatch(r"/iserver/account/[A-Za-z0-9_-]{1,64}/orders/whatif", endpoint)
+        ):
+            raise ValueError("This transport only allows POST to the order-preview endpoint")
+        target = self.base_url + endpoint
+        if params:
+            target += "?" + urlencode(params)
+        headers = {"Accept": "application/json", "User-Agent": "AtlasPM-readonly/0.4"}
+        if preview is not None:
+            headers["Content-Type"] = "application/json"
         req = Request(
-            self.base_url + endpoint,
-            headers={"Accept": "application/json", "User-Agent": "AtlasPM-readonly/0.4"},
-            method="GET",
+            target, headers=headers, method="POST" if preview is not None else "GET",
+            data=json.dumps(preview, allow_nan=False).encode() if preview is not None else None,
         )
+        return self._send_json(req)
+
+    def _send_json(self, req: Request) -> Any:
+        endpoint = urlsplit(req.full_url).path.removeprefix("/v1/api")
+        slow_get = req.get_method() == "GET" and endpoint in SLOW_GETS
         try:
-            with self.opener.open(req, timeout=self.timeout_seconds) as resp:
-                data = resp.read(MAX_RESPONSE_BYTES + 1)
+            with self._pacing_lock:
+                due = max(self._next_request, self._next_get.get(endpoint, 0.0) if slow_get else 0.0)
+                remaining = due - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
+                started = time.monotonic()
+                self._next_request = started + 0.11
+                if slow_get:
+                    self._next_get[endpoint] = started + 5.1
+                with self.opener.open(req, timeout=self.timeout_seconds) as resp:
+                    data = resp.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            raise ValueError(
-                f"Gateway HTTP {exc.code}; verify its browser session and account access"
-            ) from None
+            raise GatewayHTTPError(exc.code) from None
         except (URLError, TimeoutError, ssl.SSLError) as exc:
             raise ValueError(
                 "Cannot read local IBKR Gateway using verified TLS. "

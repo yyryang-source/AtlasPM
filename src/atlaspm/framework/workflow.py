@@ -51,6 +51,9 @@ STAGES: tuple[WorkflowStage, ...] = (
             "atlaspm.data.factor_eval",
             "atlaspm.data.factor_v3",
             "atlaspm.data.corporate_action_reconciliation",
+            "atlaspm.data.historical_universe",
+            "atlaspm.data.stock_fundamentals_import",
+            "atlaspm.market_close",
         ),
         deliverables=("data_quality_report", "point_in_time_universe"),
         limitations=("完整历史退市与 IPO 时点股票池尚未验证", "价格源调整可能存在追溯修订"),
@@ -73,6 +76,7 @@ STAGES: tuple[WorkflowStage, ...] = (
         "partial_research", ("alpha",),
         existing_modules=(
             "atlaspm.research.stock_walkforward",
+            "atlaspm.research.stock_comparison",
             "atlaspm.engine.replay",
             "atlaspm.research.training_experiment",
             "atlaspm.research.v2_momentum_diagnostics",
@@ -89,6 +93,8 @@ STAGES: tuple[WorkflowStage, ...] = (
         existing_modules=(
             "atlaspm.strategies.equity.monthly_stock_selection",
             "atlaspm.strategies.equity.alpha_eligibility",
+            "atlaspm.strategies.options.protective_put",
+            "atlaspm.strategies.bonds.treasury_replay",
         ),
         deliverables=("equity_candidates", "optional_derivative_and_bond_research"),
         limitations=("期权、债券独立 Alpha/选券引擎仍待开发",),
@@ -100,6 +106,8 @@ STAGES: tuple[WorkflowStage, ...] = (
         existing_modules=(
             "atlaspm.engine.mean_variance",
             "atlaspm.engine.unified",
+            "atlaspm.engine.stock_allocation",
+            "atlaspm.hedging.multiasset_hedge",
             "atlaspm.risk.risk_budget",
             "atlaspm.risk.ibkr_multiasset_budget",
             "atlaspm.risk.atlas_risknet",
@@ -111,24 +119,28 @@ STAGES: tuple[WorkflowStage, ...] = (
     WorkflowStage(
         "pretrade", "06 交易前风险与合规检查",
         "校验价格、保证金、头寸、集中度、流动性与操作权限",
-        "synthetic_only", ("portfolio",),
+        "partial_research", ("portfolio",),
         existing_modules=(
             "atlaspm.execution.institutional_gate",
             "atlaspm.execution.institutional_batch",
+            "atlaspm.rebalance_workbench",
+            "atlaspm.ibkr_whatif",
         ),
-        deliverables=("offline_pretrade_review",),
-        limitations=("合成或用户提供的经纪商字段不构成真实买入授权",),
+        deliverables=("offline_pretrade_review", "paper_what_if_review"),
+        limitations=("IBKR Paper 联调待验收", "预检不授予实盘权限"),
     ),
     WorkflowStage(
         "execution", "07 订单执行、成交回报与对账",
         "研究订单生命周期、部分成交、取消、异常及账本一致性",
-        "synthetic_only", ("pretrade",),
+        "partial_research", ("pretrade",),
         existing_modules=(
             "atlaspm.execution.paper_oms",
             "atlaspm.execution.broker_reconcile",
+            "atlaspm.ibkr_paper_orders",
+            "atlaspm.paper_order_journal",
         ),
-        deliverables=("synthetic_oms_journal", "reconciliation_diagnostics"),
-        limitations=("没有自动发送 IBKR/Alpaca 订单的适配器",),
+        deliverables=("synthetic_oms_journal", "paper_order_journal", "reconciliation_diagnostics"),
+        limitations=("IBKR Paper 执行和对账待券商联调验收，仅支持人工确认发单",),
     ),
     WorkflowStage(
         "monitor", "08 监控、绩效归因与复盘",
@@ -150,18 +162,21 @@ ASSET_SLEEVES: tuple[AssetSleeve, ...] = (
         existing_modules=(
             "atlaspm.research.ai_stock_ranker_v2",
             "atlaspm.strategies.equity.monthly_stock_selection",
+            "atlaspm.strategies.equity.stock_screener",
         ),
-        limitations=("样本外 Alpha 尚未验证", "不提供订单或目标权重"),
+        limitations=("样本外 Alpha 尚未验证",),
     ),
     AssetSleeve(
-        "options", "期权策略", "planned",
-        ("隐含/实现波动率", "Delta / Gamma / Vega", "期限结构", "组合保护"),
-        limitations=("独立期权行情、定价、Greek 风险与策略回测尚未完成",),
+        "options", "期权策略", "partial_research",
+        ("历史报价回放", "保护性看跌期权"),
+        existing_modules=("atlaspm.strategies.options.option_replay", "atlaspm.strategies.options.protective_put"),
+        limitations=("波动率曲面、Greek 风险和交易联调待开发",),
     ),
     AssetSleeve(
-        "bonds", "债券策略", "planned",
-        ("收益率曲线", "久期 / 凸性", "信用利差", "利率对冲"),
-        limitations=("独立债券行情、期限结构和选券回测尚未完成",),
+        "bonds", "债券策略", "partial_research",
+        ("美国国债历史报价", "现金流与久期风险回放"),
+        existing_modules=("atlaspm.strategies.bonds.treasury_replay",),
+        limitations=("信用债选券、完整期限结构和交易联调待开发",),
     ),
 )
 
@@ -243,7 +258,8 @@ def workflow_report() -> dict[str, object]:
         "feedback_loop": {"from": "monitor", "to": "alpha", "type": "research_review_only"},
         "warnings": [
             "Architecture inventory only: nothing executes, allocates or authorizes orders.",
-            "Options and bonds sleeves are planned research interfaces, not implemented strategies.",
+            "Options, Treasuries and multi-asset hedges have historical replay with limited coverage.",
+            "IBKR Paper integration still requires authenticated validation.",
             "Risk management spans research, portfolio, execution and monitoring.",
             "Hedges must be jointly optimized with exposures and costs, not appended blindly.",
         ],
@@ -265,8 +281,8 @@ def mermaid_flowchart() -> str:
                 lines.append(f"    {dependency} --> {stage.code}")
     lines += [
         '    equity(("股票研究"))',
-        '    options(("期权研究 · 规划"))',
-        '    bonds(("债券研究 · 规划"))',
+        '    options(("期权历史回放"))',
+        '    bonds(("国债历史回放"))',
         "    validation --> sleeves",
         "    sleeves --> equity",
         "    sleeves --> options",

@@ -1,10 +1,12 @@
 """Offline regression tests for explicitly guarded IBKR local Gateway GET capture."""
 
 import copy
+import io
 import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from atlaspm.execution.ibkr_gateway import (
     FixtureGatewayTransport, LocalGatewayTransport,
@@ -108,6 +110,33 @@ class IBKRGatewayTests(unittest.TestCase):
         for bad in ("http://evil.example", "//evil", "/../orders", "/a?b=c"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 client.get(bad)
+
+    def test_gateway_spaces_requests_and_brackets_order_snapshots_at_broker_rate(self):
+        clock = 10.0
+        sent_at = []
+        client = LocalGatewayTransport()
+
+        def advance(delay):
+            nonlocal clock
+            clock += delay
+
+        def response(request, *, timeout):
+            sent_at.append(clock)
+            return io.BytesIO(b"{}")
+
+        with (patch("atlaspm.quant.ibkr_gateway.time.monotonic", side_effect=lambda: clock),
+              patch("atlaspm.quant.ibkr_gateway.time.sleep", side_effect=advance),
+              patch.object(client.opener, "open", side_effect=response)):
+            client.get("/iserver/account/orders")
+            client.get("/iserver/accounts")
+            client.get("/iserver/account/orders")
+            client.get("/iserver/account/trades")
+            client.get("/iserver/account/trades")
+
+        self.assertGreaterEqual(sent_at[1] - sent_at[0], .10)
+        self.assertGreaterEqual(sent_at[2] - sent_at[0], 5.0)
+        self.assertGreaterEqual(sent_at[3] - sent_at[2], .10)
+        self.assertGreaterEqual(sent_at[4] - sent_at[3], 5.0)
 
     def test_private_raw_capture_cannot_be_saved_in_repo_root(self):
         with TemporaryDirectory() as folder:

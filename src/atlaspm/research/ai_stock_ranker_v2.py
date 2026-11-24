@@ -252,6 +252,42 @@ def _model_research_review(
     }
 
 
+def fit_rank_queries(
+    train: tuple[list[dict[str, Any]], list[int], list[int]],
+    validation: tuple[list[dict[str, Any]], list[int], list[int]],
+    *,
+    feature_names: tuple[str, ...],
+    num_boost_round: int,
+) -> tuple[Any, int, dict[str, Any]]:
+    """Fit from labeled date groups and choose the iteration on validation only."""
+    lgb = _load_lightgbm()
+    train_rows, train_labels, train_groups = train
+    val_rows, val_labels, val_groups = validation
+    train_set = lgb.Dataset(
+        _matrix(train_rows), label=train_labels, group=train_groups,
+        feature_name=list(feature_names),
+    )
+    val_set = lgb.Dataset(
+        _matrix(val_rows), label=val_labels, group=val_groups,
+        reference=train_set, feature_name=list(feature_names),
+    )
+    params = {
+        "objective": "rank_xendcg", "metric": "ndcg", "ndcg_eval_at": [5, 10],
+        "learning_rate": 0.035, "num_leaves": 15, "max_depth": 5,
+        "min_data_in_leaf": 20, "feature_fraction": 0.9,
+        "bagging_fraction": 0.9, "bagging_freq": 1,
+        "verbosity": -1, "seed": 17, "num_threads": 2,
+        "label_gain": [0, 1, 3, 7, 15],
+    }
+    model = lgb.train(
+        params, train_set, valid_sets=[val_set],
+        num_boost_round=num_boost_round,
+        callbacks=[lgb.early_stopping(stopping_rounds=35, verbose=False)],
+    )
+    iteration = model.best_iteration or num_boost_round
+    return model, iteration, params
+
+
 def train_stock_learning_to_rank(
     prices_path: Path,
     benchmark_path: Path,
@@ -289,32 +325,13 @@ def train_stock_learning_to_rank(
     for name in ("train", "validation", "test"):
         if len(queries[name][0]) < (min_train_rows if name == "train" else 30):
             raise ValueError(f"Insufficient {name} ranker observations")
-    lgb = _load_lightgbm()
-    train_rows, train_labels, train_groups = queries["train"]
-    val_rows, val_labels, val_groups = queries["validation"]
+    train_rows, _, train_groups = queries["train"]
+    val_rows, _, val_groups = queries["validation"]
     test_rows, _, test_groups = queries["test"]
-    train_set = lgb.Dataset(
-        _matrix(train_rows), label=train_labels, group=train_groups,
-        feature_name=list(FEATURE_NAMES),
+    model, iteration, params = fit_rank_queries(
+        queries["train"], queries["validation"],
+        feature_names=FEATURE_NAMES, num_boost_round=num_boost_round,
     )
-    val_set = lgb.Dataset(
-        _matrix(val_rows), label=val_labels, group=val_groups,
-        reference=train_set, feature_name=list(FEATURE_NAMES),
-    )
-    params = {
-        "objective": "rank_xendcg", "metric": "ndcg", "ndcg_eval_at": [5, 10],
-        "learning_rate": 0.035, "num_leaves": 15, "max_depth": 5,
-        "min_data_in_leaf": 20, "feature_fraction": 0.9,
-        "bagging_fraction": 0.9, "bagging_freq": 1,
-        "verbosity": -1, "seed": 17, "num_threads": 2,
-        "label_gain": [0, 1, 3, 7, 15],
-    }
-    model = lgb.train(
-        params, train_set, valid_sets=[val_set],
-        num_boost_round=num_boost_round,
-        callbacks=[lgb.early_stopping(stopping_rounds=35, verbose=False)],
-    )
-    iteration = model.best_iteration or num_boost_round
     val_scores = model.predict(_matrix(val_rows), num_iteration=iteration)
     test_scores = model.predict(_matrix(test_rows), num_iteration=iteration)
     val_metrics = _rank_evaluation(val_rows, val_scores, top)

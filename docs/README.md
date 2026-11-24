@@ -7,6 +7,8 @@ Documentation is grouped by research domain. Actual source ownership is defined 
 
 Core engines: [Unified portfolio](UNIFIED_PORTFOLIO_ENGINE_V1.md), [Historical replay](HISTORICAL_REPLAY_V1.md), [AI research and low-memory training](AI_RESEARCH_TRAINING_V1.md), [Factor database](FACTOR_DATABASE.md), [Factor evaluation](FACTOR_EVALUATION_V2.md), [Factor V3](FACTOR_V3.md).
 
+Workbench: [Current features](FUNCTIONS.md), [Development and acceptance checklist](TODO.md), [Local research workbench](quant/RESEARCH_WORKBENCH.md), [Close and Paper workflow](quant/MARKET_CLOSE_REBALANCE.md).
+
 Shared: [Source Code Layout](CODE_LAYOUT.md), [Standard Quant Workflow](QUANT_WORKFLOW.md), [Architecture](ARCHITECTURE.md), [Data](DATA.md), [Roadmap](ROADMAP.md), [Open-source model review](OPEN_SOURCE_MODELS.md).
 
 Older version-numbered research notes remain under `docs/quant/` for method and regression reproducibility; they are **not separate supported applications**. See the root [README](../README.md) for current status and commands.
