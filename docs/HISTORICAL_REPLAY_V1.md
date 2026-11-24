@@ -35,3 +35,16 @@ Covariance uses annualized sample estimates plus 1e-8 diagonal regularization.
 The targets are not guaranteed realized weights: opening gaps, integer shares,
 costs and settlement can cause deviations. Constraints apply to optimizer
 targets, not a continuous risk limit. No real history, margin or OMS integration.
+
+## V3 comparison
+
+Use `python -m atlaspm.engine.replay_performance --file examples/historical_replay_comparison.json`.
+Requires the portfolio extra and a common optimizer configuration. All methods
+use the same post-warmup dates, initial cash and cost assumptions.
+Supply positive synthetic SPY and QQQ closing marks in each session's
+benchmark_close and an explicit benchmark_basket. Benchmarks are frictionless
+price-only buy-and-hold indices, not total-return series. The output includes
+aligned equity indices, CAGR (252 supplied sessions/year), volatility, Sharpe,
+Sortino, Calmar, drawdown, arithmetic alpha and beta versus SPY, tracking error,
+information ratio, cumulative gross traded notional/start equity and costs.
+Undefined ratios are null. Short synthetic samples are not investment evidence.
