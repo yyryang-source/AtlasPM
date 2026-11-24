@@ -1,6 +1,6 @@
 # Canonical code layout
 
-AtlasPM groups source files by domain. Legacy `atlaspm.selection.*`, `atlaspm.quant.*` and top-level compatibility imports use module-identity aliases for the relocated implementations.
+AtlasPM groups source files by domain. Retained legacy imports use module-identity aliases for relocated implementations. 39 deprecated aliases are retired; see the [retirement inventory](maintenance/SHIM_USAGE_STAGE3.md). The historical relocation list below is a migration map, not a promise that every old import is still available.
 
 | Package | Functionality | Status |
 | --- | --- | --- |
@@ -88,4 +88,4 @@ New code should import canonical paths. `atlaspm/portfolio.py` is the compatibil
 - `atlaspm.quant.optimizer` → `atlaspm.engine.optimizer`
 - `atlaspm.quant.portfolio` → `atlaspm.engine.portfolio`
 
-These implementations are moved byte-for-byte; old root and quant import paths resolve to the same canonical module object. Baseline algorithms remain available for reproducible comparisons.
+The relocated canonical implementations remain available for reproducible comparisons. Use the destination module for every import; retired paths no longer resolve.

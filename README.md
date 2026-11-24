@@ -62,7 +62,7 @@ as compatibility aliases. See [complete source map](docs/CODE_LAYOUT.md).
 This code organization does **not** implement portfolio/hedging/options/bonds
 engines or enable live broker execution.
 
-Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatibility with existing tests and external scripts. **New code should use `atlaspm.quant.*` and `atlaspm.selection.*`.**
+39 unused-in-tree deprecated import paths have been retired; 59 compatibility aliases remain. **Use canonical domain imports** (for example, `atlaspm.engine.backtest` instead of `atlaspm.backtest`). The CLI is unchanged. See the [retirement inventory and migration guidance](docs/maintenance/SHIM_USAGE_STAGE3.md).
 
 ## Local market database
 
