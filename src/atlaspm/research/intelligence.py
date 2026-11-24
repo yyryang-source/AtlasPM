@@ -16,6 +16,7 @@ import re
 
 from atlaspm.data.api_gateway import DEFAULT_GATEWAY, MODEL_ENDPOINTS, GatewayError, _strict_json
 from atlaspm.data.market_db import private_path
+from atlaspm.data.provider_policy import RESTRICTED
 from atlaspm.research.training_models import MODELS, PACKAGES
 from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
@@ -69,6 +70,11 @@ def _prepare(topic, evidence, as_of):
                 or not isinstance(text, str) or not 1 <= len(text) <= 8192
                 or item["external_use_reviewed"] is not True):
             raise ValueError("Invalid or unreviewed evidence")
+        normalized_source = re.sub(r"[^a-z0-9]", "", source.casefold())
+        restricted_names = {re.sub(r"[^a-z0-9]", "", name) for name in RESTRICTED if name != "hf"}
+        restricted_names.update({"yahoo", "huggingface", "interactivebrokers", "finnhub"})
+        if any(name in normalized_source for name in restricted_names):
+            raise ValueError("Restricted feed source cannot enter external AI through public excerpts")
         if _timestamp(item["available_at"]) > cutoff:
             raise ValueError("Evidence timestamp follows research cutoff")
         total += len(text.encode("utf-8"))
