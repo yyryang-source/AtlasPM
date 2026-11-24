@@ -254,22 +254,37 @@ open, 2003-03-20 09:32 open, 2004-06-07 09:32 open, 2005-06-01
 duration was not divisible by 5 minutes caused `AUDIT_ERROR`, even though
 these are valid market-calendar boundaries.
 
-The audit now counts all fixed UTC 5m slots **overlapping** the actual
-[open, close) session, while still flagging whole buckets completely
-outside the exchange schedule. For the first/last partial bucket it
-compares the number of source 1m records with the number of 1m slots
-actually available during the session. If the source has more minute
-records than the calendar allows, it reports
-`NYSE_BOUNDARY_MINUTE_COUNT_EXCEEDED` as a structural issue. Otherwise
-it reports `PARTIAL_NYSE_BOUNDARY_5M_BARS_REQUIRE_SOURCE_REVIEW`:
-the 5m aggregate alone cannot prove which specific source minutes were
-included, so it is **not** an approval of the bar. The full set of
-irregular NYSE sessions is listed in `non_5m_aligned_nyse_sessions`.
+The audit counts fixed UTC 5m slots **overlapping** the actual
+NYSE [open, close) session, while still flagging bars entirely outside
+the NYSE schedule for investigation. For the first/last partial bucket
+it compares the number of source 1m records with the number of NYSE
+calendar-open minutes. The full set of irregular NYSE dates is listed in
+`non_5m_aligned_nyse_sessions`.
 
-The monthly audit JSON schema was updated to `atlaspm_hf_5m_research_qc_v2`.
-Existing V1 batch checkpoints are invalidated automatically, so the next
-batch pass revisits the 315 monthly partitions; this does not redownload
-any market data and preserves all original Parquet. To inspect only the
+**Important all-market caveat:** This dataset includes US stocks from
+multiple exchanges. The NYSE special open/close time does not establish
+the corresponding Nasdaq or individual security's listing-venue session.
+For example, a 09:30-09:35 5m bucket can have more 1m records than the
+NYSE-open portion of a delayed-opening 09:33 session. That difference is
+meaningful evidence but **not independently proof of a corrupted price
+bar** for a ticker with unknown historical exchange membership.
+`nyse_boundary_minute_count_exceeded` preserves the exact count, and
+`NYSE_BOUNDARY_MINUTES_EXCEED_EXCHANGE_OPEN_VENUE_UNVERIFIED` is added
+to `review_reasons`. The status remains `REVIEW_REQUIRED` when no
+other structurally provable error exists. Actual invalid OHLCV,
+duplicates, missing QC metadata and separate true structural failures
+remain `STRUCTURAL_QC_FAILED`. Do not repair or delete prices based
+solely on this NYSE-versus-all-venues discrepancy.
+
+The monthly audit schema is now `atlaspm_hf_5m_research_qc_v3`.
+The batch resume logic selectively invalidates older V2 monthly audit
+checkpoints **only if** the report contains this NYSE boundary overflow.
+Unaffected V2 scans can be reused after file signatures and audit-JSON
+hash checks pass. Older V1 and unknown schemas always require rescanning.
+This avoids unnecessarily re-reading the entire 25+ GiB lake solely
+for a classification change. No market data is redownloaded.
+
+To inspect only the
 six previously errored months first:
 
 ~~~powershell
@@ -288,6 +303,13 @@ foreach ($m in @("2001-09","2001-10","2003-03","2004-06","2005-06","2006-12")) {
     }
 }
 ~~~
+
+After these six targeted audits, rerun the batch command; the new V3
+reports invalidate their existing checkpoint hashes automatically:
+`python -m atlaspm.cli market-db hf-5m-audit-batch`. Previously
+audited, unaffected V2 months resume without full rescan.
+Inspect `months_structural_failed` and all actual structural issues
+separately. Training and live execution remain disabled.
 
 Remember that the lake spans many US-listed symbols, while this calendar
 audit uses NYSE as its reference. Venue-specific histories and individual
