@@ -48,3 +48,9 @@ aligned equity indices, CAGR (252 supplied sessions/year), volatility, Sharpe,
 Sortino, Calmar, drawdown, arithmetic alpha and beta versus SPY, tracking error,
 information ratio, cumulative gross traded notional/start equity and costs.
 Undefined ratios are null. Short synthetic samples are not investment evidence.
+
+## V4–V6 extensions
+
+Optional execution_policy uses prior-session volume only and requires a volume map per supplied session. Audited order events are a synthetic adapter, not the institutional Paper OMS. Independent margin_stress uses fixed exposure and calendar-day ACT/365 interest; no broker liquidation or dynamic borrowing.
+
+replay_search.search(payload, grid, validation_start, holdout_start) accepts zero-based chronological split indices and at most 128 combinations. Trials run only on the prefix ending before holdout; selection uses validation Sharpe then return, with deterministic grid ordering for ties. Only the selected configuration is replayed on the full series, carrying positions into holdout. No fallback selection on holdout failure. This is single-split synthetic parameter research, not nested walk-forward, sealed external data access, or model training. Repeated manual tuning on the same holdout invalidates independence.
