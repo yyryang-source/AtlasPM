@@ -1,0 +1,213 @@
+{
+  "mode": "synthetic",
+  "synthetic_fixture": true,
+  "initial_cash": 1000,
+  "fee_bps": 0,
+  "slippage_bps": 0,
+  "cash_reserve": 0,
+  "top_k": 1,
+  "rebalance_sessions": 1,
+  "settlement_sessions": 1,
+  "sessions": [
+    {
+      "date": "2020-01-02",
+      "open_at": "2020-01-02T09:30:00-05:00",
+      "close_at": "2020-01-02T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 100,
+        "BBB": 100
+      },
+      "close": {
+        "AAA": 100,
+        "BBB": 100
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-02T16:00:00-05:00",
+          "available_at": "2020-01-02T16:00:00-05:00",
+          "data_available_at": "2020-01-02T16:00:00-05:00",
+          "expires_at": "2020-01-02T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-02T16:00:00-05:00",
+          "available_at": "2020-01-02T16:00:00-05:00",
+          "data_available_at": "2020-01-02T16:00:00-05:00",
+          "expires_at": "2020-01-02T16:00:00-05:00",
+          "factor_score": 0,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-03",
+      "open_at": "2020-01-03T09:30:00-05:00",
+      "close_at": "2020-01-03T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 110,
+        "BBB": 100
+      },
+      "close": {
+        "AAA": 110,
+        "BBB": 100
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-03T16:00:00-05:00",
+          "available_at": "2020-01-03T16:00:00-05:00",
+          "data_available_at": "2020-01-03T16:00:00-05:00",
+          "expires_at": "2020-01-03T16:00:00-05:00",
+          "factor_score": -2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-03T16:00:00-05:00",
+          "available_at": "2020-01-03T16:00:00-05:00",
+          "data_available_at": "2020-01-03T16:00:00-05:00",
+          "expires_at": "2020-01-03T16:00:00-05:00",
+          "factor_score": 0,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-06",
+      "open_at": "2020-01-06T09:30:00-05:00",
+      "close_at": "2020-01-06T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 120,
+        "BBB": 100
+      },
+      "close": {
+        "AAA": 120,
+        "BBB": 100
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-06T16:00:00-05:00",
+          "available_at": "2020-01-06T16:00:00-05:00",
+          "data_available_at": "2020-01-06T16:00:00-05:00",
+          "expires_at": "2020-01-06T16:00:00-05:00",
+          "factor_score": -2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-06T16:00:00-05:00",
+          "available_at": "2020-01-06T16:00:00-05:00",
+          "data_available_at": "2020-01-06T16:00:00-05:00",
+          "expires_at": "2020-01-06T16:00:00-05:00",
+          "factor_score": 0,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-07",
+      "open_at": "2020-01-07T09:30:00-05:00",
+      "close_at": "2020-01-07T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 130,
+        "BBB": 100
+      },
+      "close": {
+        "AAA": 130,
+        "BBB": 100
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-07T16:00:00-05:00",
+          "available_at": "2020-01-07T16:00:00-05:00",
+          "data_available_at": "2020-01-07T16:00:00-05:00",
+          "expires_at": "2020-01-07T16:00:00-05:00",
+          "factor_score": -2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-07T16:00:00-05:00",
+          "available_at": "2020-01-07T16:00:00-05:00",
+          "data_available_at": "2020-01-07T16:00:00-05:00",
+          "expires_at": "2020-01-07T16:00:00-05:00",
+          "factor_score": 0,
+          "model_rank": 2
+        }
+      ]
+    }
+  ]
+}
