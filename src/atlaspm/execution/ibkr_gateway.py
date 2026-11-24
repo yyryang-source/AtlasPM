@@ -99,6 +99,27 @@ class LocalGatewayTransport:
     def get(self, endpoint: str) -> Any:
         return self._request(endpoint)
 
+    def market_snapshot(self, conids, fields):
+        """Fixed L1 market-data route; never a regulatory fee-based snapshot."""
+        if (not isinstance(conids, (list, tuple)) or not 1 <= len(conids) <= 100
+                or any(type(c) is not int or not 1 <= c <= 2**63-1 for c in conids)
+                or len(set(conids)) != len(conids)):
+            raise ValueError("Invalid bounded contract IDs")
+        if (not isinstance(fields, (list, tuple)) or not 1 <= len(fields) <= 50
+                or any(not isinstance(f, str) or not re.fullmatch(r"[0-9]{1,5}", f) for f in fields)):
+            raise ValueError("Invalid bounded market fields")
+        return self._request("/iserver/marketdata/snapshot", params={
+            "conids": ",".join(map(str, conids)), "fields": ",".join(fields)})
+
+    def market_unsubscribe(self, conid):
+        """Only an individually identified market stream, never an order."""
+        if type(conid) is not int or not 1 <= conid <= 2**63-1:
+            raise ValueError("Invalid market stream contract ID")
+        req = Request(self.base_url + "/iserver/marketdata/unsubscribe",
+                      headers={"Accept":"application/json", "Content-Type":"application/json"},
+                      method="POST", data=json.dumps({"conid": conid}).encode())
+        return self._send_json(req)
+
     def _request(
         self, endpoint: str, *, params: dict[str, str] | None = None,
         preview: dict[str, Any] | None = None,
