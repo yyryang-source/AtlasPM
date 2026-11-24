@@ -21,7 +21,11 @@ def inventory(gateway=DEFAULT_GATEWAY):
         env=PROVIDERS[name].key_env if name in PROVIDERS else MODEL_ENDPOINTS.get(name,("",None))[1]
         if name=="sec":
             env="ATLASPM_SEC_USER_AGENT"
+        if name=="finra":
+            env="FINRA_CLIENT_ID + FINRA_CLIENT_SECRET"
         configured=bool(os.environ.get(env)) if env else None
+        if name=="finra":
+            configured=bool(os.environ.get("FINRA_CLIENT_ID") and os.environ.get("FINRA_CLIENT_SECRET"))
         if name=="xpressapi":
             configured=bool(os.environ.get("XPRESSAPI_TOKEN") or
                             (os.environ.get("XPRESSAPI_USERNAME") and os.environ.get("XPRESSAPI_PASSWORD")))
@@ -44,7 +48,8 @@ def inventory(gateway=DEFAULT_GATEWAY):
             "enabled_by_configuration":enabled,"ready_for_manual_attempt":ready,
             "credential_env":env,"credential_configured":configured,"rights_attested":rights,
             "token_expiry_operator_valid":expiry,"auth_mode":
-                "local_gateway" if name=="ibkr" else "licensed_file_or_pending" if name in _BLOCKED else
+                "local_gateway" if name=="ibkr" else "oauth2_client_credentials_data_pending" if name=="finra" else
+                "licensed_file_or_pending" if name in _BLOCKED else
                 "bearer" if name in {"xpressapi","unusual_whales","massive","openai","anthropic"} else
                 "api_key" if name in {"fred","gemini"} else "contact_header" if name=="sec" else "none",
             "calls":state.get("calls",0),"success_rate":state.get("success_rate"),

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from base64 import b64encode
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -118,7 +119,7 @@ class Gateway:
         self._open = opener if opener is not None else build_opener(_NoRedirect()).open
         self._clock, self._sleep = clock, sleep
         self._max_bytes, self._cache_bytes, self._attempts = max_bytes, cache_bytes, attempts
-        self._states = {name: _State() for name in (*PROVIDERS, *MODEL_ENDPOINTS)}
+        self._states = {name: _State() for name in (*PROVIDERS, *MODEL_ENDPOINTS, "finra")}
         self._cache = OrderedDict()
         self._cache_lock = Lock()
         self._cache_size = 0
@@ -402,17 +403,34 @@ class Gateway:
                           data=urlencode(payload).encode(),method="POST",
                           headers={"Content-Type":"application/x-www-form-urlencoded",
                                    "Accept":"application/json","Accept-Encoding":"identity"})
-        state=self._states["xpressapi"]
+        return self._auth_token("xpressapi",request,refresh_required=True)
+
+    def finra_token(self):
+        """Official FINRA FIP OAuth2 client credentials flow; no data query implied."""
+        require_enabled("finra")
+        local_rights("finra")
+        client,secret=(os.environ.get(k,"") for k in ("FINRA_CLIENT_ID","FINRA_CLIENT_SECRET"))
+        if (not client or not secret or ":" in client or len(client)>8192 or len(secret)>8192
+                or any(ord(c)<32 for c in client+secret)):
+            raise GatewayError("Missing or invalid FINRA credential")
+        auth=b64encode((client+":"+secret).encode()).decode("ascii")
+        request=Request("https://ews.fip.finra.org/fip/rest/ews/oauth2/access_token?grant_type=client_credentials",
+                        data=b"",method="POST",headers={"Authorization":"Basic "+auth,
+                        "Accept":"application/json","Accept-Encoding":"identity"})
+        return self._auth_token("finra",request,refresh_required=False)
+
+    def _auth_token(self, provider, request, *, refresh_required):
+        state=self._states[provider]
         with state.lock:
             if self._clock()<state.blocked_until:
-                raise GatewayError("XpressAPI circuit open")
-            if state.calls>=request_budget("xpressapi"):
-                raise GatewayError("XpressAPI local request budget exhausted")
+                raise GatewayError("Authentication circuit open")
+            if state.calls>=request_budget(provider):
+                raise GatewayError("Authentication request budget exhausted")
             wait=state.next_request-self._clock()
             if wait>0:
                 self._sleep(wait)
             started=self._clock()
-            state.next_request=started+PROVIDERS["xpressapi"].interval
+            state.next_request=started+2
             state.calls+=1
             try:
                 with self._open(request,timeout=45) as handle:
@@ -422,11 +440,13 @@ class Gateway:
                 value=_strict_json(raw)
                 if str(value.get("token_type","")).casefold()!="bearer":
                     raise ValueError("Unexpected token type")
-                access,refresh=value.get("access_token"),value.get("refresh_token")
-                ttl=value.get("expires_in_seconds")
+                access=value.get("access_token")
+                refresh=value.get("refresh_token") if refresh_required else None
+                ttl=value.get("expires_in_seconds" if refresh_required else "expires_in")
+                secrets=(access,refresh) if refresh_required else (access,)
                 if (any(not isinstance(v,str) or not 1<=len(v)<=8192 or
-                        any(not 33<=ord(ch)<=126 for ch in v) for v in (access,refresh))
-                        or not isinstance(ttl,str) or not re.fullmatch(r"[0-9]{1,8}",ttl)
+                        any(not 33<=ord(ch)<=126 for ch in v) for v in secrets)
+                        or type(ttl) not in (str,int) or not re.fullmatch(r"[0-9]{1,8}",str(ttl))
                         or not 1<=int(ttl)<=604800):
                     raise ValueError("Invalid token response")
             except HTTPError as exc:
@@ -436,17 +456,16 @@ class Gateway:
                 state.failures+=1
                 state.last_status=f"AUTH_HTTP_{code}"
                 state.blocked_until=self._clock()+max(60,delay)
-                raise GatewayError(f"XpressAPI authentication HTTP {code}; no automatic retry") from None
+                raise GatewayError(f"{provider} authentication HTTP {code}; no automatic retry") from None
             except (OSError,ValueError,RecursionError):
                 state.failures+=1
                 state.last_status="AUTH_ERROR"
                 state.blocked_until=self._clock()+60
-                raise GatewayError("XpressAPI authentication failed; no automatic retry") from None
+                raise GatewayError(f"{provider} authentication failed; no automatic retry") from None
             state.successes+=1
             state.received_bytes+=len(raw)
             state.last_status="AUTH_SUCCESS"
             state.last_latency_seconds=self._clock()-started
-            # Do not mark market data last update or return a Response/evidence containing tokens.
             return access,refresh,int(ttl)
 
     async def fetch_many(self, requests):
@@ -485,7 +504,7 @@ class Gateway:
         for name, state in self._states.items():
             with state.lock:
                 spec = PROVIDERS.get(name)
-                key_env = spec.key_env if spec else MODEL_ENDPOINTS[name][1]
+                key_env = spec.key_env if spec else MODEL_ENDPOINTS.get(name,("", "FINRA_CLIENT_ID"))[1]
                 result[name] = {
                     "calls": state.calls, "failed_attempts": state.failures,
                     "successful_requests": state.successes,

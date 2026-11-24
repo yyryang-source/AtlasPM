@@ -31,3 +31,20 @@ class TokenTests(unittest.TestCase):
         self.assertNotIn("secret",json.dumps(g.health()))
         self.assertNotIn("secret",repr(session))
         session.clear()
+
+
+    def test_finra_oauth_fixed_destination_and_no_data_claim(self):
+        calls=[]
+        def opener(req,timeout):
+            calls.append(req)
+            return BytesIO(b'{"token_type":"Bearer","access_token":"fixture-access","expires_in":"3600"}')
+        g=Gateway(opener=opener)
+        with patch.dict(os.environ,{"FINRA_CLIENT_ID":"fixture-id","FINRA_CLIENT_SECRET":"fixture-secret",
+                      "ATLASPM_FINRA_RIGHTS":"fixture","ATLASPM_FINRA_MAX_REQUESTS":"1"}):
+            access,refresh,ttl=g.finra_token()
+        self.assertEqual((access,refresh,ttl),("fixture-access",None,3600))
+        self.assertTrue(calls[0].full_url.startswith("https://ews.fip.finra.org/"))
+        self.assertTrue(calls[0].get_header("Authorization").startswith("Basic "))
+        self.assertEqual(g.health()["finra"]["last_status"],"AUTH_SUCCESS")
+        self.assertIsNone(g.health()["finra"]["last_success_utc"])
+        self.assertNotIn("fixture-secret",json.dumps(g.health()))

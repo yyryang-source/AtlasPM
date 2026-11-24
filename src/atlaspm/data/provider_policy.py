@@ -55,7 +55,7 @@ def local_rights(provider, *, retention=False):
 
 
 def request_budget(provider):
-    env = {"unusual_whales":"ATLASPM_UW_MAX_REQUESTS", "xpressapi":"ATLASPM_XPRESSAPI_MAX_REQUESTS"}.get(provider)
+    env = {"unusual_whales":"ATLASPM_UW_MAX_REQUESTS", "xpressapi":"ATLASPM_XPRESSAPI_MAX_REQUESTS", "finra":"ATLASPM_FINRA_MAX_REQUESTS"}.get(provider)
     if env is None:
         raise ValueError("Unknown paid feed budget")
     raw = os.environ.get(env, "")
