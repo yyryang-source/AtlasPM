@@ -140,18 +140,22 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
                 WHERE s.trade_date IS NULL OR a.timestamp_ms < s.first_bucket_ms
                    OR a.timestamp_ms >= s.last_bucket_end_ms
             """).fetchone()[0]
-            boundary_bars, boundary_minute_overflow = cx.execute(f"""
-                SELECT count(*),
-                       count(*) FILTER (
-                           WHERE a.source_minute_bars > floor(
-                             (least(a.timestamp_ms + {width}, s.close_ms)
-                              - greatest(a.timestamp_ms, s.open_ms)) / 60000.0))
-                FROM bars a JOIN nyse s ON a.trade_date_et=s.trade_date
-                WHERE a.timestamp_ms < s.close_ms
-                  AND a.timestamp_ms + {width} > s.open_ms
-                  AND (a.timestamp_ms < s.open_ms
-                       OR a.timestamp_ms + {width} > s.close_ms)
-            """).fetchone()
+            # Avoid a second full monthly Parquet scan on the many months
+            # whose entire NYSE schedule already lies on regular 5m edges.
+            boundary_bars, boundary_minute_overflow = 0, 0
+            if special_boundaries:
+                boundary_bars, boundary_minute_overflow = cx.execute(f"""
+                    SELECT count(*),
+                           count(*) FILTER (
+                               WHERE a.source_minute_bars > floor(
+                                 (least(a.timestamp_ms + {width}, s.close_ms)
+                                  - greatest(a.timestamp_ms, s.open_ms)) / 60000.0))
+                    FROM bars a JOIN nyse s ON a.trade_date_et=s.trade_date
+                    WHERE a.timestamp_ms < s.close_ms
+                      AND a.timestamp_ms + {width} > s.open_ms
+                      AND (a.timestamp_ms < s.open_ms
+                           OR a.timestamp_ms + {width} > s.close_ms)
+                """).fetchone()
         day_rows = cx.execute("""
             SELECT trade_date_et, count(*), count(DISTINCT symbol)
             FROM bars GROUP BY trade_date_et ORDER BY trade_date_et
