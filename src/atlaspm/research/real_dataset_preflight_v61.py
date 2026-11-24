@@ -90,11 +90,13 @@ def _check_feature_source(cx,sample,source,features):
         raise ValueError("Dataset feature/source reconciliation failed")
 
 
-def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",threads=2):
+def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",threads=2,require_lineage=False):
     for n in (minimum_train_rows,minimum_test_rows):
         if type(n) is not int or n<1:
             raise ValueError("Minimum sample counts must be positive integers")
     m=dataset.inspect(dataset_id)
+    if require_lineage and not m.get("lineage_id"):
+        raise ValueError("Dataset lacks unified factor lineage; rebuild through canonical bridge")
     c=m["config"]
     months,config=dataset._config(c["months"][0],c["months"][-1],c["features"],c["horizons"],
         c["minimum_train_sessions"],c["test_sessions"],c["embargo_sessions"])
@@ -134,8 +136,13 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
                     horizon_counts[h][i]=int(count)
     finally:
         cx.close()
-    dataset.inspect(dataset_id)  # check sample outputs again before publishing
+    if dataset.inspect(dataset_id)!=m:
+        raise ValueError("Dataset manifest changed during preflight")
     _source_inputs(m)  # source factors must still match the recorded revision
+    if m.get("lineage_id") is not None:
+        current=factor_preflight(months[0],months[-1],memory=memory,threads=threads)
+        if not current["structural_preflight_passed"] or current["evidence_id"]!=m["lineage_id"]:
+            raise ValueError("Unified factor lineage changed during preflight")
     prediction_prefix=_prefix(pred)
     folds={}
     totals={}
@@ -159,7 +166,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             "minimum_train_rows":minimum_train_rows,"minimum_test_rows":minimum_test_rows,
             "label_paths_reconciled":True,"feature_source_reconciled":True,
             "lineage_id":m.get("lineage_id"),"approved_for_backtest":False,
-            "point_in_time_verified":False,"horizons":totals,"folds":folds,
+            "point_in_time_verified":False,"broker_order_submission_enabled":False,
+            "model_registry_admission":False,"horizons":totals,"folds":folds,
             "blockers":m["blockers"],"models_fitted":0,
             "warning":"Fold counts are structural only. Unverified security identity, actions, rights and feature timing prevent formal training."}
     path=dataset.BASE/dataset_id[:24]/"preflight.json"

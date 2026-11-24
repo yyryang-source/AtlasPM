@@ -186,7 +186,9 @@ def build(start,end,*,features=DEFAULT_FEATURES,horizons=(1,5,21),
     months,config=_config(start,end,features,horizons,minimum_train_sessions,test_sessions,embargo_sessions)
     inputs,missing=_inputs(months)
     report={"schema":VERSION,**v4.GUARDS,"mode":"real_unverified_research",
-            "synthetic_fixture":False,"config":config,"missing_factor_months":missing,
+            "synthetic_fixture":False,"approved_for_backtest":False,
+            "point_in_time_verified":False,"broker_order_submission_enabled":False,
+            "model_registry_admission":False,"config":config,"missing_factor_months":missing,
             "status":"MISSING_FACTOR_PARTITIONS" if missing else "PLAN_READY",
             "blockers":["HISTORICAL_SECURITY_IDENTITY_UNVERIFIED","CORPORATE_ACTIONS_UNVERIFIED",
                         "FEATURE_AVAILABILITY_UNVERIFIED","PRICE_ADJUSTMENT_SEMANTICS_UNVERIFIED",
@@ -284,4 +286,5 @@ def inspect(dataset_id):
     # Never propagate flags that may have been edited in a local JSON file.
     return {**m,**v4.GUARDS,"mode":"real_unverified_research","synthetic_fixture":False,
             "approved_for_backtest":False,"point_in_time_verified":False,
+            "broker_order_submission_enabled":False,"model_registry_admission":False,
             "status":"RESEARCH_DATASET_READY_TRAINING_BLOCKED"}

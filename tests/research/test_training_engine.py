@@ -19,6 +19,18 @@ def fixture():
 
 
 class PanelTests(unittest.TestCase):
+    def test_training_rejects_external_prepared_panel(self):
+        from atlaspm.research.training_engine import _train, train_parquet
+        panel=build_panel(fixture(),5,compact=True)
+        for fn in (train,_train):
+            with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+                fn({"mode":"real_unverified_research","synthetic_fixture":False},prepared_panel=panel)
+        with self.assertRaisesRegex(ValueError,"EXTERNAL_PREPARED_PANEL_NOT_ALLOWED"):
+            train(fixture(),prepared_panel=panel)
+        with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+            train_parquet(None,{"mode":"historical","synthetic_fixture":False},feature_cache_dir=None)
+
+
     def test_horizons(self):
         for h in (1,5,10,21):
             p=build_panel(fixture(),h)

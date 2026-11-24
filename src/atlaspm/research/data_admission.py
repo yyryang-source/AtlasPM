@@ -27,8 +27,6 @@ def build_research_dataset(start_month, end_month, *, memory="256MB", threads=1,
 
 def inspect_research_dataset(dataset_id, *, memory="256MB", threads=1, **options):
     from atlaspm.research.real_dataset_preflight_v61 import run
-    from atlaspm.research.real_dataset_v6 import inspect
-    manifest=inspect(dataset_id)
-    if not manifest.get("lineage_id"):
-        raise ValueError("Dataset lacks unified factor lineage; rebuild through canonical bridge")
-    return run(dataset_id,memory=memory,threads=threads,**options)
+    if "require_lineage" in options:
+        raise ValueError("Unified lineage verification cannot be overridden")
+    return run(dataset_id,memory=memory,threads=threads,require_lineage=True,**options)

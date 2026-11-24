@@ -7,7 +7,7 @@ from math import sqrt
 from pathlib import Path
 from statistics import fmean
 from itertools import groupby
-from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for
+from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for, validate_panel_metadata
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict, validate_parameters
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
@@ -87,12 +87,18 @@ def _metrics(rows):
 
 def train(payload, *, feature_cache_dir=None, **kwargs):
     """Run a synthetic experiment; optional feature cache is scoped to this call."""
+    validate_panel_metadata(payload,kwargs.get("horizon",5),kwargs.get("sequence_length",1))
+    if "prepared_panel" in kwargs:
+        raise ValueError("EXTERNAL_PREPARED_PANEL_NOT_ALLOWED")
     with feature_workspace(feature_cache_dir) as column:
         return _train(payload,feature_column=column,**kwargs)
 
 
 def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_assets_per_session=100000, **kwargs):
     """Stream validated synthetic partitions into the same fold engine."""
+    validate_panel_metadata(manifest,kwargs.get("horizon",5),kwargs.get("sequence_length",1))
+    if "prepared_panel" in kwargs:
+        raise ValueError("EXTERNAL_PREPARED_PANEL_NOT_ALLOWED")
     from contextlib import ExitStack, closing
     from atlaspm.research.training_parquet import iter_sessions
     from atlaspm.research.training_stream_panel import build_stream_panel, DiskObservations
@@ -109,6 +115,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
           embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, model_parameters=None, next_session=None, training_window_sessions=None, entry_lag_sessions=0):
+    validate_panel_metadata(payload,horizon,sequence_length)
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')

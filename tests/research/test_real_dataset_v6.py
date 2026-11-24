@@ -200,3 +200,26 @@ class RealDatasetTests(unittest.TestCase):
                 gate.build_research_dataset("2020-01","2020-02",features=["mom_5d"],horizons=[1])
         with self.assertRaisesRegex(ValueError,"cannot be overridden"):
             gate.build_research_dataset("2020-01","2020-02",verify_lineage=False)
+
+    def test_manifest_revision_and_canonical_gate(self):
+        from atlaspm.research import data_admission as gate
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        self.seed()
+        r=self.build()
+        with self.assertRaisesRegex(ValueError,"lacks unified factor lineage"):
+            gate.inspect_research_dataset(r["dataset_id"])
+        with self.assertRaisesRegex(ValueError,"cannot be overridden"):
+            gate.inspect_research_dataset(r["dataset_id"],require_lineage=False)
+        original=v.inspect(r["dataset_id"])
+        changed={**original,"rows":original["rows"]+1}
+        with patch.object(v,"_calendar",return_value=CAL), patch.object(v,"inspect",side_effect=[original,changed]):
+            with self.assertRaisesRegex(ValueError,"manifest changed"):
+                pre.run(r["dataset_id"])
+        for flag in ("approved_for_model_training","approved_for_backtest","point_in_time_verified",
+                     "live_execution_enabled","broker_order_submission_enabled","model_registry_admission"):
+            r[flag]=True
+        Path(r["manifest_path"]).write_text(json.dumps(r),encoding="utf-8")
+        restored=v.inspect(r["dataset_id"])
+        for flag in ("approved_for_model_training","approved_for_backtest","point_in_time_verified",
+                     "live_execution_enabled","broker_order_submission_enabled","model_registry_admission"):
+            self.assertIs(restored[flag],False)
