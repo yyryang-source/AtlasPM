@@ -311,7 +311,7 @@ def joint_local_review(*, security_id, asset_type, as_of, events, research_rows,
         # Event-derived evidence requires matching visible source and receipt.
         # Independent numerical artifacts require their own admission; the
         # synthetic fixture path is the only numerical route in this phase.
-        if not body["synthetic_fixture"]:
+        if not body["synthetic_fixture"] or events:
             for ev in body["evidence"]:
                 match=by_hash.get(ev["sha256"])
                 if (match is None or match["provider"]!=ev["source"] or
@@ -331,6 +331,38 @@ def joint_local_review(*, security_id, asset_type, as_of, events, research_rows,
             "event_review_sha256":digest(event_report),"research_ids":[r["research_id"] for r in checked],
             "unmatched_evidence_rows":rejected,"fusion":fusion,"external_ai_allowed":False,
             "trade_authorized":False,"identity_independently_verified":False}
+
+
+def offline_model_responses():
+    """Exercise the actual request/response schemas without transport or keys.
+
+    Fixed fixture responses are not genuine provider outputs, not forecasts,
+    and never enter numeric fusion. No environment changes or network path.
+    """
+    evidence=[{"evidence_id":"fixture","source":"synthetic public fixture",
+               "available_at":"2020-01-02T20:00:00Z","text":"Synthetic revenue was 10.",
+               "external_use_reviewed":True}]
+    cutoff,rows,by_id=_prepare("fundamental",evidence,"2020-01-02T21:00:00Z")
+    content=json.dumps({"topic":"fundamental","as_of":cutoff,"evidence":rows})
+    text=json.dumps({"findings":[{"evidence_id":"fixture","quote":"Synthetic revenue was 10.",
+                                "interpretation":"Synthetic evidence only."}]})
+    wire={
+        "openai":{"status":"completed","model":"fixture-openai","output":[{"type":"message",
+                  "content":[{"type":"output_text","text":text}]}]},
+        "anthropic":{"stop_reason":"end_turn","model":"fixture-anthropic","content":[{"type":"text","text":text}]},
+        "gemini":{"modelVersion":"fixture-gemini","candidates":[{"finishReason":"STOP",
+                  "content":{"parts":[{"text":text}]}}]},
+    }
+    reports=[]
+    for provider,body in wire.items():
+        request=_payload(provider,"fixture-model",content,128)
+        if "tools" in request:
+            raise ValueError("OFFLINE_MODEL_TOOL_SCOPE")
+        output,model,_=_extract(provider,body)
+        findings=_findings(output,by_id)
+        reports.append({"adapter":provider,"fixture_model":model,"findings":len(findings),
+                        "mode":"synthetic_response_schema_test","actual_provider_call":False})
+    return {**_FLAGS,"models":reports,"network_calls":0,"actual_cost_usd":None}
 
 
 def main():

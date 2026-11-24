@@ -64,9 +64,13 @@ def normalize(row, *, received_at):
     if not isinstance(row,dict) or set(row)!=fields:
         raise ValueError("Unexpected event schema")
     provider,kind=row["provider"],row["kind"]
-    if provider not in ROLES or kind not in _ALLOWED.get(provider,set()):
-        raise ValueError("Provider/event category mismatch")
-    require_enabled(provider)
+    if provider=="synthetic":
+        if kind not in KINDS or row["delivery"]!="file" or not str(row["source_id"]).startswith("SYN:"):
+            raise ValueError("Invalid synthetic event scope")
+    else:
+        if provider not in ROLES or kind not in _ALLOWED.get(provider,set()):
+            raise ValueError("Provider/event category mismatch")
+        require_enabled(provider)
     if provider in RIGHTS_ENV:
         local_rights(provider)
     received=_time(received_at)
@@ -80,6 +84,10 @@ def normalize(row, *, received_at):
     if not isinstance(subjects,list) or len(subjects)>64:
         raise ValueError("Invalid subject list")
     subjects=sorted({_token(x) for x in subjects})
+    if provider=="synthetic" and (not subjects or any(not re.fullmatch(r"SYN:[A-Z0-9._-]{1,32}",s) for s in subjects)):
+        raise ValueError("Synthetic event requires synthetic subject")
+    if provider!="synthetic" and any(s.startswith("SYN:") for s in subjects):
+        raise ValueError("Real source cannot claim synthetic subject")
     if not isinstance(row["evidence_sha256"],str) or not re.fullmatch(r"[0-9a-f]{64}",row["evidence_sha256"]):
         raise ValueError("Invalid evidence digest")
     if row["delivery"] not in {"delayed","unknown","file","poll","stream_reported"}:
@@ -95,7 +103,7 @@ def normalize(row, *, received_at):
     revision=_digest(record)
     return {**record,"event_id":_digest([provider,record["source_id"]]),"revision":revision,
             "received_at":received.isoformat(),"rights_status":"operator_attested_not_verified"
-            if provider in RIGHTS_ENV else "source_review_required"}
+            if provider in RIGHTS_ENV else "synthetic_test_only" if provider=="synthetic" else "source_review_required"}
 
 
 def review(rows, *, as_of, holdings=()):

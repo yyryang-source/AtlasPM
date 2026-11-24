@@ -46,6 +46,7 @@ def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoin
         for session in sessions:
             raw=deepcopy(session)
             research=raw.pop("research")
+            events=raw.pop("events",[])
             if "signals" in raw or raw["source"]!="synthetic":
                 raise ValueError("CONTINUOUS_REQUIRES_RESEARCH_NOT_CALLER_SIGNALS")
             symbols=set(raw["close"])
@@ -59,6 +60,16 @@ def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoin
             try:
                 if not isinstance(research,list) or not 1<=len(research)<=128:
                     raise ValueError("MISSING_OR_OVERSIZED_RESEARCH")
+                if events:
+                    from atlaspm.research.intelligence import joint_local_review
+                    if not isinstance(events,list) or len(events)>256 or any(e.get("provider")!="synthetic" for e in events):
+                        raise ValueError("CONTINUOUS_SYNTHETIC_EVENTS_REQUIRED")
+                    for symbol in symbols:
+                        subset=[r for r in research if r["security_id"]=="SYN:"+symbol]
+                        joint=joint_local_review(security_id="SYN:"+symbol,asset_type="stock",as_of=cutoff,
+                                                 events=events,research_rows=subset,weights=weights)
+                        if joint["unmatched_evidence_rows"] or not joint["event_revisions"]:
+                            raise ValueError("CONTINUOUS_EVENT_EVIDENCE_MISMATCH")
                 result=decide(research,as_of=cutoff,weights=weights,horizon_days=horizon_days,cost_fraction=cost_fraction)
                 candidates=result["candidates"]
                 # All-or-nothing universe coverage; a missing/HOLD/SELL
@@ -111,6 +122,45 @@ def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoin
         return {**result,"checkpoint_reused":bool(old and old["session_hashes"]==fingerprints),
                 "result_sha256":result_hash}
     return _transaction(Path(checkpoint),commit)
+
+
+def fixture_research(symbol,stamp,values):
+    return [{"security_id":"SYN:"+symbol,"asset_type":"stock","category":"factor",
+             "kind":"quantitative_prediction","source":"synthetic","model_version":name,
+             "evidence":[{"sha256":digest([name,symbol,stamp]),"available_at":stamp,
+                          "received_at":stamp,"source":"synthetic","rights_status":"synthetic_test_only"}],
+             "generated_at":stamp,"expires_at":stamp,"horizon_days":1,
+             "expected_return":value,"uncertainty_radius":.01,"risk_factors":["fixture"],
+             "invalidation":["fixture expiry"],"synthetic_fixture":True}
+            for name,value in zip(("m1","m2"),values)]
+
+
+def synthetic_fixture():
+    sessions=[]
+    for day,op,cl in (("2020-01-02",100,100),("2020-01-03",100,100),
+                       ("2020-01-06",100,90),("2020-01-07",90,90),("2020-01-08",90,90)):
+        stamp=day+"T21:00:00Z"
+        rows=fixture_research("AAA",stamp,(.10,.11))+fixture_research("BBB",stamp,(.08,.09))
+        if day=="2020-01-06":
+            rows=[]  # risk exit must not depend on new research
+        from atlaspm.research.financial_events import normalize
+        events=[normalize({"provider":"synthetic","source_id":"SYN:"+x["model_version"]+":"+x["security_id"]+":"+day,
+                           "kind":"earnings_forecast" if x["model_version"]=="m1" else "volume_anomaly",
+                           "subjects":[x["security_id"]],"published_at":stamp,"first_available_at":stamp,
+                           "effective_at":None,"evidence_sha256":x["evidence"][0]["sha256"],
+                           "delivery":"file","expiry_seconds":86400},received_at=stamp) for x in rows]
+        sessions.append({"events":events,"date":day,"open_at":day+"T14:30:00Z","close_at":stamp,"source":"synthetic",
+                         "open":{"AAA":op,"BBB":100},"close":{"AAA":cl,"BBB":100},
+                         "volume":{"AAA":100000,"BBB":100000},"sectors":{"AAA":"tech","BBB":"health"},
+                         "research":rows})
+    return {"mode":"synthetic","synthetic_fixture":True,"initial_cash":10000,
+            "fee_bps":1,"slippage_bps":1,"cash_reserve":.2,"top_k":1,"rebalance_sessions":1,
+            "settlement_sessions":1,"risk_policy":{"max_drawdown":.25,"max_gross_leverage":1.,
+            "equity_shock":.2,"max_stress_loss_fraction":.25},
+            "execution_policy":{"max_participation":.01,"impact_bps_at_full_participation":10,"fill_fraction":1},
+            "position_lifecycle":{"stop_loss":.05,"take_profit":.3,"max_holding_sessions":20},
+            "sessions":sessions}
+
 
 
 def main():

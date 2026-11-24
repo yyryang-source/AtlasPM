@@ -10,39 +10,9 @@ from atlaspm.framework.continuous_simulation import continuous
 from atlaspm.research import event_queue
 from atlaspm.research.financial_events import normalize
 from atlaspm.research.signal_fusion import fuse,matured_correlations
-from atlaspm.research.training_registry import digest
 
 
-def research(symbol,stamp,values):
-    return [{"security_id":"SYN:"+symbol,"asset_type":"stock","category":"factor",
-             "kind":"quantitative_prediction","source":"synthetic","model_version":name,
-             "evidence":[{"sha256":digest([name,symbol,stamp]),"available_at":stamp,
-                          "received_at":stamp,"source":"synthetic","rights_status":"synthetic_test_only"}],
-             "generated_at":stamp,"expires_at":stamp,"horizon_days":1,
-             "expected_return":value,"uncertainty_radius":.01,"risk_factors":["fixture"],
-             "invalidation":["fixture expiry"],"synthetic_fixture":True}
-            for name,value in zip(("m1","m2"),values)]
-
-
-def fixture():
-    sessions=[]
-    for day,op,cl in (("2020-01-02",100,100),("2020-01-03",100,100),
-                       ("2020-01-06",100,90),("2020-01-07",90,90),("2020-01-08",90,90)):
-        stamp=day+"T21:00:00Z"
-        rows=research("AAA",stamp,(.10,.11))+research("BBB",stamp,(.08,.09))
-        if day=="2020-01-06":
-            rows=[]  # risk exit must not depend on new research
-        sessions.append({"date":day,"open_at":day+"T14:30:00Z","close_at":stamp,"source":"synthetic",
-                         "open":{"AAA":op,"BBB":100},"close":{"AAA":cl,"BBB":100},
-                         "volume":{"AAA":100000,"BBB":100000},"sectors":{"AAA":"tech","BBB":"health"},
-                         "research":rows})
-    return {"mode":"synthetic","synthetic_fixture":True,"initial_cash":10000,
-            "fee_bps":1,"slippage_bps":1,"cash_reserve":.2,"top_k":1,"rebalance_sessions":1,
-            "settlement_sessions":1,"risk_policy":{"max_drawdown":.25,"max_gross_leverage":1.,
-            "equity_shock":.2,"max_stress_loss_fraction":.25},
-            "execution_policy":{"max_participation":.01,"impact_bps_at_full_participation":10,"fill_fraction":1},
-            "position_lifecycle":{"stop_loss":.05,"take_profit":.3,"max_holding_sessions":20},
-            "sessions":sessions}
+from atlaspm.framework.continuous_simulation import fixture_research as research,synthetic_fixture as fixture
 
 
 class ContinuousTests(unittest.TestCase):
