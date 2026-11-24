@@ -99,6 +99,7 @@ class InstitutionalTests(unittest.TestCase):
         out=ir.factors(subject="conid:123",as_of="2020-01-05T00:00:00Z",
                        previous_as_of="2020-01-03T00:00:00Z",unit="USD",period="2020-03-31",basis="GAAP")
         self.assertEqual(out["sample_counts"]["ratings"],2)
+        self.assertEqual(out["sample_counts"]["paired_ratings"],2)
         self.assertAlmostEqual(out["values"]["analyst_rating_momentum"],-1)
         self.assertEqual(out["sample_counts"]["paired_targets"],1)
         self.assertEqual(out["sample_counts"]["paired_eps"],1)
