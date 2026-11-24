@@ -7,14 +7,43 @@ from math import isfinite
 from typing import Any, Mapping
 
 
-def finite(value: object, field: str, *, minimum: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{field}: finite number required")
-    number = float(value)
-    if minimum is not None and number < minimum:
-        raise ValueError(f"{field}: must be >= {minimum}")
-    return number
+def finite_number(value: object, field: str, *,
+                  invalid_message: str, nonfinite_message: str | None = None,
+                  minimum: float | None = None, maximum: float | None = None,
+                  strict_minimum: bool = False,
+                  minimum_message: str | None = None,
+                  maximum_message: str | None = None) -> float:
+    """Shared numeric mechanics; callers explicitly own their legacy policy/text.
 
+    bool is not a number; NaN and infinities are never accepted. All bounds
+    are opt-in, and zero and negative values remain legal by default.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(invalid_message)
+    if not isfinite(value):
+        raise ValueError(nonfinite_message if nonfinite_message is not None
+                         else invalid_message)
+    result = float(value)
+    if minimum is not None and (result < minimum or (strict_minimum and result == minimum)):
+        raise ValueError(minimum_message if minimum_message is not None
+                         else f"{field}: below minimum")
+    if maximum is not None and result > maximum:
+        raise ValueError(maximum_message if maximum_message is not None
+                         else f"{field}: above maximum")
+    return result
+
+
+def validated_object(value: object, field: str, *, invalid_message: str) -> dict[str, Any]:
+    """Require an actual dict (not any Mapping), retaining the original value."""
+    if not isinstance(value, dict):
+        raise ValueError(invalid_message)
+    return value
+
+
+def finite(value: object, field: str, *, minimum: float | None = None) -> float:
+    return finite_number(value, field, minimum=minimum,
+    invalid_message=f"{field}: finite number required",
+    minimum_message=f"{field}: must be >= {minimum}")
 
 def timestamp(value: object, field: str) -> datetime:
     if not isinstance(value, str):
@@ -29,10 +58,7 @@ def timestamp(value: object, field: str) -> datetime:
 
 
 def object_map(value: object, field: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{field}: JSON object required")
-    return value
-
+    return validated_object(value, field, invalid_message=f"{field}: JSON object required")
 
 @dataclass(frozen=True)
 class Candidate:

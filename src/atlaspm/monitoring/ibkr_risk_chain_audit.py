@@ -7,9 +7,13 @@ No network access, orders, margin approval, or real trading gate integration.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
 import hashlib
 import json
-from math import isfinite
+
 from typing import Any, Mapping
 
 from atlaspm.risk.ibkr_margin_stress import FIELD_PAIR
@@ -31,10 +35,7 @@ TOLERANCE = 0.02
 
 
 def _object(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be a JSON object")
 
 def _list(value: Any, label: str) -> list[Any]:
     if not isinstance(value, list) or not value:
@@ -43,13 +44,9 @@ def _list(value: Any, label: str) -> list[Any]:
 
 
 def _number(value: Any, label: str, *, low: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{label} must be finite numeric data")
-    n = float(value)
-    if low is not None and n < low:
-        raise ValueError(f"{label} below allowed range")
-    return n
-
+    return finite_number(value, label, minimum=low,
+    invalid_message=f"{label} must be finite numeric data",
+    minimum_message=f"{label} below allowed range")
 
 def _finite_json(value: Any) -> str:
     # Reject NaN/Infinity anywhere in source instead of silently hashing invalid JSON.

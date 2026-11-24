@@ -6,6 +6,10 @@ snapshots and previews are inputs provided by an adapter, not fetched here.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
 from math import isfinite
 from typing import Any, Mapping
 
@@ -18,20 +22,13 @@ RISK_STATES = ("NORMAL", "WATCH", "DE_RISK", "CRITICAL", "HALT")
 
 
 def _object(value: object, label: str) -> Mapping[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be a JSON object")
 
 def _number(src: Mapping[str, Any], key: str, *, lo: float = 0.0, maxval: float | None = None) -> float:
-    value = src.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{key} must be a finite number")
-    result = float(value)
-    if result < lo or (maxval is not None and result > maxval):
-        raise ValueError(f"{key} is outside the valid range")
-    return result
-
+    return finite_number(src.get(key), key, minimum=lo, maximum=maxval,
+    invalid_message=f"{key} must be a finite number",
+    minimum_message=f"{key} is outside the valid range",
+    maximum_message=f"{key} is outside the valid range")
 
 def _bool(src: Mapping[str, Any], key: str) -> bool:
     value = src.get(key)

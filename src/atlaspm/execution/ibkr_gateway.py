@@ -7,6 +7,8 @@ Raw snapshots are private, not reconciled normalized broker permissions.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import finite_number
+
 import json
 import re
 import ssl
@@ -179,10 +181,7 @@ def _positive_int(value: Any, label: str) -> int:
 
 
 def _num(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
-        raise ValueError(f"{label} must be a finite number")
-    return float(value)
-
+    return finite_number(value, label, invalid_message=f"{label} must be a finite number")
 
 def collect_ibkr_readonly_account(
     transport: Any, *, account_id: str, fixture_mode: bool = False,

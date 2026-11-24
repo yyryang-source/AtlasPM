@@ -6,6 +6,8 @@ buying-power calculation, collateral creation or option exercise occurs here.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
 from collections import defaultdict
 from datetime import datetime, timezone
 from math import isfinite
@@ -13,10 +15,7 @@ from typing import Any, Mapping
 
 
 def _object(value: Any, label: str) -> Mapping[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be a JSON object")
 
 def _array(value: Any, label: str) -> list[Any]:
     if not isinstance(value, list):

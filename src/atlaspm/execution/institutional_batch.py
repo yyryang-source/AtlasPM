@@ -7,9 +7,13 @@ All brokerage previews in JSON are untrusted simulation inputs.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
 from copy import deepcopy
 from datetime import date
-from math import isfinite
+
 from typing import Any, Mapping
 
 from atlaspm.execution.institutional_gate import assess_institutional_intent
@@ -17,19 +21,12 @@ from atlaspm.execution.institutional_ledger import build_institutional_ledger, _
 
 
 def _obj(value: Any, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} must be a JSON object")
-    return value
-
+    return validated_object(value, label, invalid_message=f"{label} must be a JSON object")
 
 def _num(value: Any, label: str, positive: bool = False) -> float:
-    if isinstance(value, bool) or not isinstance(value, (float, int)) or not isfinite(value):
-        raise ValueError(f"{label} must be a finite number")
-    value = float(value)
-    if value < 0 or (positive and value == 0):
-        raise ValueError(f"{label} must be positive" if positive else f"{label} must be nonnegative")
-    return value
-
+    return finite_number(value, label, minimum=0, strict_minimum=positive,
+    invalid_message=f"{label} must be a finite number",
+    minimum_message=f"{label} must be positive" if positive else f"{label} must be nonnegative")
 
 def _id(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():

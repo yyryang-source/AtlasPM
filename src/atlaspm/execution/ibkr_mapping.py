@@ -6,8 +6,12 @@ payload. Returns private diagnostic data to local_data/ only. No API traffic.
 
 from __future__ import annotations
 
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
 from datetime import datetime, timezone
-from math import isfinite
+
 from typing import Any, Mapping
 
 from atlaspm.execution.institutional_ledger import _timestamp
@@ -19,10 +23,7 @@ REQUIRED_OPTION = ("underlying", "right", "strike", "expiration_date", "multipli
 
 
 def _obj(value: Any, name: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{name} must be an object")
-    return value
-
+    return validated_object(value, name, invalid_message=f"{name} must be an object")
 
 def _text(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
@@ -31,10 +32,7 @@ def _text(value: Any, name: str) -> str:
 
 
 def _finite(value: Any, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (float, int)) or not isfinite(value):
-        raise ValueError(f"{name} must be finite numeric data")
-    return float(value)
-
+    return finite_number(value, name, invalid_message=f"{name} must be finite numeric data")
 
 def _conid(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:

@@ -6,7 +6,11 @@ authority to execute. Fake broker previews in tests are for contract testing.
 
 from __future__ import annotations
 
-from math import isfinite
+from atlaspm.engine.contracts import validated_object
+
+from atlaspm.engine.contracts import finite_number
+
+
 from typing import Any, Mapping
 
 from atlaspm.execution.institutional_gate import assess_institutional_intent
@@ -14,19 +18,12 @@ from atlaspm.execution.institutional_ledger import build_institutional_ledger
 
 
 def _obj(x: object, name: str) -> dict[str, Any]:
-    if not isinstance(x, dict):
-        raise ValueError(f"{name} must be a JSON object")
-    return x
-
+    return validated_object(x, name, invalid_message=f"{name} must be a JSON object")
 
 def _num(x: object, name: str, *, allow_zero: bool = True) -> float:
-    if isinstance(x, bool) or not isinstance(x, (float, int)) or not isfinite(x):
-        raise ValueError(f"{name} must be a finite number")
-    value = float(x)
-    if value < 0 or (not allow_zero and value == 0):
-        raise ValueError(f"{name} must be nonnegative" if allow_zero else f"{name} must be positive")
-    return value
-
+    return finite_number(x, name, minimum=0, strict_minimum=not allow_zero,
+    invalid_message=f"{name} must be a finite number",
+    minimum_message=f"{name} must be nonnegative" if allow_zero else f"{name} must be positive")
 
 def _text(x: object, name: str) -> str:
     if not isinstance(x, str) or not x.strip():
