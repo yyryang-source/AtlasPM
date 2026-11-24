@@ -91,12 +91,15 @@ class FilingTests(unittest.TestCase):
         with patch.dict(os.environ,{"ATLASPM_SEC_USER_AGENT":"Test test@example.com"}), patch.object(ev,"download",return_value=BODY) as download, patch.object(f.time,"sleep"):
             report = f.collect(*args,fetch=True,max_requests=1)
             download.assert_called_once()
-        self.assertEqual(report["filings_parsed"],1)
+        self.assertEqual(report["filings_parsed"],1,report["results"])
         self.assertGreater(report["hints_count"],0)
+        hints = list(Path(f.BASE / "hints").glob("*.json"))
+        self.assertEqual(len(hints),1)
+        self.assertEqual(len(hints[0].stem),64)
         with patch.object(ev,"download") as download:
             report = f.collect(*args)
             download.assert_not_called()
-        self.assertEqual(report["filings_parsed"],1)
+        self.assertEqual(report["filings_parsed"],1,report["results"])
         self.assertEqual(report["network_downloads"],0)
         self.assertFalse(report["live_execution_enabled"])
         self.assertFalse(report["approved_for_model_training"])
