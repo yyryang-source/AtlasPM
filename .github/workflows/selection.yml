@@ -9,7 +9,7 @@ on:
       - "tests/selection/**"
       - "src/atlaspm/cli.py"
       - "src/atlaspm/commands/**"
-      - "tests/test_modular_cli.py"
+      - "tests/interfaces/test_modular_cli.py"
       - "scripts/selection/**"
       - ".github/workflows/selection.yml"
       - "pyproject.toml"

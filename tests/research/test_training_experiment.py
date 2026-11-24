@@ -1,7 +1,7 @@
 import unittest
 from importlib.util import find_spec
 from atlaspm.research.training_experiment import experiment
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 @unittest.skipUnless(find_spec("numpy"),"numpy extra required")

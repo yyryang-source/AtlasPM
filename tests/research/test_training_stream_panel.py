@@ -9,7 +9,7 @@ from atlaspm.research.training_dataset import build_panel,sequence_for,purged_fo
 from atlaspm.research.training_compact import feature_workspace
 from atlaspm.research.training_stream_panel import build_stream_panel,DiskObservations
 from atlaspm.research.training_engine import train,train_parquet
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 @unittest.skipUnless(find_spec("numpy"),"numpy required")

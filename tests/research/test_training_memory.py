@@ -5,7 +5,7 @@ from pathlib import Path
 from importlib.util import find_spec
 from atlaspm.research.training_memory import FoldArrays
 from atlaspm.research.training_dataset import build_panel, sequence_for, purged_folds
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 class CompactTests(unittest.TestCase):

@@ -7,7 +7,7 @@ from pathlib import Path
 from importlib.util import find_spec
 from atlaspm.research.training_registry import register,load,list_runs,FLAGS
 from atlaspm.research.training_engine import train
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 class RegistryTests(unittest.TestCase):

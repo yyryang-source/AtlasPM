@@ -3,7 +3,7 @@ from importlib.util import find_spec
 from atlaspm.research.training_dataset import build_panel
 from atlaspm.research.training_engine import train
 from atlaspm.research.training_ensemble import adaptive_ensemble
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 class SequencePanelTests(unittest.TestCase):

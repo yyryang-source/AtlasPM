@@ -7,7 +7,7 @@ from pathlib import Path
 from importlib.util import find_spec
 from atlaspm.research.training_predictions import PredictionArchive
 from atlaspm.research.training_engine import train
-from test_training_engine import fixture
+from .test_training_engine import fixture
 
 
 class ArchiveTests(unittest.TestCase):

@@ -1,7 +1,20 @@
-# AtlasPM Tests
+# AtlasPM regression suites
 
-- [Stock-selection tests](selection/) cover market universe/quotes, AI ranking, monthly reports and Alpha Eligibility Gate.
-- [Quantitative/risk tests](quant/) cover portfolio optimization, model training, backtests, broker read-only and synthetic OMS.
-- Shared root tests cover the CLI interface.
+Run all tests: `python -m unittest discover -s tests -v`.
 
-Run the entire suite from the repository root: `python -m unittest discover -s tests -v`. Run a focused test anywhere recursively: `python -m unittest discover -s tests -p "test_ai_stock_ranker_v2.py" -v`.
+| Directory | Responsibility |
+| --- | --- |
+| data/ | Market data, Parquet lake, factors and quality |
+| research/ | AI training, memory modes, models and checkpoints |
+| interfaces/ | CLI, compatibility and workflow integration |
+| selection/ | Stock screening and alpha eligibility |
+| quant/ | Portfolio/risk models, financing and paper OMS |
+| root replay/portfolio tests | Unified engine and replay; retained at root to preserve shared fixtures on the existing replay branch |
+
+Run focused suites with root discovery so shared fixtures resolve:
+```powershell
+python -m unittest discover -s tests -p "test_training*.py" -v
+python -m unittest discover -s tests -p "test_factor*.py" -v
+python -m unittest discover -s tests -p "test_historical_replay*.py" -v
+```
+Never use private broker captures or production price history as CI fixtures.
