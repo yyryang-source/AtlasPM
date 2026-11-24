@@ -14,7 +14,7 @@ from pathlib import Path
 
 from atlaspm.research.training_dataset import HORIZONS, validate_panel_metadata
 from atlaspm.research.training_engine import train, _metrics
-from atlaspm.research.training_models import MODELS
+from atlaspm.research.training_models import MODELS, validate_parameters
 from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
 METRICS={"mae":1,"rmse":1,"mean_daily_rank_ic":-1,"mean_daily_ic":-1}
@@ -38,7 +38,7 @@ def _identity(rows):
 
 
 def _trial_config(candidate,config):
-    if not isinstance(candidate,dict) or set(candidate)-{"model","ridge_alpha","sequence_epochs"}:
+    if not isinstance(candidate,dict) or set(candidate)-{"model","ridge_alpha","sequence_epochs","parameters"}:
         raise ValueError("INVALID_TOURNAMENT_CANDIDATE")
     name=candidate.get("model")
     if name not in MODELS+SEQUENCE_MODELS:
@@ -55,7 +55,11 @@ def _trial_config(candidate,config):
         raise ValueError("INVALID_TOURNAMENT_EPOCHS")
     if name in SEQUENCE_MODELS and config.get("sequence_length",1)<2:
         raise ValueError("SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS")
-    return {**config,"models":[name],"ridge_alpha":alpha,"sequence_epochs":epochs}
+    params=validate_parameters(name,candidate.get("parameters",{}))
+    result={**config,"models":[name],"ridge_alpha":alpha,"sequence_epochs":epochs}
+    if params:
+        result["model_parameters"]={name:params}
+    return result
 
 
 def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae"):
