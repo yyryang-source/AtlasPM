@@ -15,7 +15,7 @@ def fuse(rows, *, as_of, weights, max_disagreement=.05, max_age_seconds=86400):
         raise ValueError("INVALID_FUSION_BATCH")
     cap=finite(max_disagreement,"max_disagreement",minimum=0)
     policy={k:finite(v,"weight",minimum=0) for k,v in weights.items()}
-    if not policy or any(not isinstance(k,str) or not k for k in policy) or sum(policy.values())<=0:
+    if not policy or any(not isinstance(k,str) or not k for k in policy) or any(v>1e6 for v in policy.values()) or sum(policy.values())<=0:
         raise ValueError("INVALID_EXPERIMENTAL_WEIGHTS")
     validated=[contract(r,as_of=as_of,max_age_seconds=max_age_seconds) for r in rows]
     groups={}
@@ -79,6 +79,11 @@ def fuse(rows, *, as_of, weights, max_disagreement=.05, max_age_seconds=86400):
 
 def historical_diagnostics(streams, *, window_dates=30, minimum_dates=10):
     """Reuse canonical matured-label monitor and adaptive ensemble, not another fitter."""
+    if (not isinstance(streams,dict) or not 2<=len(streams)<=8 or
+            any(not isinstance(rows,list) or not 1<=len(rows)<=10000 or
+                any(not isinstance(r,dict) or not str(r.get("security_id","")).startswith("SYN:") for r in rows)
+                for rows in streams.values())):
+        raise ValueError("BOUNDED_SYNTHETIC_DIAGNOSTICS_ONLY")
     from atlaspm.research.training_monitor import monitor_predictions
     from atlaspm.research.training_ensemble import adaptive_ensemble
     monitor=monitor_predictions(streams,window_dates=window_dates,minimum_dates=minimum_dates)

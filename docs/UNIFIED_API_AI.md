@@ -425,3 +425,69 @@ Previous d96cd9a CI: 3/5 workflows success, full Windows 1067/1068 (1 error, no 
 & $py -m atlaspm.research.institutional_research --import-metadata local_data/research/report.json
 ```
 CLI prints sanitized import summary; factors and evaluation callable via explicit arguments (see --help). Real documents, licensed feed access, PDF dependency, actual identity/basis/PIT, performance and AI-processing rights not validated. No real API calls made. Keep #94 frozen and all formal training/backtest/live disabled.
+
+
+## Unified research, fusion, decision and synthetic lifecycle batch
+
+Base 3363512; frozen PR #94 remains 5b331ea. Earlier latency-contract
+fix 6ae58a5 independently passed its five returned workflows. No inherited
+PASS for this batch.
+
+- research_contract: bounded typed IDs and asset classes, distinct objective,
+  numeric forecast, institution opinion and LLM inference; evidence hashes,
+  available/receipt/generated/expiry chronology, horizon, risk/invalidation,
+  freshness and rights. Unknown availability stays unknown. A hash or caller
+  fixture flag is not proof of external source authenticity. Real specialist
+  reports can be adapted descriptively via descriptive_report; numeric
+  admission is strictly synthetic. No verified external historical mapping.
+- signal_fusion: same subject/asset/horizon only, fixed explicit experimental
+  policy, reject duplicate model, collapse overlapping evidence components,
+  conservative disagreement and direction veto, uncertainty envelope (not
+  confidence interval), no subjective sentiment-to-return mapping. Historical
+  diagnostic wrapper reuses training_monitor and training_ensemble with
+  bounded synthetic streams; no promoted weights or calibration. True
+  correlation, analyst weights, market regime and out-of-sample real evidence
+  remain pending.
+- intelligence.dispatch_tasks: max eight sequential explicit public/local
+  artifact tasks, validates public egress before calls, requested output-token
+  budget, one result per identical task in batch, no automatic fallback.
+  No persistent cache/actual billing or autonomous model selection; restricted
+  feed text still cannot enter external AI. Existing model inventory/registry
+  retained. No trained model used in fixed fixture.
+- autonomous_decision: BUY/SELL/HOLD/NO_TRADE research, conservative edge
+  after cost and uncertainty, exact horizon separation. Synthetic cash
+  portfolio bridge requires complete positive held stock/ETF candidates,
+  annual horizon, typed SYN IDs, current synthetic liquidity, spread/cost
+  and existing independent risk constraints. Does not turn HOLD/NO_TRADE
+  into a liquidation. Options/bonds remain research only. No broker calls.
+- autonomous_cycle: fixed synthetic events and forecast values (not trained
+  AI), existing portfolio allocation, risk, institutional preflight and
+  Paper OMS, actual simulated fill/position state; fixed 5% mark shock,
+  independent sell-only exit via the same order builder, preflight and OMS,
+  explicit synthetic next-day settlement, flat reconciliation and P&L
+  decomposition. Full fill/settled entry required; blocked/partial/rejected
+  paths remain explicit. No real exchange calendar or real trades.
+- event_queue: bounded atomic metadata queue in existing local_data/runs,
+  max 1000 revisions / 8 MiB, per revision dedup, priority, max 100
+  local review tasks per drain, retry up to 3 then quarantine, restart reads
+  pending state. Retention attestation required for commercial data;
+  exclusive lock, manual stale-lock recovery. No continuous polling daemon,
+  automatic AI dispatch, cross-process network side effects, archive compaction
+  or certified delivery yet. No new database.
+
+Remaining: complete specialized report/ratings/bond data history and actual
+security mapping, source-backed evidence verification, real-time stream
+scheduler, automatic model routing with observed performance and cost,
+validated risk/return models, cross-asset execution and verified real data.
+No formal training, formal backtest or automatic live permission.
+
+Expected tests 1088 (previous 1079 + 9), not measured. From the existing
+Windows review checkout, use previous consolidated validation with
+--minimum-passed 1088, then:
+```powershell
+& $py -m atlaspm.framework.autonomous_cycle
+if ($LASTEXITCODE -ne 0) { throw "Synthetic event-to-flat validation failed" }
+```
+No real API or order call in fixture. CLI prints only fixture status and
+attribution, not a production return. Actual full-suite CI and local
+performance not yet measured.

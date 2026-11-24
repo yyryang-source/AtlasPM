@@ -223,6 +223,68 @@ def model_inventory():
     return {"local": local, "external": external, **_FLAGS}
 
 
+def dispatch_tasks(tasks, *, external_output_budget=0, allow_external=False, gateway=DEFAULT_GATEWAY):
+    """Bounded sequential task routing with request-local dedup and budget.
+
+    Explicit selected provider/model, no speculative fan-out or silent paid
+    fallback. Local artifact registry remains canonical. Budget is requested
+    output tokens, not a guaranteed total token/currency expenditure.
+    """
+    from atlaspm.research.training_registry import digest
+    if (not isinstance(tasks,list) or not 1<=len(tasks)<=8 or
+        type(external_output_budget) is not int or not 0<=external_output_budget<=8192):
+        raise ValueError("INVALID_RESEARCH_TASK_BUDGET")
+    validated=[]
+    total=0
+    # Preflight all shapes before any external side effects.
+    for task in tasks:
+        if not isinstance(task,dict):
+            raise ValueError("INVALID_RESEARCH_TASK")
+        kind=task.get("kind")
+        if kind=="public":
+            if set(task)!={"kind","provider","model","topic","as_of","evidence","max_tokens"}:
+                raise ValueError("INVALID_PUBLIC_TASK")
+            provider=task["provider"]
+            if (provider not in MODEL_ENDPOINTS or not isinstance(task["model"],str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",task["model"])
+                or type(task["max_tokens"]) is not int or not 128<=task["max_tokens"]<=2048):
+                raise ValueError("INVALID_PUBLIC_MODEL_TASK")
+            _prepare(task["topic"],task["evidence"],task["as_of"])
+            if allow_external is not True or os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI")!="1":
+                raise GatewayError("External AI requires explicit local egress approval")
+            if not os.environ.get(MODEL_ENDPOINTS[provider][1]):
+                raise GatewayError("Selected external provider credential not configured")
+            total+=task["max_tokens"]
+        elif kind=="local_artifact":
+            if set(task)!={"kind","artifact_db","artifact_id","payload"}:
+                raise ValueError("INVALID_LOCAL_ARTIFACT_TASK")
+        else:
+            raise ValueError("UNSUPPORTED_RESEARCH_TASK")
+        key=digest(task)
+        validated.append((key,task))
+    if total>external_output_budget:
+        raise ValueError("EXTERNAL_OUTPUT_BUDGET_EXCEEDED")
+    results={}
+    ordered=[]
+    for key,task in validated:
+        if key not in results:
+            try:
+                if task["kind"]=="public":
+                    args={k:v for k,v in task.items() if k!="kind"}
+                    results[key]={"status":"completed","report":research_public(
+                        **args,allow_external=allow_external,gateway=gateway)}
+                else:
+                    results[key]={"status":"completed","report":predict_local_artifact(
+                        task["artifact_db"],task["artifact_id"],task["payload"])}
+            except (ValueError,OSError,KeyError,TypeError):
+                # No provider payload/secret or raw exception in task log.
+                results[key]={"status":"blocked","report":None}
+        ordered.append({"task_sha256":key,**results[key]})
+    return {**_FLAGS,"tasks":ordered,"unique_tasks":len(results),
+            "reserved_output_tokens":total,"output_token_budget":external_output_budget,
+            "automatic_fallback":False,"actual_cost_usd":None}
+
+
 def main():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")

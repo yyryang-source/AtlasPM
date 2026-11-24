@@ -110,3 +110,28 @@ class UnifiedResearchTests(unittest.TestCase):
         event_queue.PATH.write_text(json.dumps(state))
         with self.assertRaisesRegex(ValueError,"INTEGRITY"):
             event_queue.drain(as_of=now.isoformat())
+
+
+    def test_dispatch_preflights_budget_and_never_auto_calls_external(self):
+        from atlaspm.research.intelligence import dispatch_tasks
+        from unittest.mock import patch
+        task={"kind":"public","provider":"openai","model":"fixture-model","topic":"analyst",
+              "as_of":NOW,"max_tokens":128,"evidence":[{"evidence_id":"fixture",
+              "source":"public fixture","available_at":"2026-11-20T20:00:00Z",
+              "text":"fixture","external_use_reviewed":True}]}
+        with patch.dict(os.environ,{"ATLASPM_ALLOW_EXTERNAL_AI":"1","OPENAI_API_KEY":"fixture"}):
+            with patch("atlaspm.research.intelligence.research_public") as call:
+                with self.assertRaisesRegex(ValueError,"BUDGET"):
+                    dispatch_tasks([task],external_output_budget=0,allow_external=True)
+                call.assert_not_called()
+                call.return_value={"research_only":True}
+                result=dispatch_tasks([task,task],external_output_budget=256,allow_external=True)
+                self.assertEqual(result["unique_tasks"],1)
+                call.assert_called_once()
+                self.assertFalse(result["broker_order_submission_enabled"])
+
+    def test_historical_diagnostics_reject_real_security_stream(self):
+        from atlaspm.research.signal_fusion import historical_diagnostics
+        with self.assertRaisesRegex(ValueError,"SYNTHETIC"):
+            historical_diagnostics({"historical_mean":[{"security_id":"conid:123"}],
+                                    "model":[{"security_id":"conid:123"}]})
