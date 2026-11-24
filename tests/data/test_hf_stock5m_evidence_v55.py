@@ -34,7 +34,7 @@ class MatchingTests(unittest.TestCase):
 
     def test_explicit_split_match_is_not_certification(self):
         r=m.match_split(EVENT,FILING,body(TEXT))
-        self.assertEqual(r["status"],"MARKET_AND_TEXT_AGREE_REVIEW_REQUIRED")
+        self.assertEqual(r["status"],"MARKET_AND_TEXT_AGREE_REVIEW_REQUIRED",r)
         self.assertAlmostEqual(r["candidates"][0]["normalized_overnight_return_if_split"],-0.02)
         self.assertEqual(r["candidates"][0]["effective_date_mentions"],["2020-02-03"])
         self.assertEqual(r["ratio_terms"],["1/25"])
@@ -52,6 +52,19 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(r["status"],"AMBIGUOUS_RATIO_TERMS")
         r=m.match_split(EVENT,FILING,body(TEXT.replace("symbol ABC","symbol ABCD")))
         self.assertEqual(r["status"],"SPLIT_TERMS_REQUIRE_REVIEW")
+
+    def test_ticker_punctuation_and_share_class_boundaries(self):
+        for suffix in (".", ",", ";", '"', ")", ""):
+            with self.subTest(suffix=suffix):
+                r=m.match_split(EVENT,FILING,body(TEXT.replace("ABC.","ABC"+suffix)))
+                self.assertEqual(r["status"],"MARKET_AND_TEXT_AGREE_REVIEW_REQUIRED",r)
+        for suffix in (".B","-B","D","1"):
+            with self.subTest(suffix=suffix):
+                r=m.match_split(EVENT,FILING,body(TEXT.replace("ABC.","ABC"+suffix+".")))
+                self.assertEqual(r["status"],"SPLIT_TERMS_REQUIRE_REVIEW",r)
+        for ticker in ("ABC.B","ABC-B"):
+            r=m.match_split({**EVENT,"symbol":ticker},FILING,body(TEXT.replace("ABC.",ticker+".")))
+            self.assertEqual(r["status"],"MARKET_AND_TEXT_AGREE_REVIEW_REQUIRED",r)
 
     def test_raw_body_hash(self):
         data=body(TEXT)
@@ -79,7 +92,7 @@ class MatchingTests(unittest.TestCase):
         inv={"results":[{**EVENT,"candidate_ciks":["0000000123"],"filings":[FILING]}]}
         with patch.object(m,"_body",return_value=(body(TEXT),p)):
             result=m.review(q,inv,refs)[0]
-            self.assertEqual(result["status"],"EXTERNAL_REFERENCE_AGREES_REVIEW_REQUIRED")
+            self.assertEqual(result["status"],"EXTERNAL_REFERENCE_AGREES_REVIEW_REQUIRED",result)
             self.assertFalse(result["approved_for_ingest"])
             self.assertFalse(result["independent_source_verified"])
             refs[("ABC","2020-02-03")][0]["new_over_old_shares"]="1/20"
