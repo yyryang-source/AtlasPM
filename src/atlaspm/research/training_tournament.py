@@ -38,7 +38,7 @@ def _identity(rows):
 
 
 def _trial_config(candidate,config):
-    if not isinstance(candidate,dict) or set(candidate)-{"model","ridge_alpha","sequence_epochs","parameters"}:
+    if not isinstance(candidate,dict) or set(candidate)-{"model","ridge_alpha","sequence_epochs","parameters","features"}:
         raise ValueError("INVALID_TOURNAMENT_CANDIDATE")
     name=candidate.get("model")
     if name not in MODELS+SEQUENCE_MODELS:
@@ -60,6 +60,17 @@ def _trial_config(candidate,config):
     if params:
         result["model_parameters"]={name:params}
     return result
+
+
+def project_features(payload, names):
+    original=payload["feature_names"]
+    if not isinstance(names,list) or not names or len(set(names))!=len(names) or any(n not in original for n in names):
+        raise ValueError("INVALID_FEATURE_SUBSET")
+    if names==original:
+        return payload
+    return {**payload,"feature_names":names,"sessions":[
+        {**session,"assets":[{**asset,"features":{n:asset["features"][n] for n in names}}
+                            for asset in session["assets"]]} for session in payload["sessions"]]}
 
 
 def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae"):
@@ -85,7 +96,11 @@ def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae")
             or (holdout_start-first)%step):
         raise ValueError("HOLDOUT_MUST_START_ON_REFIT_BOUNDARY")
     options=[_trial_config(c,config) for c in candidates]
-    if len({_sha(c) for c in options})!=len(options):
+    subsets=[c.get("features",payload["feature_names"]) for c in candidates]
+    for names in subsets:
+        if not isinstance(names,list) or not names or any(not isinstance(n,str) for n in names) or len(set(names))!=len(names) or any(n not in payload["feature_names"] for n in names):
+            raise ValueError("INVALID_FEATURE_SUBSET")
+    if len({_sha([c,names]) for c,names in zip(options,subsets)})!=len(options):
         raise ValueError("DUPLICATE_TOURNAMENT_CANDIDATE")
     # Holdout data never enters candidate selection. Train one candidate at
     # a time; discard its prediction arrays after scoring.
@@ -94,7 +109,7 @@ def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae")
     trials=[]
     for index,option in enumerate(options):
         name=option["models"][0]
-        result=train(prefix,**option)
+        result=train(project_features(prefix,subsets[index]),**option)
         rows=result["predictions"][name]
         identity=_identity(rows)
         if reference is None:
@@ -115,7 +130,8 @@ def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae")
     best=min(eligible,key=lambda t:(METRICS[selection_metric]*t["selection_score"],t["index"]))
     selected=options[best["index"]]
     winner=selected["models"][0]
-    final=train(payload,**selected)
+    selected_features=subsets[best["index"]]
+    final=train(project_features(payload,selected_features),**selected)
     day=sessions[holdout_start]["date"]
     if day not in {f["test_start"] for f in final["folds"]}:
         raise ValueError("HOLDOUT_MUST_START_ON_REFIT_BOUNDARY")
@@ -127,7 +143,7 @@ def tournament(payload,*,config,candidates,holdout_start,selection_metric="mae")
                                       "holdout_start":holdout_start,"selection_metric":selection_metric}),
             "dataset_sha256":final["dataset_sha256"],"validation_identity_sha256":reference,
             "selection_metric":selection_metric,"trial_count":len(trials),"trials":trials,
-            "selected_model":winner,"selected_config":selected,"selected_trial_index":best["index"],
+            "selected_model":winner,"selected_config":selected,"selected_features":selected_features,"selected_trial_index":best["index"],
             "validation_end":sessions[holdout_start-1]["date"],"holdout_start":day,
             "holdout":_metrics(holdout),"holdout_predictions":holdout,
             "holdout_mode":"winner_only_walk_forward_refits_on_matured_past_labels",
