@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -117,6 +117,10 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
+    if type(epoch_checkpoint) is not bool or (epoch_checkpoint and checkpoint_path is None):
+        raise ValueError('EPOCH_CHECKPOINT_REQUIRES_FOLD_STORE')
+    if epoch_checkpoint and not any(m in SEQUENCE_MODELS for m in models):
+        raise ValueError('EPOCH_CHECKPOINT_REQUIRES_SEQUENCE_MODEL')
     artifact_store=None
     if model_artifact_path is not None:
         from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
@@ -150,6 +154,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if epoch_checkpoint:
+        config['epoch_checkpoint']=True
     if artifact_store is not None:
         config['model_artifact_storage']=str(artifact_store.path)
     store=None
@@ -230,10 +236,15 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                             return arrays.rows(rows,(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
                         sequence_train=materialize(train_rows)
                         sequence_test=materialize(test_rows)
+                    epoch_store=None
+                    if epoch_checkpoint:
+                        from atlaspm.research.training_checkpoint import EpochStore
+                        epoch_store=EpochStore(store,fold_index,name)
                     values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
                                                  epochs=sequence_epochs,device=device,batch_size=batch_size,
                                                  mixed_precision=mixed_precision,
-                                                 capture_weights=saved_weights.update if artifact_store is not None else None)
+                                                 capture_weights=saved_weights.update if artifact_store is not None else None,
+                                                 epoch_store=epoch_store)
                 else:
                     values,settings=fit_predict(name,z,y,test,seed,
                                                 capture_weights=saved_weights.update if artifact_store is not None else None)

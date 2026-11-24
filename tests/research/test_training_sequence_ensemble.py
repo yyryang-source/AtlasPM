@@ -76,3 +76,35 @@ class DeepTests(unittest.TestCase):
         y=next(r for r in b["predictions"]["gru"] if key(r))
         self.assertIsNone(y["actual"])
         self.assertAlmostEqual(x["prediction"],y["prediction"],places=6)
+
+
+    def test_epoch_resume_after_interruption(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from atlaspm.research.training_checkpoint import EpochStore
+        cwd=Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                p=fixture()
+                config=dict(minimum_train_sessions=10,test_sessions=30,models=["gru"],
+                            sequence_length=3,sequence_epochs=3,batch_size=8)
+                reference=train(p,**config)
+                save=EpochStore.save
+                def stop_after_save(self,state):
+                    save(self,state)
+                    if state["completed_epochs"]==1:
+                        raise InterruptedError("synthetic interruption")
+                options=dict(checkpoint_path="local_data/checkpoint.sqlite3",epoch_checkpoint=True)
+                with patch.object(EpochStore,"save",stop_after_save):
+                    with self.assertRaises(InterruptedError):
+                        train(p,**config,**options)
+                resumed=train(p,**config,**options)
+                self.assertEqual(reference["predictions"],resumed["predictions"])
+                self.assertEqual(reference["model_settings"]["gru"]["epoch_losses"],
+                                 resumed["model_settings"]["gru"]["epoch_losses"])
+                self.assertEqual(resumed["model_settings"]["gru"]["resumed_epochs"],1)
+            finally:
+                os.chdir(cwd)

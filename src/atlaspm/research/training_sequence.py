@@ -37,7 +37,7 @@ def build_sequence_model(name,features,length):
     return Attention() if name=="transformer" else Recurrent()
 
 
-def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False, capture_weights=None):
+def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False, capture_weights=None, epoch_store=None):
     import numpy as np
     import torch
     from torch import nn
@@ -97,8 +97,24 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                 torch.cuda.reset_peak_memory_stats()
             losses=[]
             generator=torch.Generator().manual_seed(seed)
+            start_epoch=0
+            if epoch_store is not None:
+                previous=epoch_store.load()
+                if previous is not None:
+                    start_epoch=previous["completed_epochs"]
+                    losses=list(previous["losses"])
+                    if not 1<=start_epoch<=epochs or len(losses)!=start_epoch or not np.isfinite(losses).all():
+                        raise ValueError("INVALID_EPOCH_CHECKPOINT")
+                    model.load_state_dict(previous["model"],strict=True)
+                    optimizer.load_state_dict(previous["optimizer"])
+                    scaler.load_state_dict(previous["scaler"])
+                    generator.set_state(previous["generator"])
+                    torch.set_rng_state(previous["cpu_rng"])
+                    if device=="cuda":
+                        torch.cuda.set_rng_state(previous["cuda_rng"])
+                    del previous
             model.train()
-            for _ in range(epochs):
+            for epoch in range(start_epoch,epochs):
                 epoch_loss=0.
                 for ids in torch.randperm(len(train),generator=generator).split(batch_size):
                     xb=(torch.as_tensor(train[ids.numpy()],dtype=torch.float32,device=device)-mu)/sigma
@@ -115,6 +131,12 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                     scaler.update()
                     epoch_loss+=float(loss.detach().cpu())*len(ids)
                 losses.append(epoch_loss/len(train))
+                if epoch_store is not None:
+                    epoch_store.save(dict(completed_epochs=epoch+1,losses=losses,
+                        model=model.state_dict(),optimizer=optimizer.state_dict(),
+                        scaler=scaler.state_dict(),generator=generator.get_state(),
+                        cpu_rng=torch.get_rng_state(),
+                        cuda_rng=torch.cuda.get_rng_state() if device=='cuda' else None))
             model.eval()
             with torch.no_grad():
                 result=np.empty(len(test),dtype=np.float64)
@@ -134,4 +156,5 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                        peak_cuda_allocated_bytes=peak_device_bytes,host_resident_fold=True,
                        feature_mean=mean.tolist(),feature_scale=scale.tolist(),
                        target_mean=ymean,target_scale=yscale,
-                       deterministic_gpu_guaranteed=False)
+                       deterministic_gpu_guaranteed=False,
+                       resumed_epochs=start_epoch)

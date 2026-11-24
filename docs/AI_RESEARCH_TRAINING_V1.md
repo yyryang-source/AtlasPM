@@ -111,3 +111,15 @@ python -m atlaspm.research.training_artifacts --db local_data/models.sqlite3 pre
 ```
 
 Inference accepts only a validated synthetic window of exactly the saved sequence length, with the original feature order and no earlier date than the artifact's first test session. CPU replay of GPU-trained weights may differ within numerical precision; dependency versions must match. Epoch resume is independent of model snapshots.
+
+
+### Epoch-level recovery
+
+For LSTM/GRU/Transformer, set `"epoch_checkpoint": true` and
+`"checkpoint_path": "local_data/checkpoints.sqlite3"`. The latest completed
+epoch is saved atomically per fold and model, including optimizer, scaler,
+batch generator and RNG state. The same dataset, code, dependency versions,
+device and training configuration must be used. The loader uses PyTorch's
+restricted weights-only deserialization for local checkpoints; do not import
+untrusted databases. Interrupted partial epochs restart from the preceding
+completed epoch. CPU replay is tested; CUDA reproducibility is not guaranteed.
