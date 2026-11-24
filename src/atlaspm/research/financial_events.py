@@ -15,7 +15,7 @@ import re
 from atlaspm.data.market_db import private_path
 from atlaspm.data.provider_policy import ROLES, local_rights, RIGHTS_ENV, require_enabled
 
-KINDS = {"news":2, "analyst_rating":2, "earnings_forecast":2, "credit_rating":4,
+KINDS = {"news":2, "analyst_rating":3, "earnings_forecast":3, "credit_rating":4,
          "credit_outlook":3, "credit_watch":4, "credit_withdrawal":4, "default":5,
          "earnings":4, "sec_disclosure":4, "options_flow":3, "volume_anomaly":3,
          "macro_release":4, "rate_decision":5, "index_change":3,

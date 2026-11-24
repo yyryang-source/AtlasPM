@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import os
 from atlaspm.data.api_gateway import DEFAULT_GATEWAY, PROVIDERS, MODEL_ENDPOINTS
-from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, require_enabled
+from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, require_enabled, RESEARCH_DELIVERY
 
 _BLOCKED = {"yahoo_finance","bloomberg","sp_ratings","moodys","fitch","dbrs","kbra",
             "investment_banks","sp_dji","msci","ftse_russell","finra","msrb"}
@@ -48,6 +48,10 @@ def inventory(gateway=DEFAULT_GATEWAY):
             "enabled_by_configuration":enabled,"ready_for_manual_attempt":ready,
             "effective_status":"READY_FOR_MANUAL_ATTEMPT" if ready else "DISABLED_OR_BLOCKED",
             "credential_env":env,"credential_configured":configured,"rights_attested":rights,
+            "document_research_rights_configured":bool(os.environ.get("ATLASPM_"+name.upper()+"_RESEARCH_RIGHTS"))
+                if name in RESEARCH_DELIVERY else None,
+            "document_retention_configured":os.environ.get("ATLASPM_"+name.upper()+"_RESEARCH_RIGHTS_RETENTION")=="1"
+                if name in RESEARCH_DELIVERY else None,
             "token_expiry_operator_valid":expiry,"auth_mode":
                 "local_gateway" if name=="ibkr" else "oauth2_client_credentials_data_pending" if name=="finra" else
                 "licensed_file_or_pending" if name in _BLOCKED else

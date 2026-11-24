@@ -234,7 +234,7 @@ def ingest(metadata_file, *, archive=ARCHIVE):
             "parser":"explicit_tagged_lines_v1","document_sha256":digest}
 
 
-def visible(*, as_of, subject, archive=ARCHIVE):
+def visible(*, as_of, subject, archive=ARCHIVE, all_revisions=False):
     """Use actual local receipt and stated availability; do not backdate imports."""
     cutoff=_time(as_of)
     _subject(subject)
@@ -246,6 +246,8 @@ def visible(*, as_of, subject, archive=ARCHIVE):
             continue
         research_rights(row["provider"])
         key=tuple(row[k] for k in ("provider","firm","analyst_id","report_id","subject"))
+        if all_revisions:
+            key=(*key,row["revision"])
         prior=selected.get(key)
         if prior and prior["received_at"]==row["received_at"] and prior["revision"]!=row["revision"]:
             raise ValueError("Conflicting report receipt")
@@ -255,6 +257,10 @@ def visible(*, as_of, subject, archive=ARCHIVE):
     for row in selected.values():
         if row["first_available_at"] is not None and _time(row["first_available_at"])>cutoff:
             continue
+        meta={k:row[k] for k in ("provider","firm","analyst_id","report_id","subject","evidence_type",
+                                  "published_at","first_available_at","source_url","document")}
+        if _metadata(meta,_time(row["received_at"]))!=meta:
+            raise ValueError("Stored research metadata invalid")
         digest,pages=_read_document(private_path(Path(row["document"]),exists=True))
         if digest!=row["document_sha256"] or extract(pages)!=row["claims"]:
             raise ValueError("Source report content or parser evidence changed")
@@ -327,7 +333,8 @@ def factors(*, subject, as_of, previous_as_of, unit, period, basis,
     erase the earlier visible snapshot. No pricing or training admission.
     """
     now,prior=_time(as_of),_time(previous_as_of)
-    if not prior<now or not 1<=max_age_days<=730 or not 1<=half_life_days<=365:
+    if (not prior<now or type(max_age_days) is not int or type(half_life_days) is not int
+            or not 1<=max_age_days<=730 or not 1<=half_life_days<=365):
         raise ValueError("Invalid factor cutoffs/age policy")
     if not isinstance(unit,str) or not re.fullmatch(r"[A-Z]{3}",unit) or unit in {"PCT","INDEX"}:
         raise ValueError("Expected common currency")
@@ -400,7 +407,7 @@ def evaluate_forecasts(*, subject, as_of, outcomes_file, archive=ARCHIVE):
     revisions. No historical weights until independent sample validation.
     """
     cutoff=_time(as_of)
-    rows=visible(as_of=as_of,subject=subject,archive=archive)
+    rows=visible(as_of=as_of,subject=subject,archive=archive,all_revisions=True)
     with private_path(Path(outcomes_file),exists=True).open("rb") as handle:
         raw=handle.read(1024*1024+1)
     if len(raw)>1024*1024:
@@ -444,6 +451,8 @@ def evaluate_forecasts(*, subject, as_of, outcomes_file, archive=ARCHIVE):
                 continue
             bucket="1-30d" if horizon<=30 else "31-90d" if horizon<=90 else "91-365d" if horizon<=365 else "366-730d"
             group=(row["firm"],row["analyst_id"],key,bucket)
+            if group in selected and known==selected[group][0] and Decimal(claim["value"])!=selected[group][1]:
+                raise ValueError("Ambiguous same-receipt forecast")
             if group not in selected or known<selected[group][0]:
                 selected[group]=(known,Decimal(claim["value"]),row["receipt_sha256"])
     scores={}
@@ -478,9 +487,9 @@ def event_review(*, subject, as_of, context=(), archive=ARCHIVE, holdings=()):
     market repricing. No external calls and no automatic decision authority.
     """
     from atlaspm.research.financial_events import normalize, review
-    events=list(context)
-    if len(events)>1000:
+    if not isinstance(context,(list,tuple)) or len(context)>1000:
         raise ValueError("Context exceeds 1000 events")
+    events=list(context)
     for row in visible(as_of=as_of,subject=subject,archive=archive):
         if row["evidence_type"]!="original_report":
             continue
@@ -493,6 +502,8 @@ def event_review(*, subject, as_of, context=(), archive=ARCHIVE, holdings=()):
                     "first_available_at":row["first_available_at"],"effective_at":None,
                     "evidence_sha256":row["receipt_sha256"],"delivery":"file","expiry_seconds":86400},
                     received_at=row["received_at"]))
+    if len(events)>2000:
+        raise ValueError("Institutional event batch exceeds review capacity")
     return review(events,as_of=as_of,holdings=holdings)
 
 
