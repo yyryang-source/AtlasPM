@@ -249,6 +249,17 @@ class V3DuckDB(V3Contracts):
                          res["redundancy_selection"]["excluded_insufficient_standardized_dates"])
         self.assertIsNone(res["multi_factor"]["composite"])
 
+    def test_training_weights_fail_without_matured_labels(self):
+        self._generate()
+        kw = {**self._kwargs(), "factors":["mom_5d"],
+              "horizon":21, "holdout_start":"2026-01-26",
+              "weighting":"ic_train"}
+        res = factor_v3.analyze(**kw, exploratory=True)
+        self.assertEqual("INSUFFICIENT_MATURED_TRAINING_IC",
+                         res["multi_factor"]["weighting_state"])
+        self.assertEqual(["mom_5d"],res["redundancy_selection"]["selected_factors"])
+        self.assertIsNone(res["multi_factor"]["composite"])
+
     def test_sqlite_adjusted_source_kept_separate(self):
         self._generate(source="sqlite")
         kw = {**self._kwargs(), "factors":["mom_5d"],
