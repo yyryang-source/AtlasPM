@@ -680,3 +680,72 @@ generation across all sources, genuine model inference/routing, general
 multiasset allocation and lifecycle, production durable recovery/kill switch,
 independent research promotion/rollback scheduling, performance and real
 data/rights verification. Keep #94 frozen; formal training/backtest/live disabled.
+
+
+## Offline V1.0 final integration release gate (candidate, not approved)
+
+Independently verified prior head 84fe21809eb3ec77e499ddae2ec6e3003751bbb7:
+all seven returned GitHub workflows successful, Windows full 1109/1109
+zero failures/errors/skips, source errors and duplicate candidates zero.
+Windows tests 87.611 s; offline benchmark PASS, 2.1363836 s wall,
+2.171875 s CPU, process lifetime peak RSS 152698880 bytes, process I/O
+22441098 read bytes and 276869 written bytes. This measures a bounded
+synthetic fixture, not real market performance or physical disk transfer.
+Evidence: https://github.com/yyryang-source/AtlasPM/actions/runs/45510372198/job/138856258246
+Linux full dependency gate also passed:
+https://github.com/yyryang-source/AtlasPM/actions/runs/45510372066/job/138856257608
+
+Final batch adds all-category synthetic event metadata contracts and a
+deterministic partition of topics across three fixed model response schemas.
+Joint local evidence checks and existing decision/fusion run on the combined
+context plus separately fixed synthetic numerical forecasts. No real provider
+text retrieval, trained prediction or external inference claimed; no synthetic
+LLM output becomes a numerical signal. Actual specialist archive calls remain
+bounded explicit local routes; unavailable vendor schemas remain blocked.
+
+Existing mixed basket OMS now exercises partial fill, cancel pending,
+confirmed cancellation and unknown outcome with immutable checkpoint and
+cash/position reconciliation; unknown outcome remains halted. A process-exit
+test terminates the actual writer after committed replacement before lock
+cleanup; explicit operator cleanup after confirming the process has exited,
+then replay produces zero duplicate completions. This is not power-loss
+durability or arbitrary broker recovery. No real kill switch or automatic
+stale lock stealing.
+
+Experimental rank_synthetic_baskets compares at most eight already specified
+exact-leg synthetic baskets through the existing independent preflight and
+instrument-specific lower return bounds (option premium, dirty bond value,
+equity); rejects missing evidence, short options and maturity crossing
+the forecast window; deducts assumed financing, entry fee and configurable
+conservative stress penalty. No automatic order execution, no calibrated
+return/covariance optimization, no general option assignment or bond sale
+settlement. Existing risk limits preserved; no fictitious broker preview.
+
+Existing learning review now emits review_schedule drift requests; model-review
+CLI reads and compares content-addressed alpha registry versions, refuses
+same version, marks different dataset/config incomparable, no promotion or
+rollback activation. Independent validation required for any new version.
+Workbench status includes counts of persisted specialist topics and blocked
+tasks. No new database/OMS/HTTP client/model framework; no code removed
+without evidence of redundancy.
+
+Latest expected full Windows count 1112 (1109 + 3 test methods), not a
+measured result. Full Windows gate and Linux full-dependency job run
+benchmark --offline; benchmark reports actual runtime/CPU/RSS/I/O and
+bounded workload counts, not a sustained throughput claim. Use:
+```powershell
+python scripts/maintenance/verify_release.py --minimum-passed 1112
+python scripts/maintenance/benchmark_unified_data.py --offline
+```
+Model comparison: `python -m atlaspm.framework.orchestrator model-review
+--file local_data/model_review.json`, with exact keys path (existing local
+registry .sqlite3), champion, challenger (registered strategy versions).
+No promotion action. Credential list and authorized staged real tests above
+remain the canonical preparation instructions; provider contract, limits,
+fees and external-AI rights must be independently confirmed before activation.
+After latest full gates, freeze feature expansion and fix observed defects only.
+No release tag/merge/approval until exact SHA and Windows user gate pass.
+Real data/PIT/rights, actual AI and IBKR Paper connections, production recovery,
+generalized cross-asset optimization/expiry and independent operational model
+approval remain explicit blockers. #94 unchanged. Formal training, formal
+backtest and automatic live remain disabled; real Paper manual only.

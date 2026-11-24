@@ -84,13 +84,17 @@ def offline_benchmark():
     before=process_io_counters()
     wall,cpu=perf_counter(),process_time()
     report=offline_release()
-    metrics={"scope":"synthetic_offline_fixture_only","wall_seconds":perf_counter()-wall,
+    elapsed=perf_counter()-wall
+    counts=report.get("work_counts",{})
+    metrics={"scope":"synthetic_offline_fixture_only","wall_seconds":elapsed,
+             "work_counts":counts,"queued_event_revisions_per_total_second":counts.get("queued_event_revisions",0)/max(elapsed,1e-9),
              "cpu_seconds":process_time()-cpu,"process_lifetime_peak_rss_bytes":process_peak_rss_bytes(),
              "process_io_delta":io_delta(before,process_io_counters()),
              "production_performance_verified":False}
     print(json.dumps({"status":report["status"],"checks":report["checks"],"metrics":metrics,
                       "synthetic_simulation":report.get("synthetic_simulation"),
                       "mixed_asset_fixture":report.get("mixed_asset_fixture"),
+                      "joint_fixture":report.get("joint_fixture"),
                       "network_calls":0,"broker_side_effects":False},indent=2,allow_nan=False))
     return 0 if report["status"]=="OFFLINE_FIXTURE_PASS" else 1
 

@@ -32,11 +32,19 @@ def status(*, path=event_queue.PATH):
     items=event_queue._read_state(path)
     control=items.get(event_queue.CONTROL_KEY,{})
     counts={}
+    topics={}
+    blocked=0
     for key,item in items.items():
         if key!=event_queue.CONTROL_KEY:
             state=item["state"]
             counts[state]=counts.get(state,0)+1
+            report=item.get("report") or {}
+            for task in report.get("specialist_tasks",[]):
+                topic=task["topic"]
+                topics[topic]=topics.get(topic,0)+1
+            blocked+=len(report.get("blocked_specialist_tasks",[]))
     return {**FLAGS,"control":control,"queue_counts":counts,
+            "research_topic_counts":topics,"blocked_research_tasks":blocked,
             "network_tasks_enabled":False,"formal_training_enabled":False,
             "broker_tasks_enabled":False,"max_concurrency":1}
 
@@ -239,6 +247,8 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
                       "total_cost":replay["total_cost"],"result_sha256":sim["result_sha256"]},
                   single_cycle_decision=single["decision"],learning=learning,
                   joint_fixture={"coverage":joint["coverage"],"model_reports":joint["model_reports"],"model_outputs_are_fixtures":True},
+                  work_counts={"queued_event_revisions":count,"joint_event_revisions":len(events),
+                               "replay_sessions":sim["sessions"],"mixed_journal_events":mixed["events"]},
                   mixed_asset_fixture={"decision":mixed_report["decision"],"orders":len(mixed_report["orders"]),
                                        "result_sha256":mixed["result_sha256"],"broker_verified":False},
                   historical_data_certified=False,real_api_connected=False,
