@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from atlaspm.engine.unified import run_unified_portfolio
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@unittest.skipUnless(importlib.util.find_spec("scipy"), "Optional optimizer extra needed: pip install -e .[portfolio]")
 class UnifiedPortfolioEngineTests(unittest.TestCase):
     def setUp(self) -> None:
         self.payload = json.loads(
