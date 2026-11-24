@@ -1,0 +1,1538 @@
+{
+  "mode": "synthetic",
+  "synthetic_fixture": true,
+  "initial_cash": 1000,
+  "fee_bps": 5,
+  "slippage_bps": 5,
+  "cash_reserve": 0.2,
+  "top_k": 2,
+  "rebalance_sessions": 5,
+  "settlement_sessions": 1,
+  "optimizer": {
+    "method": "equal_weight",
+    "lookback_sessions": 20,
+    "max_name_weight": 0.7,
+    "risk_budgets": {
+      "AAA": 1,
+      "BBB": 1
+    }
+  },
+  "benchmark_basket": [
+    "AAA",
+    "BBB"
+  ],
+  "sessions": [
+    {
+      "date": "2020-01-02",
+      "open_at": "2020-01-02T09:30:00-05:00",
+      "close_at": "2020-01-02T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 100,
+        "BBB": 100
+      },
+      "close": {
+        "AAA": 100,
+        "BBB": 100
+      },
+      "benchmark_close": {
+        "SPY": 100,
+        "QQQ": 100
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-02T16:00:00-05:00",
+          "available_at": "2020-01-02T16:00:00-05:00",
+          "data_available_at": "2020-01-02T16:00:00-05:00",
+          "expires_at": "2020-01-02T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-02T16:00:00-05:00",
+          "available_at": "2020-01-02T16:00:00-05:00",
+          "data_available_at": "2020-01-02T16:00:00-05:00",
+          "expires_at": "2020-01-02T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-03",
+      "open_at": "2020-01-03T09:30:00-05:00",
+      "close_at": "2020-01-03T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 102,
+        "BBB": 101.5
+      },
+      "close": {
+        "AAA": 102,
+        "BBB": 101.5
+      },
+      "benchmark_close": {
+        "SPY": 101,
+        "QQQ": 102
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-03T16:00:00-05:00",
+          "available_at": "2020-01-03T16:00:00-05:00",
+          "data_available_at": "2020-01-03T16:00:00-05:00",
+          "expires_at": "2020-01-03T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-03T16:00:00-05:00",
+          "available_at": "2020-01-03T16:00:00-05:00",
+          "data_available_at": "2020-01-03T16:00:00-05:00",
+          "expires_at": "2020-01-03T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-04",
+      "open_at": "2020-01-04T09:30:00-05:00",
+      "close_at": "2020-01-04T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 104,
+        "BBB": 103
+      },
+      "close": {
+        "AAA": 104,
+        "BBB": 103
+      },
+      "benchmark_close": {
+        "SPY": 102,
+        "QQQ": 104
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-04T16:00:00-05:00",
+          "available_at": "2020-01-04T16:00:00-05:00",
+          "data_available_at": "2020-01-04T16:00:00-05:00",
+          "expires_at": "2020-01-04T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-04T16:00:00-05:00",
+          "available_at": "2020-01-04T16:00:00-05:00",
+          "data_available_at": "2020-01-04T16:00:00-05:00",
+          "expires_at": "2020-01-04T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-05",
+      "open_at": "2020-01-05T09:30:00-05:00",
+      "close_at": "2020-01-05T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 103,
+        "BBB": 104.5
+      },
+      "close": {
+        "AAA": 103,
+        "BBB": 104.5
+      },
+      "benchmark_close": {
+        "SPY": 103,
+        "QQQ": 106
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-05T16:00:00-05:00",
+          "available_at": "2020-01-05T16:00:00-05:00",
+          "data_available_at": "2020-01-05T16:00:00-05:00",
+          "expires_at": "2020-01-05T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-05T16:00:00-05:00",
+          "available_at": "2020-01-05T16:00:00-05:00",
+          "data_available_at": "2020-01-05T16:00:00-05:00",
+          "expires_at": "2020-01-05T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-06",
+      "open_at": "2020-01-06T09:30:00-05:00",
+      "close_at": "2020-01-06T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 105,
+        "BBB": 102
+      },
+      "close": {
+        "AAA": 105,
+        "BBB": 102
+      },
+      "benchmark_close": {
+        "SPY": 104,
+        "QQQ": 108
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-06T16:00:00-05:00",
+          "available_at": "2020-01-06T16:00:00-05:00",
+          "data_available_at": "2020-01-06T16:00:00-05:00",
+          "expires_at": "2020-01-06T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-06T16:00:00-05:00",
+          "available_at": "2020-01-06T16:00:00-05:00",
+          "data_available_at": "2020-01-06T16:00:00-05:00",
+          "expires_at": "2020-01-06T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-07",
+      "open_at": "2020-01-07T09:30:00-05:00",
+      "close_at": "2020-01-07T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 107,
+        "BBB": 103.5
+      },
+      "close": {
+        "AAA": 107,
+        "BBB": 103.5
+      },
+      "benchmark_close": {
+        "SPY": 105,
+        "QQQ": 110
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-07T16:00:00-05:00",
+          "available_at": "2020-01-07T16:00:00-05:00",
+          "data_available_at": "2020-01-07T16:00:00-05:00",
+          "expires_at": "2020-01-07T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-07T16:00:00-05:00",
+          "available_at": "2020-01-07T16:00:00-05:00",
+          "data_available_at": "2020-01-07T16:00:00-05:00",
+          "expires_at": "2020-01-07T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-08",
+      "open_at": "2020-01-08T09:30:00-05:00",
+      "close_at": "2020-01-08T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 106,
+        "BBB": 105
+      },
+      "close": {
+        "AAA": 106,
+        "BBB": 105
+      },
+      "benchmark_close": {
+        "SPY": 106,
+        "QQQ": 112
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-08T16:00:00-05:00",
+          "available_at": "2020-01-08T16:00:00-05:00",
+          "data_available_at": "2020-01-08T16:00:00-05:00",
+          "expires_at": "2020-01-08T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-08T16:00:00-05:00",
+          "available_at": "2020-01-08T16:00:00-05:00",
+          "data_available_at": "2020-01-08T16:00:00-05:00",
+          "expires_at": "2020-01-08T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-09",
+      "open_at": "2020-01-09T09:30:00-05:00",
+      "close_at": "2020-01-09T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 108,
+        "BBB": 106.5
+      },
+      "close": {
+        "AAA": 108,
+        "BBB": 106.5
+      },
+      "benchmark_close": {
+        "SPY": 107,
+        "QQQ": 114
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-09T16:00:00-05:00",
+          "available_at": "2020-01-09T16:00:00-05:00",
+          "data_available_at": "2020-01-09T16:00:00-05:00",
+          "expires_at": "2020-01-09T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-09T16:00:00-05:00",
+          "available_at": "2020-01-09T16:00:00-05:00",
+          "data_available_at": "2020-01-09T16:00:00-05:00",
+          "expires_at": "2020-01-09T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-10",
+      "open_at": "2020-01-10T09:30:00-05:00",
+      "close_at": "2020-01-10T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 110,
+        "BBB": 104
+      },
+      "close": {
+        "AAA": 110,
+        "BBB": 104
+      },
+      "benchmark_close": {
+        "SPY": 108,
+        "QQQ": 116
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-10T16:00:00-05:00",
+          "available_at": "2020-01-10T16:00:00-05:00",
+          "data_available_at": "2020-01-10T16:00:00-05:00",
+          "expires_at": "2020-01-10T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-10T16:00:00-05:00",
+          "available_at": "2020-01-10T16:00:00-05:00",
+          "data_available_at": "2020-01-10T16:00:00-05:00",
+          "expires_at": "2020-01-10T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-11",
+      "open_at": "2020-01-11T09:30:00-05:00",
+      "close_at": "2020-01-11T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 109,
+        "BBB": 105.5
+      },
+      "close": {
+        "AAA": 109,
+        "BBB": 105.5
+      },
+      "benchmark_close": {
+        "SPY": 109,
+        "QQQ": 118
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-11T16:00:00-05:00",
+          "available_at": "2020-01-11T16:00:00-05:00",
+          "data_available_at": "2020-01-11T16:00:00-05:00",
+          "expires_at": "2020-01-11T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-11T16:00:00-05:00",
+          "available_at": "2020-01-11T16:00:00-05:00",
+          "data_available_at": "2020-01-11T16:00:00-05:00",
+          "expires_at": "2020-01-11T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-12",
+      "open_at": "2020-01-12T09:30:00-05:00",
+      "close_at": "2020-01-12T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 111,
+        "BBB": 107
+      },
+      "close": {
+        "AAA": 111,
+        "BBB": 107
+      },
+      "benchmark_close": {
+        "SPY": 110,
+        "QQQ": 120
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-12T16:00:00-05:00",
+          "available_at": "2020-01-12T16:00:00-05:00",
+          "data_available_at": "2020-01-12T16:00:00-05:00",
+          "expires_at": "2020-01-12T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-12T16:00:00-05:00",
+          "available_at": "2020-01-12T16:00:00-05:00",
+          "data_available_at": "2020-01-12T16:00:00-05:00",
+          "expires_at": "2020-01-12T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-13",
+      "open_at": "2020-01-13T09:30:00-05:00",
+      "close_at": "2020-01-13T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 113,
+        "BBB": 108.5
+      },
+      "close": {
+        "AAA": 113,
+        "BBB": 108.5
+      },
+      "benchmark_close": {
+        "SPY": 111,
+        "QQQ": 122
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-13T16:00:00-05:00",
+          "available_at": "2020-01-13T16:00:00-05:00",
+          "data_available_at": "2020-01-13T16:00:00-05:00",
+          "expires_at": "2020-01-13T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-13T16:00:00-05:00",
+          "available_at": "2020-01-13T16:00:00-05:00",
+          "data_available_at": "2020-01-13T16:00:00-05:00",
+          "expires_at": "2020-01-13T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-14",
+      "open_at": "2020-01-14T09:30:00-05:00",
+      "close_at": "2020-01-14T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 112,
+        "BBB": 106
+      },
+      "close": {
+        "AAA": 112,
+        "BBB": 106
+      },
+      "benchmark_close": {
+        "SPY": 112,
+        "QQQ": 124
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-14T16:00:00-05:00",
+          "available_at": "2020-01-14T16:00:00-05:00",
+          "data_available_at": "2020-01-14T16:00:00-05:00",
+          "expires_at": "2020-01-14T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-14T16:00:00-05:00",
+          "available_at": "2020-01-14T16:00:00-05:00",
+          "data_available_at": "2020-01-14T16:00:00-05:00",
+          "expires_at": "2020-01-14T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-15",
+      "open_at": "2020-01-15T09:30:00-05:00",
+      "close_at": "2020-01-15T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 114,
+        "BBB": 107.5
+      },
+      "close": {
+        "AAA": 114,
+        "BBB": 107.5
+      },
+      "benchmark_close": {
+        "SPY": 113,
+        "QQQ": 126
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-15T16:00:00-05:00",
+          "available_at": "2020-01-15T16:00:00-05:00",
+          "data_available_at": "2020-01-15T16:00:00-05:00",
+          "expires_at": "2020-01-15T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-15T16:00:00-05:00",
+          "available_at": "2020-01-15T16:00:00-05:00",
+          "data_available_at": "2020-01-15T16:00:00-05:00",
+          "expires_at": "2020-01-15T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-16",
+      "open_at": "2020-01-16T09:30:00-05:00",
+      "close_at": "2020-01-16T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 116,
+        "BBB": 109
+      },
+      "close": {
+        "AAA": 116,
+        "BBB": 109
+      },
+      "benchmark_close": {
+        "SPY": 114,
+        "QQQ": 128
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-16T16:00:00-05:00",
+          "available_at": "2020-01-16T16:00:00-05:00",
+          "data_available_at": "2020-01-16T16:00:00-05:00",
+          "expires_at": "2020-01-16T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-16T16:00:00-05:00",
+          "available_at": "2020-01-16T16:00:00-05:00",
+          "data_available_at": "2020-01-16T16:00:00-05:00",
+          "expires_at": "2020-01-16T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-17",
+      "open_at": "2020-01-17T09:30:00-05:00",
+      "close_at": "2020-01-17T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 115,
+        "BBB": 110.5
+      },
+      "close": {
+        "AAA": 115,
+        "BBB": 110.5
+      },
+      "benchmark_close": {
+        "SPY": 115,
+        "QQQ": 130
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-17T16:00:00-05:00",
+          "available_at": "2020-01-17T16:00:00-05:00",
+          "data_available_at": "2020-01-17T16:00:00-05:00",
+          "expires_at": "2020-01-17T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-17T16:00:00-05:00",
+          "available_at": "2020-01-17T16:00:00-05:00",
+          "data_available_at": "2020-01-17T16:00:00-05:00",
+          "expires_at": "2020-01-17T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-18",
+      "open_at": "2020-01-18T09:30:00-05:00",
+      "close_at": "2020-01-18T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 117,
+        "BBB": 108
+      },
+      "close": {
+        "AAA": 117,
+        "BBB": 108
+      },
+      "benchmark_close": {
+        "SPY": 116,
+        "QQQ": 132
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-18T16:00:00-05:00",
+          "available_at": "2020-01-18T16:00:00-05:00",
+          "data_available_at": "2020-01-18T16:00:00-05:00",
+          "expires_at": "2020-01-18T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-18T16:00:00-05:00",
+          "available_at": "2020-01-18T16:00:00-05:00",
+          "data_available_at": "2020-01-18T16:00:00-05:00",
+          "expires_at": "2020-01-18T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-19",
+      "open_at": "2020-01-19T09:30:00-05:00",
+      "close_at": "2020-01-19T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 119,
+        "BBB": 109.5
+      },
+      "close": {
+        "AAA": 119,
+        "BBB": 109.5
+      },
+      "benchmark_close": {
+        "SPY": 117,
+        "QQQ": 134
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-19T16:00:00-05:00",
+          "available_at": "2020-01-19T16:00:00-05:00",
+          "data_available_at": "2020-01-19T16:00:00-05:00",
+          "expires_at": "2020-01-19T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-19T16:00:00-05:00",
+          "available_at": "2020-01-19T16:00:00-05:00",
+          "data_available_at": "2020-01-19T16:00:00-05:00",
+          "expires_at": "2020-01-19T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-20",
+      "open_at": "2020-01-20T09:30:00-05:00",
+      "close_at": "2020-01-20T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 118,
+        "BBB": 111
+      },
+      "close": {
+        "AAA": 118,
+        "BBB": 111
+      },
+      "benchmark_close": {
+        "SPY": 118,
+        "QQQ": 136
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-20T16:00:00-05:00",
+          "available_at": "2020-01-20T16:00:00-05:00",
+          "data_available_at": "2020-01-20T16:00:00-05:00",
+          "expires_at": "2020-01-20T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-20T16:00:00-05:00",
+          "available_at": "2020-01-20T16:00:00-05:00",
+          "data_available_at": "2020-01-20T16:00:00-05:00",
+          "expires_at": "2020-01-20T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-21",
+      "open_at": "2020-01-21T09:30:00-05:00",
+      "close_at": "2020-01-21T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 120,
+        "BBB": 112.5
+      },
+      "close": {
+        "AAA": 120,
+        "BBB": 112.5
+      },
+      "benchmark_close": {
+        "SPY": 119,
+        "QQQ": 138
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-21T16:00:00-05:00",
+          "available_at": "2020-01-21T16:00:00-05:00",
+          "data_available_at": "2020-01-21T16:00:00-05:00",
+          "expires_at": "2020-01-21T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-21T16:00:00-05:00",
+          "available_at": "2020-01-21T16:00:00-05:00",
+          "data_available_at": "2020-01-21T16:00:00-05:00",
+          "expires_at": "2020-01-21T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-22",
+      "open_at": "2020-01-22T09:30:00-05:00",
+      "close_at": "2020-01-22T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 122,
+        "BBB": 110
+      },
+      "close": {
+        "AAA": 122,
+        "BBB": 110
+      },
+      "benchmark_close": {
+        "SPY": 120,
+        "QQQ": 140
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-22T16:00:00-05:00",
+          "available_at": "2020-01-22T16:00:00-05:00",
+          "data_available_at": "2020-01-22T16:00:00-05:00",
+          "expires_at": "2020-01-22T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-22T16:00:00-05:00",
+          "available_at": "2020-01-22T16:00:00-05:00",
+          "data_available_at": "2020-01-22T16:00:00-05:00",
+          "expires_at": "2020-01-22T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-23",
+      "open_at": "2020-01-23T09:30:00-05:00",
+      "close_at": "2020-01-23T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 121,
+        "BBB": 111.5
+      },
+      "close": {
+        "AAA": 121,
+        "BBB": 111.5
+      },
+      "benchmark_close": {
+        "SPY": 121,
+        "QQQ": 142
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-23T16:00:00-05:00",
+          "available_at": "2020-01-23T16:00:00-05:00",
+          "data_available_at": "2020-01-23T16:00:00-05:00",
+          "expires_at": "2020-01-23T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-23T16:00:00-05:00",
+          "available_at": "2020-01-23T16:00:00-05:00",
+          "data_available_at": "2020-01-23T16:00:00-05:00",
+          "expires_at": "2020-01-23T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-24",
+      "open_at": "2020-01-24T09:30:00-05:00",
+      "close_at": "2020-01-24T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 123,
+        "BBB": 113
+      },
+      "close": {
+        "AAA": 123,
+        "BBB": 113
+      },
+      "benchmark_close": {
+        "SPY": 122,
+        "QQQ": 144
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-24T16:00:00-05:00",
+          "available_at": "2020-01-24T16:00:00-05:00",
+          "data_available_at": "2020-01-24T16:00:00-05:00",
+          "expires_at": "2020-01-24T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-24T16:00:00-05:00",
+          "available_at": "2020-01-24T16:00:00-05:00",
+          "data_available_at": "2020-01-24T16:00:00-05:00",
+          "expires_at": "2020-01-24T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-25",
+      "open_at": "2020-01-25T09:30:00-05:00",
+      "close_at": "2020-01-25T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 125,
+        "BBB": 114.5
+      },
+      "close": {
+        "AAA": 125,
+        "BBB": 114.5
+      },
+      "benchmark_close": {
+        "SPY": 123,
+        "QQQ": 146
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-25T16:00:00-05:00",
+          "available_at": "2020-01-25T16:00:00-05:00",
+          "data_available_at": "2020-01-25T16:00:00-05:00",
+          "expires_at": "2020-01-25T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-25T16:00:00-05:00",
+          "available_at": "2020-01-25T16:00:00-05:00",
+          "data_available_at": "2020-01-25T16:00:00-05:00",
+          "expires_at": "2020-01-25T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-26",
+      "open_at": "2020-01-26T09:30:00-05:00",
+      "close_at": "2020-01-26T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 124,
+        "BBB": 112
+      },
+      "close": {
+        "AAA": 124,
+        "BBB": 112
+      },
+      "benchmark_close": {
+        "SPY": 124,
+        "QQQ": 148
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-26T16:00:00-05:00",
+          "available_at": "2020-01-26T16:00:00-05:00",
+          "data_available_at": "2020-01-26T16:00:00-05:00",
+          "expires_at": "2020-01-26T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-26T16:00:00-05:00",
+          "available_at": "2020-01-26T16:00:00-05:00",
+          "data_available_at": "2020-01-26T16:00:00-05:00",
+          "expires_at": "2020-01-26T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-27",
+      "open_at": "2020-01-27T09:30:00-05:00",
+      "close_at": "2020-01-27T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 126,
+        "BBB": 113.5
+      },
+      "close": {
+        "AAA": 126,
+        "BBB": 113.5
+      },
+      "benchmark_close": {
+        "SPY": 125,
+        "QQQ": 150
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-27T16:00:00-05:00",
+          "available_at": "2020-01-27T16:00:00-05:00",
+          "data_available_at": "2020-01-27T16:00:00-05:00",
+          "expires_at": "2020-01-27T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-27T16:00:00-05:00",
+          "available_at": "2020-01-27T16:00:00-05:00",
+          "data_available_at": "2020-01-27T16:00:00-05:00",
+          "expires_at": "2020-01-27T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-28",
+      "open_at": "2020-01-28T09:30:00-05:00",
+      "close_at": "2020-01-28T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 128,
+        "BBB": 115
+      },
+      "close": {
+        "AAA": 128,
+        "BBB": 115
+      },
+      "benchmark_close": {
+        "SPY": 126,
+        "QQQ": 152
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-28T16:00:00-05:00",
+          "available_at": "2020-01-28T16:00:00-05:00",
+          "data_available_at": "2020-01-28T16:00:00-05:00",
+          "expires_at": "2020-01-28T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-28T16:00:00-05:00",
+          "available_at": "2020-01-28T16:00:00-05:00",
+          "data_available_at": "2020-01-28T16:00:00-05:00",
+          "expires_at": "2020-01-28T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    },
+    {
+      "date": "2020-01-29",
+      "open_at": "2020-01-29T09:30:00-05:00",
+      "close_at": "2020-01-29T16:00:00-05:00",
+      "source": "synthetic",
+      "open": {
+        "AAA": 127,
+        "BBB": 116.5
+      },
+      "close": {
+        "AAA": 127,
+        "BBB": 116.5
+      },
+      "benchmark_close": {
+        "SPY": 127,
+        "QQQ": 154
+      },
+      "signals": [
+        {
+          "symbol": "AAA",
+          "security_id": "SYN:AAA",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-29T16:00:00-05:00",
+          "available_at": "2020-01-29T16:00:00-05:00",
+          "data_available_at": "2020-01-29T16:00:00-05:00",
+          "expires_at": "2020-01-29T16:00:00-05:00",
+          "factor_score": 2,
+          "model_rank": 1
+        },
+        {
+          "symbol": "BBB",
+          "security_id": "SYN:BBB",
+          "sector": "test",
+          "model_version": "fixture",
+          "identity_source": "synthetic",
+          "data_source": "synthetic",
+          "data_quality": "synthetic_test_only",
+          "research_eligible": true,
+          "model_approved_for_training": false,
+          "generated_at": "2020-01-29T16:00:00-05:00",
+          "available_at": "2020-01-29T16:00:00-05:00",
+          "data_available_at": "2020-01-29T16:00:00-05:00",
+          "expires_at": "2020-01-29T16:00:00-05:00",
+          "factor_score": 1,
+          "model_rank": 2
+        }
+      ]
+    }
+  ]
+}
