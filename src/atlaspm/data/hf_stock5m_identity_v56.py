@@ -1,7 +1,7 @@
 """Historical SEC cover-page observations (not certified security identities).
 
 Select historical issuer filings independently of today's ticker directory.
-Only explicit, same-row iXBRL DEI facts from the primary document qualify.
+Explicit same-row iXBRL DEI facts or strict untagged cover tables qualify.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import os
 import re
 import time
 
+from atlaspm.data import sec_legacy_cover
 from atlaspm.data import hf_stock5m_evidence_v51 as ev
 from atlaspm.data import hf_stock5m_filings_v52 as filings
 from atlaspm.data import hf_stock5m_evidence_v55 as matching
@@ -120,10 +121,27 @@ def extract(data,filing):
             continue
         seen.add(key)
         observations.append({"symbol":symbol,"exchange_mic_candidate":mic,"security_title":values["title"],
-            "exchange_reported":values["exchange"],"context_ref":next(iter(contexts)),
+            "exchange_reported":values["exchange"],"context_ref":next(iter(contexts)),"method":"SAME_ROW_DEI",
             "observed_filing_date":filing["filed_date"],"known_date_lower_bound":filing["filed_date"],
             "security_id":None,"valid_from":None,"valid_to":None,
             "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
+    # Never fall back to plain text in a tagged document. In particular,
+    # inconsistent contexts must not be accepted by dropping their tags.
+    if not re.search(r"<\s*ix:",primary[0],re.I):
+        for title,symbol,exchange in sec_legacy_cover.rows(primary[0]):
+            mic=EXCHANGES.get(exchange.upper())
+            if not SYMBOL.fullmatch(symbol) or not mic or not 1<=len(title)<=500:
+                rejected+=1
+                continue
+            key=(symbol,mic,title,None)
+            if key in seen:
+                continue
+            seen.add(key)
+            observations.append({"symbol":symbol,"exchange_mic_candidate":mic,"security_title":title,
+                "exchange_reported":exchange,"context_ref":None,"method":"EXPLICIT_LEGACY_TABLE",
+                "observed_filing_date":filing["filed_date"],"known_date_lower_bound":filing["filed_date"],
+                "security_id":None,"valid_from":None,"valid_to":None,
+                "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
     conflicts={s for s,n in Counter(o["symbol"] for o in observations).items() if n>1}
     return {"observations":[o for o in observations if o["symbol"] not in conflicts],
             "conflicting_symbols":sorted(conflicts),"rejected_tagged_rows":rejected,
@@ -225,6 +243,7 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
                   warning="Sampled SEC cover observations are issuer-level leads, not independent sources, PIT intervals, or verified historical share classes.")
     # Cursor only advances automatically after all selected bodies were processed.
     report["resume_after_cik"]=report["next_after_cik"] if report["page_complete"] else report["after_cik"]
+    report["page_advance_allowed"]=report["page_complete"] and not report["missing_index_quarters"]
     key=ev._sha(json.dumps([year,report["after_cik"],report["selected_issuers"],report["index_partition_sha256"]]).encode())[:24]
     path=BASE/"pages"/(key+".json")
     report["report_path"]=str(private_path(path))
