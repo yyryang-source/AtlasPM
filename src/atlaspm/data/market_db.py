@@ -325,6 +325,11 @@ def register_parser(sub):
     h.add_argument('--session',choices=['rth','all'],default='rth')
     h.add_argument('--dry-run',action='store_true')
     h.add_argument('--no-resume',action='store_true')
+    h=actions.add_parser('hf-5m-session-v4',help='Offline calendar diagnostics and research projection plan')
+    h.add_argument('--start-month',default='2000-01')
+    h.add_argument('--end-month',default='2026-03')
+    h.add_argument('--all-months',action='store_true')
+    h.add_argument('--dry-run',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -459,6 +464,11 @@ def run(args):
         return hf_stock5m_batch.run(
             args.start_month, args.end_month, session=args.session,
             max_months=args.max_months, resume=not args.no_resume,
+            dry_run=args.dry_run)
+    if args.db_action == 'hf-5m-session-v4':
+        from atlaspm.data import hf_stock5m_session_v4
+        return hf_stock5m_session_v4.run(
+            args.start_month,args.end_month,all_months=args.all_months,
             dry_run=args.dry_run)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
