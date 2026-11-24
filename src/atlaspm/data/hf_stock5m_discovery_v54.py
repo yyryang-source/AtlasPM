@@ -56,11 +56,11 @@ def _daily(cx,month):
               min(timestamp_ms) AS first_ms,max(timestamp_ms) AS last_ms
             FROM {view}
             WHERE symbol IS NOT NULL AND length(symbol) BETWEEN 1 AND 32
-              AND isfinite(open) AND open>0 AND isfinite(close) AND close>0
+            GROUP BY 1,2 HAVING count(*)=count(DISTINCT timestamp_ms)
+              AND bool_and(coalesce(isfinite(open) AND open>0 AND isfinite(close) AND close>0
               AND isfinite(high) AND isfinite(low) AND low>0
               AND high>=greatest(open,close,low) AND low<=least(open,close)
-              AND isfinite(volume_shares) AND volume_shares>=0
-            GROUP BY 1,2 HAVING count(*)=count(DISTINCT timestamp_ms)
+              AND isfinite(volume_shares) AND volume_shares>=0,false))
             ORDER BY symbol,trade_date
             ) TO {factors._quoted(stage)} (FORMAT PARQUET,COMPRESSION ZSTD)""")
         if signature!=v4._signature(path):
@@ -83,8 +83,8 @@ def _candidates(cx,paths,calendar,month,threshold,limit):
     cx.executemany("INSERT INTO discovery_sessions VALUES (?,?,?,?)",
                    [(r[0],i,r[1],r[2]) for i,r in enumerate(sorted(calendar),1)])
     src=factors._files_sql(paths)
-    # A consecutive-session overnight gap requires observed first and final
-    # full calendar slots on both dates; sparse days are not split candidates.
+    # Require prior final and current first full calendar slot, not merely
+    # adjacent observations. Interior completeness is not established.
     sql=f"""WITH daily AS (
       SELECT d.*,s.ordinal,s.open_ms,s.close_ms
       FROM {src} d JOIN discovery_sessions s USING(trade_date)
@@ -99,11 +99,11 @@ def _candidates(cx,paths,calendar,month,threshold,limit):
     ), selected AS (
       SELECT *,CASE WHEN session_gap=1 THEN 'OVERNIGHT_PRICE_GAP' ELSE 'OBSERVATION_GAP' END AS kind,
         CASE WHEN session_gap=1 THEN abs(ln(price_ratio)) ELSE ln(session_gap::DOUBLE) END AS score
-      FROM moves WHERE (session_gap=1
+      FROM moves WHERE isfinite(price_ratio) AND price_ratio>0 AND ((session_gap=1
         AND first_ms=((open_ms+299999)//300000)*300000
         AND prior_last=(prior_session_close//300000)*300000-300000
         AND (price_ratio>=? OR price_ratio<=1.0/?))
-        OR session_gap>=10
+        OR session_gap>=10)
     )
     SELECT symbol,trade_date,prior_date,prior_close,day_open,price_ratio,session_gap,kind,score,
       count(*) OVER() AS total
