@@ -30,6 +30,16 @@ def replay(payload):
         raise ValueError("REQUIRES_TWO_SESSIONS")
     holdings, pending, curve, trades = {}, [], [], []
     targets = None
+    history, allocations = [], []
+    optimizer = payload.get("optimizer")
+    if optimizer is not None:
+        if not isinstance(optimizer, dict):
+            raise ValueError("OPTIMIZER_CONFIG_MUST_BE_OBJECT")
+        from atlaspm.engine.replay_allocation import rolling_target
+        optimizer = dict(optimizer)
+        if "min_cash_fraction" in optimizer and optimizer["min_cash_fraction"] != reserve:
+            raise ValueError("CASH_RESERVE_CONFIGURATION_MISMATCH")
+        optimizer["min_cash_fraction"] = reserve
     prior_day = prior_close = None
     prior_prices = {}
     prior_equity = peak = initial
@@ -91,18 +101,28 @@ def replay(payload):
                           unsettled_cash=sum(v for _,v in pending), holdings=dict(holdings),
                           daily_return=equity/prior_equity-1, drawdown=equity/peak-1,
                           overnight_pnl=overnight, intraday_pnl=intraday, trade_cost=cost_today))
+        history.append((str(day), cl))
         if i % cadence == 0:
             candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
             if not all(c.symbol in cl for c in candidates):
                 raise ValueError("SIGNAL_MARK_MISSING")
             chosen = sorted(candidates,key=lambda c:(-c.score,c.symbol))[:top]
-            targets = (str(day), closing, {c.symbol:(1-reserve)/len(chosen) for c in chosen})
+            if optimizer is None:
+                targets = (str(day), closing, {c.symbol:(1-reserve)/len(chosen) for c in chosen})
+            else:
+                # Retain held names in the optimization universe; no silent discard.
+                selected = [c for c in candidates if c in chosen or c.symbol in holdings]
+                result = rolling_target(selected, history, holdings, cash,
+                                        sum(v for _,v in pending), optimizer)
+                if result is not None:
+                    allocations.append(dict(signal_date=str(day), **result))
+                    targets = (str(day), closing, result["weights"])
         prior_day, prior_close, prior_prices, prior_equity = day, closing, cl, equity
         prior_holdings = dict(holdings)
     return dict(research_only=True, live_execution_enabled=False,
                 approved_for_model_training=False, historical_security_identity_verified=False,
                 broker_order_submission_enabled=False, execution_model="synthetic_next_open_cash_only",
-                curve=curve, trades=trades, total_cost=total_cost,
+                curve=curve, trades=trades, allocations=allocations, total_cost=total_cost,
                 total_return=prior_equity/initial-1, max_drawdown=min(p["drawdown"] for p in curve),
                 unexecuted_final_signal=targets is not None)
 
