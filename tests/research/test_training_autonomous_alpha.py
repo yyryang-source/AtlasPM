@@ -1,0 +1,86 @@
+import unittest
+from copy import deepcopy
+from datetime import date,timedelta
+from importlib.util import find_spec
+
+from atlaspm.research.autonomous_alpha import research
+from atlaspm.research.alpha_metrics import evaluate, block_lower
+
+
+def fixture():
+    sessions=[]
+    prices={s:100. for s in range(1,9)}
+    for i in range(65):
+        d=str(date(2020,1,1)+timedelta(days=i))
+        t=d+"T21:00:00Z"
+        assets=[]
+        for s in prices:
+            prices[s]*=1+.0004*s+(.0001 if i%2 else -.0001)
+            assets.append(dict(security_id="SYN:"+str(s),source="synthetic",observed_at=t,
+                               available_at=t,close=prices[s],
+                               features=dict(momentum=s,volatility=9-s,liquidity=s%3)))
+        sessions.append(dict(date=d,close_at=t,assets=assets))
+    return dict(mode="synthetic",synthetic_fixture=True,feature_names=["momentum","volatility","liquidity"],
+                sessions=sessions)
+
+
+def options(p):
+    return dict(validation_start=p["sessions"][25]["date"],holdout_start=p["sessions"][44]["date"])
+
+
+class MetricTests(unittest.TestCase):
+    def test_lag_and_ties(self):
+        dates=["a","b","c"]
+        rows=[dict(date=d,security_id=s,prediction=(1 if d=="a" and s=="A" else 0),
+                   actual=(.1 if s=="A" else -.1)) for d in dates for s in ("A","B")]
+        r=evaluate(rows,dates,cost_bps=0)
+        self.assertAlmostEqual(r["mean_excess"],.05)
+        self.assertEqual(r["sessions"],2)
+
+    def test_block_bootstrap_deterministic(self):
+        self.assertEqual(block_lower([.01]*20,trials=4),.01)
+        self.assertIsNone(block_lower([.01]*3,trials=4))
+
+
+@unittest.skipUnless(find_spec("numpy"),"portfolio extra required")
+class AlphaTests(unittest.TestCase):
+    def test_reproducible_and_no_live_permissions(self):
+        p=fixture()
+        a=research(p,**options(p))
+        self.assertEqual(a,research(p,**options(p)))
+        self.assertFalse(a["live_execution_enabled"])
+        self.assertFalse(a["approved_for_model_training"])
+        self.assertFalse(a["model_registry_admission"])
+        self.assertIsNone(a["market_state_probability"])
+        self.assertIn("rule:equal_weight",a["validation"])
+
+    def test_holdout_never_changes_selection(self):
+        p=fixture()
+        a=research(p,**options(p))
+        for session in p["sessions"][44:]:
+            for item in session["assets"]:
+                item["close"]*=1+int(item["security_id"].split(":")[1])*.1
+        b=research(p,**options(p))
+        self.assertEqual(a["selected_strategy"],b["selected_strategy"])
+        self.assertEqual(a["validation"],b["validation"])
+        self.assertEqual(a["factor_selection"],b["factor_selection"])
+
+    def test_no_trade_and_corrupt_input(self):
+        p=fixture()
+        result=research(p,**options(p),cost_bps=900)
+        self.assertEqual(result["decision"],"NO_TRADE")
+        self.assertEqual(result["signals"],[])
+        q=deepcopy(p)
+        q["sessions"][0]["assets"][0]["available_at"]=q["sessions"][1]["close_at"]
+        with self.assertRaisesRegex(ValueError,"FEATURE_LOOKAHEAD"):
+            research(q,**options(q))
+        q=deepcopy(p)
+        q["mode"]="historical"
+        with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+            research(q,**options(q))
+
+    def test_permission_override(self):
+        p=fixture()
+        p["live_execution_enabled"]=True
+        with self.assertRaisesRegex(ValueError,"ALPHA_PERMISSION_OVERRIDE"):
+            research(p,**options(p))

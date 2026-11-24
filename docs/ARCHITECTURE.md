@@ -57,3 +57,8 @@ asset engine, broker permission, or production execution has been implemented.
 - Preserve import compatibility aliases until a versioned API migration updates consumers and regression tests.
 
 For current work, see [QUANT_WORKFLOW.md](QUANT_WORKFLOW.md), [ROADMAP.md](ROADMAP.md), [selection docs](selection/) and [quant docs](quant/).
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

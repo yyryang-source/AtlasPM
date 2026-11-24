@@ -45,3 +45,8 @@ cross-cutting controls at every stage.
 ## Maintenance
 
 `README.md` is the single current entry point. Topic-specific quantitative and selection methods stay in `docs/quant` and `docs/selection`; historical experiments remain in Git history or method notes. All new modules use canonical `atlaspm.quant` / `atlaspm.selection` paths. Legacy import shims will be removed only in a documented breaking change after tests and CLI consumers migrate.
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

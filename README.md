@@ -125,3 +125,8 @@ real-time execution and live broker permissions are not implemented.**
 Market data, brokerage snapshots, credentials, training outputs and model artifacts must remain in ignored local folders such as `local_data/`; do **not** commit them. The Git repository contains only code, synthetic fixtures, reproducible tests, documented assumptions and approved small research manifests.
 
 Run `python -m unittest discover -s tests -v` before proposing changes. GitHub Actions runs Linux and Windows checks; no live broker access is needed. Changes to ranking, margin risk or order-preflight behavior must preserve fail-closed defaults. MIT licensed; see [LICENSE](LICENSE).
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](docs/AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

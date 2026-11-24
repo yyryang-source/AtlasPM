@@ -37,3 +37,8 @@ cd C:\Users\Kevin\Desktop\AtlasPM
 ```
 
 The local `local_data/` folder holds uncommitted private market/broker files; none are imported automatically or sent to any service by the CLI routing layer.
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

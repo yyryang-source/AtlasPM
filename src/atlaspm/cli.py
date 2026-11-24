@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     selection_cli.register_parsers(sub)
     market_db.register_parser(sub)
     portfolio_engine_cli.register_parser(sub)
+    alpha = sub.add_parser("autonomous-alpha", help="Synthetic autonomous alpha research")
+    alpha.add_argument("--file", required=True)
     return parser
 
 
@@ -31,7 +33,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "portfolio-engine":
+        if args.command == "autonomous-alpha":
+            from pathlib import Path
+            from atlaspm.research.autonomous_alpha import research, simulate
+            request = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            report = simulate(**request) if "portfolio" in request else research(**request)
+        elif args.command == "portfolio-engine":
             report = portfolio_engine_cli.run(args)
         elif args.command == "market-db":
             report = market_db.run(args)
