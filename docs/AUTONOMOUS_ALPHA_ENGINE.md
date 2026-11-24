@@ -15,6 +15,10 @@ from training. No broker calls, trading privileges or production model admission
   model snapshots, adaptive and regime ensembles, close-observed market state,
   locked validation winner and separate holdout veto, research signals and
   existing local research registry. No candidate may replace a failed holdout.
+- `alpha_lifecycle.py`: append-only version events with hash-chain checks,
+  idempotent registration and explicit suspension/retirement. No paper promotion.
+- `alpha_benchmark.py`: deterministic synthetic request generation and measured
+  elapsed time/whole-process peak RSS using existing cross-platform helpers.
 - `simulate`: in-process synthetic adapter to Unified Portfolio Engine, institutional
   risk checks and Paper OMS. Equal-weight only, exact universe, existing holdings;
   validates integration contracts but is not alpha-weighted execution.
@@ -22,7 +26,11 @@ from training. No broker calls, trading privileges or production model admission
 ## Usage
 
 Install `.[portfolio]`; optional models use `.[research-ml]` / `.[research-deep]`.
-Run `python -m atlaspm.research.autonomous_alpha --file local_data/alpha_request.json`.
+Generate a synthetic request using
+`python -m atlaspm.research.alpha_benchmark --request-output local_data/alpha_request.json`.
+Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`.
+Benchmark in a fresh process: `python -m atlaspm.research.alpha_benchmark --days 65 --assets 32`.
+Use a new output path on repeated request generation. No speedup is claimed.
 Request keys: payload (existing training synthetic panel schema), validation_start,
 holdout_start, optional models, cost_bps, minimum_sessions, max_drawdown,
 sequence_length, seed, artifact_path and registry_path (ignored local_data SQLite).
@@ -48,7 +56,7 @@ Open work: Factor V3 DuckDB integration with independent point-in-time evidence,
 industry neutralization and missing factor handling in this orchestrator,
 multiple horizons/decay and capacity, nested hyperparameter tuning and untouched
 final holdout governance, regime uncertainty/liquidity/crisis validation, calibrated
-forecasts, persistent lifecycle transitions and rollback, model ensemble snapshot
+forecasts, independent paper-admission transitions and active-version rollback, model ensemble snapshot
 inference, portfolio optimizer alpha sizing, end-to-end research feedback,
 real-data identity/corporate actions/survivorship validation, reproducible
 full-scale resource benchmarks. RegimeNet and legacy screeners are not yet wired

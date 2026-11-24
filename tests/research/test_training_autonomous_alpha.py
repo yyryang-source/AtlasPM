@@ -114,3 +114,40 @@ class AlphaTests(unittest.TestCase):
         portfolio["account"]["positions"][0]["mark_price"]=101
         with self.assertRaisesRegex(ValueError,"ALPHA_PORTFOLIO_MARK_MISMATCH"):
             simulate(p,portfolio,**options(p),models=["historical_mean"],cost_bps=0)
+
+    def test_registry_lifecycle_and_corruption(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        import sqlite3
+        from atlaspm.research.alpha_lifecycle import history, transition
+        from atlaspm.research.training_registry import load
+        root=Path("local_data")
+        root.mkdir(exist_ok=True)
+        p=fixture()
+        with TemporaryDirectory(dir=root) as tmp:
+            db=Path(tmp)/"alpha.sqlite3"
+            a=research(p,**options(p),models=["historical_mean"],cost_bps=0,registry_path=db)
+            self.assertEqual(a["strategy_status"],"VALIDATED")
+            version=a["strategy_version"]
+            self.assertEqual(history(db,version)["state"],"VALIDATED")
+            self.assertEqual(load(db,a["registry_run_id"])["report"]["strategy_version"],version)
+            with self.assertRaisesRegex(ValueError,"ALPHA_ONLY_DE_RISK"):
+                transition(db,version,"PAPER_ACTIVE","untrusted promotion")
+            transition(db,version,"SUSPENDED","manual review")
+            b=research(p,**options(p),models=["historical_mean"],cost_bps=0,registry_path=db)
+            self.assertEqual(b["decision"],"NO_TRADE")
+            self.assertEqual(b["persistent_lifecycle_state"],"SUSPENDED")
+            self.assertEqual(transition(db,version,"RETIRED","replaced")["state"],"RETIRED")
+            with sqlite3.connect(db) as con:
+                con.execute("UPDATE alpha_events SET event_sha='corrupt' WHERE sequence=1")
+            with self.assertRaisesRegex(ValueError,"ALPHA_LIFECYCLE_INTEGRITY"):
+                history(db,version)
+
+    def test_benchmark_reports_real_measurements(self):
+        import json
+        from atlaspm.research.alpha_benchmark import benchmark
+        result=benchmark(65,8)
+        self.assertGreater(result["elapsed_seconds"],0)
+        self.assertGreater(result["peak_rss_bytes"],0)
+        self.assertEqual(result["rows"],520)
+        print("ALPHA_BENCHMARK "+json.dumps(result,sort_keys=True))

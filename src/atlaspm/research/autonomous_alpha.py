@@ -124,9 +124,10 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
     config = dict(validation_start=validation_start,holdout_start=holdout_start,models=models,
                   cost_bps=cost_bps,minimum_sessions=minimum_sessions,max_drawdown=max_drawdown,
                   sequence_length=sequence_length,seed=seed)
-    strategy_id = digest(dict(config=config,winner=winner,factors=factors["weights"],
+    strategy_id = digest(dict(candidate=winner,feature_names=names,
                               engine_version="autonomous_alpha_v1")) if winner else None
-    version = digest(dict(strategy_id=strategy_id,dataset=dataset)) if winner else None
+    version = digest(dict(strategy_id=strategy_id,dataset=dataset,config=config,
+                          factor_weights=factors["weights"])) if winner else None
     final_scores = {}
     artifact_id = None
     if accepted and winner.startswith("rule:"):
@@ -180,6 +181,14 @@ def research(payload, *, validation_start, holdout_start, models=None, cost_bps=
                   **FLAGS)
     if registry_path is not None:
         report["registry_run_id"] = register(local_path(registry_path),config,report,kind="experiment")
+        if version:
+            from atlaspm.research.alpha_lifecycle import track_run, history
+            track_run(registry_path,report["registry_run_id"])
+            lifecycle = history(registry_path,version)
+            report["persistent_lifecycle_state"] = lifecycle["state"]
+            if lifecycle["state"] != "VALIDATED":
+                report["signals"] = []
+                report["decision"] = "NO_TRADE"
     return report
 
 
