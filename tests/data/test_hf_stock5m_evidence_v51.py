@@ -82,3 +82,39 @@ class EvidenceCollectorTests(unittest.TestCase):
         stats, rows = ev.parse_sec_tickers(b'{"fields":["cik","name","ticker","exchange"],"data":[[123,"Example","ABC","NYSE"]]}')
         self.assertEqual(stats["current_issuer_ticker_rows"],1)
         self.assertNotIn("security_id",rows[0])
+
+
+    def test_isolated_index_row_quarantine(self):
+        header = b"CIK|Company Name|Form Type|Date Filed|Filename\n"
+        valid = b"123|Example|8-K|2016-01-04|edgar/data/123/0000000123-16-000001.txt\n"
+        invalid = b"123|Example|8-K|2015-12-31|edgar/data/123/0000000123-15-000001.txt\n"
+        data = header + valid * 2000 + invalid
+        stats, rows = ev.parse_sec_index(data, "2016-Q1")
+        self.assertEqual(stats["filings"], 2000)
+        self.assertEqual(stats["rejected_rows"], 1)
+        self.assertEqual(stats["rejection_reasons"], {"OUTSIDE_REQUESTED_QUARTER": 1})
+        self.assertEqual(len(rows), 2000)
+        self.assertEqual(stats["rejection_examples"][0]["line"], 2002)
+        with self.assertRaises(ev.EvidenceParseError):
+            ev.parse_sec_index(header + valid + invalid, "2016-Q1")
+
+    def test_bad_quarter_does_not_block_next_quarter(self):
+        with patch.object(ev, "download", side_effect=[b"bad index", INDEX2]) as fetch, patch.object(ev.time, "sleep"):
+            result = ev.run("2000-Q1", "2000-Q2", current=False, fetch=True,
+                            agent="AtlasPM test test@example.com")
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(result["tasks_completed"], 1)
+        self.assertEqual(result["blocked_providers"], [])
+        self.assertEqual(result["status"], "PARTIAL_OR_BLOCKED")
+        self.assertEqual(result["results"][0]["error"], "EvidenceParseError")
+        self.assertEqual(len(list(Path(ev.BASE / "rejected").glob("*.json"))), 1)
+
+    def test_review_status_for_small_quarantine(self):
+        header = b"CIK|Company Name|Form Type|Date Filed|Filename\n"
+        valid = b"123|Example|8-K|2000-01-04|edgar/data/123/0000000123-00-000001.txt\n"
+        with patch.object(ev, "download", return_value=header + valid * 2000 + b"bad row\n"), patch.object(ev.time, "sleep"):
+            result = ev.run("2000-Q1", "2000-Q1", current=False, fetch=True,
+                            agent="AtlasPM test test@example.com")
+        self.assertEqual(result["status"], "CANDIDATES_COLLECTED_WITH_REVIEW")
+        self.assertEqual(result["total_rejected_rows"], 1)
+        self.assertFalse(result["approved_for_model_training"])
