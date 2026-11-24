@@ -63,6 +63,21 @@ class V3Contracts(unittest.TestCase):
         self.assertEqual(1, periods["holdout"]["dates"])
         self.assertEqual("INSUFFICIENT_DATED_IC", periods["train_matured"]["state"])
 
+    def test_heldout_feature_availability_is_not_used_in_selection(self):
+        c = {"factors":["mom_5d","mom_21d"],"min_dates":3,
+             "holdout_start":"2026-02-01","redundancy_threshold":0.85}
+        diags = [{"factor":name,"ic_stability":{"train_matured":{
+                     "rank_ic_mean":None}}} for name in c["factors"]]
+        coverage = [
+            {"factor":"mom_5d","standardized_dates":40,
+             "pre_holdout_standardized_dates":20},
+            {"factor":"mom_21d","standardized_dates":40,
+             "pre_holdout_standardized_dates":0},
+        ]
+        selected = factor_v3._select(c,diags,[],coverage)
+        self.assertEqual(["mom_5d"],selected["selected_factors"])
+        self.assertIn("mom_21d",selected["excluded_insufficient_standardized_dates"])
+
     def test_effective_dated_sector_map_rejects_overlap(self):
         path = Path("local_data/industry.csv")
         path.write_text(
