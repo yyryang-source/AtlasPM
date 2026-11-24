@@ -57,7 +57,7 @@ if (-not $marketDirectory.StartsWith($localData, [StringComparison]::OrdinalIgno
     throw 'The close data directory must be inside the repository local_data folder.'
 }
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$argument = "-m atlaspm.market_close --watch --schedule $Schedule --delay-minutes $DelayMinutes --poll-seconds $PollSeconds"
+$argument = "-m atlaspm.execution.market_close --watch --schedule $Schedule --delay-minutes $DelayMinutes --poll-seconds $PollSeconds"
 $argument += ' --directory "' + $marketDirectory + '" --symbols ' + ($Symbols -join ' ')
 if ($DraftAccount) {
     if (-not $DedicatedCashEquities) {

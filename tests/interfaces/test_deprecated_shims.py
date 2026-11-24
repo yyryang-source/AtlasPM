@@ -27,7 +27,9 @@ def _shims() -> dict[str, str]:
 class DeprecatedShimTests(unittest.TestCase):
     def test_all_shims_target_final_modules_and_warn_with_correct_stacklevel(self):
         targets = _shims()
-        self.assertEqual(len(targets), 98)
+        self.assertEqual(len(targets), 66)
+        for name in ["ibkr_equity_snapshot","ibkr_next_day","ibkr_paper_orders","ibkr_whatif","market_close","paper_order_journal","close_drafts"]:
+            self.assertEqual(targets["atlaspm." + name], "atlaspm.execution." + name)
         for old, final in targets.items():
             with self.subTest(shim=old):
                 self.assertNotIn(final, targets)
@@ -37,6 +39,54 @@ class DeprecatedShimTests(unittest.TestCase):
                 self.assertIn("DeprecationWarning, stacklevel=2", text)
                 self.assertIn(old + " is deprecated; use " + final, text)
                 ast.parse(text, filename=str(filename))
+
+    def test_retired_alias_files_stay_removed(self):
+        retired = (
+            "atlaspm.atlas_execution_policy",
+            "atlaspm.atlas_fusion_allocator",
+            "atlaspm.atlas_regimenet",
+            "atlaspm.atlas_robustness_audit",
+            "atlaspm.audit",
+            "atlaspm.backtest",
+            "atlaspm.benchmark",
+            "atlaspm.broker_reconcile",
+            "atlaspm.historical",
+            "atlaspm.ibkr_dashboard",
+            "atlaspm.ibkr_financing",
+            "atlaspm.ibkr_mapping",
+            "atlaspm.ibkr_margin_monitor",
+            "atlaspm.ibkr_margin_stress",
+            "atlaspm.ibkr_multiasset_budget",
+            "atlaspm.ibkr_reverse_stress",
+            "atlaspm.ibkr_risk_audit_diff",
+            "atlaspm.ibkr_risk_chain_audit",
+            "atlaspm.institutional_batch",
+            "atlaspm.institutional_gate",
+            "atlaspm.institutional_ledger",
+            "atlaspm.institutional_rebalance",
+            "atlaspm.mean_variance",
+            "atlaspm.ml_dynamic_rebalance",
+            "atlaspm.ml_model_tournament",
+            "atlaspm.models",
+            "atlaspm.oms_controls",
+            "atlaspm.paper_oms",
+            "atlaspm.performance",
+            "atlaspm.quant.atlas_execution_policy",
+            "atlaspm.quant.atlas_fusion_allocator",
+            "atlaspm.quant.backtest",
+            "atlaspm.quant.benchmark",
+            "atlaspm.quant.mean_variance",
+            "atlaspm.quant.models",
+            "atlaspm.risk_backtest",
+            "atlaspm.stock_walkforward",
+            "atlaspm.tail_risk",
+            "atlaspm.us_market_prices",
+        )
+        for old in retired:
+            with self.subTest(shim=old):
+                filename = PACKAGE / Path(*old.split(".")[1:]).with_suffix(".py")
+                self.assertFalse(filename.exists(), str(filename))
+                self.assertNotIn(old, _shims())
 
     def test_deprecated_imports_warn_and_preserve_module_identity(self):
         # Fresh process: imports in unrelated tests must not suppress warnings.

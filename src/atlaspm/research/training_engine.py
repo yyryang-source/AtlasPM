@@ -9,7 +9,7 @@ from statistics import fmean
 from itertools import groupby
 from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for
 from atlaspm.engine.contracts import finite
-from atlaspm.research.training_models import MODELS, versions, fit_predict
+from atlaspm.research.training_models import MODELS, versions, fit_predict, validate_parameters
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 from atlaspm.research.training_memory import FoldArrays
 from atlaspm.research.training_compact import IndexedRows, feature_workspace
@@ -108,10 +108,15 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, model_parameters=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
+    if model_parameters is None:
+        model_parameters={}
+    if not isinstance(model_parameters,dict) or set(model_parameters)-set(models):
+        raise ValueError("INVALID_MODEL_PARAMETER_MAPPING")
+    model_parameters={name:validate_parameters(name,p) for name,p in model_parameters.items()}
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError('INVALID_MODEL_SEED')
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
@@ -159,6 +164,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if model_parameters:
+        config['model_parameters']=model_parameters
     if incremental_ridge:
         config['incremental_ridge']=True
     if regime_ensemble is not None:
@@ -274,7 +281,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                                                  epoch_store=epoch_store)
                 else:
                     values,settings=fit_predict(name,z,y,test,seed,
-                                                capture_weights=saved_weights.update if artifact_store is not None else None)
+                                                parameters=model_parameters.get(name),capture_weights=saved_weights.update if artifact_store is not None else None)
                 if artifact_store is not None:
                     if name in SEQUENCE_MODELS:
                         weights=saved_weights

@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from atlaspm.ibkr_whatif import PreviewTransport, preview_draft
+from atlaspm.execution.ibkr_whatif import PreviewTransport, preview_draft
 
 
 class FakePreview:
@@ -91,7 +91,7 @@ class PreviewTests(unittest.TestCase):
 
     def test_delayed_or_stale_feed_blocks(self):
         self.gateway.feed = "D"
-        with patch("atlaspm.ibkr_whatif.time.sleep"):
+        with patch("atlaspm.execution.ibkr_whatif.time.sleep"):
             with self.assertRaisesRegex(ValueError, "Missing current real-time"):
                 self.preview()
             self.gateway.feed = "R"

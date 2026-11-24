@@ -209,3 +209,21 @@ jobs:
         run: python -m pip install "ruff>=0.9,<1.0"
       - name: Check unused imports, variables and deprecated module imports
         run: python -m ruff check src/atlaspm --select F401,F841,TID251
+
+  paper-order-safety:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install calendar and project
+        run: python -m pip install -e ".[calendar,workbench]"
+      - name: Run offline Paper order lifecycle and safety tests
+        run: python -m unittest discover -s tests -p "test_ibkr_paper_orders.py" -v
+      - name: Verify deprecated execution imports and CLI help
+        run: python -m unittest discover -s tests -p "test_execution_compatibility.py" -v
