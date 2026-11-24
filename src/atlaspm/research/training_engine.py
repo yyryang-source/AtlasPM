@@ -161,7 +161,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         if cached is not None:
             if set(cached["predictions"])!=set(models):
                 raise ValueError("CHECKPOINT_MODEL_MISMATCH")
-            expected=[(samples[i]["security_id"],samples[i]["date"],samples[i]["label_end_date"],samples[i]["y"]) for i in fold["test"]]
+            expected=[(r["security_id"],r["date"],r["label_end_date"],r["y"]) for r in IndexedRows(samples,fold["test"])]
             for name, rows in cached["predictions"].items():
                 if [(r["security_id"],r["date"],r["label_end_date"],r["actual"]) for r in rows]!=expected:
                     raise ValueError("CHECKPOINT_SAMPLE_MISMATCH")
@@ -182,9 +182,14 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
             y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
             mean=x.mean(axis=0)
-            scale=x.std(axis=0)
-            scale=np.where(scale>1e-12,scale,1.)
             x-=mean
+            # Compute variance on centered data in bounded blocks, not a full-size temporary.
+            squared=np.zeros(x.shape[1],dtype=np.float64)
+            for start in range(0,len(x),4096):
+                block=x[start:start+4096]
+                squared+=np.einsum("ij,ij->j",block,block)
+            scale=np.sqrt(squared/len(x))
+            scale=np.where(scale>1e-12,scale,1.)
             x/=scale
             z=x
             intercept=float(y.mean())
@@ -233,6 +238,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     predictions[name].extend(rows)
                 else:
                     archive.append(name,rows)
+            # Release references to fold arrays before allocating the next fold.
+            del x,y,z,test,ridge,sequence_train,sequence_test,block
     ensemble_audit=None
     if ensemble is not None:
         if not isinstance(ensemble,dict):

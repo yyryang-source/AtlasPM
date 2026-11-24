@@ -3,53 +3,65 @@ from __future__ import annotations
 from datetime import date
 from array import array
 from bisect import bisect_left
-from atlaspm.research.training_compact import CompactSamples, IndexedRows
+from atlaspm.research.training_compact import CompactSamples, IndexedRows, IndexPrefix
 from atlaspm.engine.contracts import finite, timestamp
 
 HORIZONS = (1, 5, 10, 21, 63)
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None):
-    if feature_column is not None and not compact:
-        raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
-    if type(sequence_length) is not int or not 1 <= sequence_length <= 252:
-        raise ValueError('INVALID_SEQUENCE_LENGTH')
-    if payload.get("mode") != "synthetic" or payload.get("synthetic_fixture") is not True:
+def validate_panel_metadata(payload,horizon,sequence_length):
+    if type(sequence_length) is not int or not 1<=sequence_length<=252:
+        raise ValueError("INVALID_SEQUENCE_LENGTH")
+    if payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True:
         raise ValueError("REAL_TRAINING_DATA_NOT_APPROVED")
     if type(horizon) is not int or horizon not in HORIZONS:
         raise ValueError("INVALID_LABEL_HORIZON")
-    features = payload["feature_names"]
-    if not isinstance(features,list) or not features or len(set(features)) != len(features):
+    features=payload["feature_names"]
+    if not isinstance(features,list) or not features:
         raise ValueError("INVALID_FEATURE_SCHEMA")
     if any(not isinstance(f,str) or not f or f.lower().startswith(("label","future","target")) for f in features):
         raise ValueError("FORBIDDEN_FEATURE_NAME")
-    sessions = payload["sessions"]
-    dates, observations = [], []
-    prior = None
+    if len(set(features))!=len(features):
+        raise ValueError("INVALID_FEATURE_SCHEMA")
+    return features
+
+
+def validated_sessions(sessions,features):
+    """Single validation contract shared by JSON and Parquet panel builders."""
+    prior=None
+    previous_day=None
+    feature_set=set(features)
     for row in sessions:
-        day = date.fromisoformat(row["date"])
-        close = timestamp(row["close_at"],"close_at")
-        if close.date()!=day or (prior is not None and close<=prior) or (dates and str(day)<=dates[-1]):
+        day=date.fromisoformat(row["date"])
+        close=timestamp(row["close_at"],"close_at")
+        if close.date()!=day or (prior is not None and (close<=prior or day<=previous_day)):
             raise ValueError("SESSION_ORDER")
-        prior = close
-        dates.append(str(day))
-        marks = {}
+        prior,previous_day=close,day
+        marks={}
         for item in row["assets"]:
-            sid = item["security_id"]
+            sid=item["security_id"]
             if not isinstance(sid,str) or not sid.startswith("SYN:") or sid in marks:
                 raise ValueError("INVALID_OR_DUPLICATE_SYNTHETIC_ID")
             if item.get("source")!="synthetic":
                 raise ValueError("UNVERIFIED_SOURCE")
-            available = timestamp(item["available_at"],"available_at")
-            observed = timestamp(item["observed_at"],"observed_at")
-            if not observed<=available<=close:
+            if not timestamp(item["observed_at"],"observed_at")<=timestamp(item["available_at"],"available_at")<=close:
                 raise ValueError("FEATURE_LOOKAHEAD")
-            if set(item["features"])!=set(features):
+            if set(item["features"])!=feature_set:
                 raise ValueError("FEATURE_SCHEMA_MISMATCH")
-            marks[sid] = (finite(item["close"],"close",minimum=.000001),
-                          [finite(item["features"][f],f) for f in features])
+            marks[sid]=(finite(item["close"],"close",minimum=.000001),
+                        [finite(item["features"][f],f) for f in features])
         if not marks:
             raise ValueError("EMPTY_SESSION")
+        yield str(day),marks
+
+
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None):
+    if feature_column is not None and not compact:
+        raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
+    features=validate_panel_metadata(payload,horizon,sequence_length)
+    dates,observations=[],[]
+    for day,marks in validated_sessions(payload["sessions"],features):
+        dates.append(day)
         observations.append(marks)
     samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
     if compact:
@@ -132,9 +144,11 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
     for start in range(first,end,test_sessions):
         stop=min(start+test_sessions,end)
         cutoff=offsets[max(0,start-embargo_sessions-horizon)]
-        train=(array('Q',(i for i in range(cutoff) if samples.label_exists(i)))
-               if isinstance(samples,CompactSamples) else
-               [i for i in range(cutoff) if samples[i]["y"] is not None])
+        if isinstance(samples,CompactSamples) and isinstance(panel['samples'],IndexedRows):
+            valid=panel['samples'].indices
+            train=IndexPrefix(valid,bisect_left(valid,cutoff))
+        else:
+            train=[i for i in range(cutoff) if samples[i]['y'] is not None]
         test=range(offsets[start],offsets[stop])
         if not train or not test:
             raise ValueError("EMPTY_PURGED_FOLD")

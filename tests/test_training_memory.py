@@ -98,3 +98,16 @@ class MemoryTests(unittest.TestCase):
                 self.assertEqual(list(Path("local_data/features").iterdir()),[])
             finally:
                 os.chdir(cwd)
+
+
+    def test_fold_index_prefix_is_shared(self):
+        from atlaspm.research.training_compact import IndexPrefix
+        from atlaspm.research.training_dataset import iter_purged_folds
+        p=build_panel(fixture(),5,compact=True)
+        folds=list(iter_purged_folds(p,minimum_train_sessions=10,test_sessions=5))
+        for fold in folds:
+            self.assertIsInstance(fold["train"],IndexPrefix)
+            self.assertIs(fold["train"].indices,p["samples"].indices)
+        self.assertEqual([list(f["train"]) for f in folds],
+                         [f["train"] for f in purged_folds(build_panel(fixture(),5),
+                                                          minimum_train_sessions=10,test_sessions=5)])

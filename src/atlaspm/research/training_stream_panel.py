@@ -6,12 +6,9 @@ observations live in a scoped local workspace. Never authorizes real data.
 from __future__ import annotations
 from array import array
 from collections import deque
-from contextlib import closing
-from datetime import date
 import sqlite3
-from atlaspm.engine.contracts import finite,timestamp
 from atlaspm.research.training_compact import CompactSamples,IndexedRows
-from atlaspm.research.training_dataset import HORIZONS
+from atlaspm.research.training_dataset import validate_panel_metadata,validated_sessions
 
 
 class DiskObservations:
@@ -21,7 +18,7 @@ class DiskObservations:
             self.con.execute("PRAGMA cache_size=-8192")
             self.con.execute("""CREATE TABLE observations (
                 session INTEGER NOT NULL, security TEXT NOT NULL, features BLOB NOT NULL,
-                PRIMARY KEY(session,security)) WITHOUT ROWID""")
+                PRIMARY KEY(security,session)) WITHOUT ROWID""")
         except BaseException:
             self.con.close()
             raise
@@ -48,46 +45,16 @@ class DiskObservations:
 
 
 def build_stream_panel(metadata,sessions,horizon,sequence_length,feature_column,observation_store=None):
-    if metadata.get("mode")!="synthetic" or metadata.get("synthetic_fixture") is not True:
-        raise ValueError("REAL_TRAINING_DATA_NOT_APPROVED")
-    if type(horizon) is not int or horizon not in HORIZONS:
-        raise ValueError("INVALID_LABEL_HORIZON")
-    if type(sequence_length) is not int or not 1<=sequence_length<=252:
-        raise ValueError("INVALID_SEQUENCE_LENGTH")
+    features=validate_panel_metadata(metadata,horizon,sequence_length)
     if feature_column is None or (sequence_length>1 and observation_store is None):
         raise ValueError("STREAMING_REQUIRES_DISK_WORKSPACE")
-    features=metadata["feature_names"]
-    if not isinstance(features,list) or not features or any(not isinstance(f,str) or not f or f.lower().startswith(("label","future","target")) for f in features) or len(set(features))!=len(features):
-        raise ValueError("INVALID_FEATURE_SCHEMA")
-    feature_set=set(features)
     dates=[]
     samples=CompactSamples(dates,horizon,len(features),feature_column)
     valid=array("Q")
     window=deque(maxlen=horizon+sequence_length)
-    prior=None
     missing=incomplete=peak=0
-    for k,row in enumerate(sessions):
-        day=date.fromisoformat(row["date"])
-        close=timestamp(row["close_at"],"close_at")
-        if close.date()!=day or (prior is not None and close<=prior) or (dates and str(day)<=dates[-1]):
-            raise ValueError("SESSION_ORDER")
-        prior=close
-        dates.append(str(day))
-        marks={}
-        for item in row["assets"]:
-            sid=item["security_id"]
-            if not isinstance(sid,str) or not sid.startswith("SYN:") or sid in marks:
-                raise ValueError("INVALID_OR_DUPLICATE_SYNTHETIC_ID")
-            if item.get("source")!="synthetic":
-                raise ValueError("UNVERIFIED_SOURCE")
-            if not timestamp(item["observed_at"],"observed_at")<=timestamp(item["available_at"],"available_at")<=close:
-                raise ValueError("FEATURE_LOOKAHEAD")
-            if set(item["features"])!=feature_set:
-                raise ValueError("FEATURE_SCHEMA_MISMATCH")
-            marks[sid]=(finite(item["close"],"close",minimum=.000001),
-                        [finite(item["features"][f],f) for f in features])
-        if not marks:
-            raise ValueError("EMPTY_SESSION")
+    for k,(day,marks) in enumerate(validated_sessions(sessions,features)):
+        dates.append(day)
         if observation_store is not None:
             observation_store.append(k,marks)
         window.append(marks)

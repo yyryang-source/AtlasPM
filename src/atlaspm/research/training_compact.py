@@ -34,7 +34,7 @@ class DiskFeatures:
     def __getitem__(self,index):
         if self.mapping is None:
             raise ValueError('FEATURE_COLUMN_NOT_SEALED')
-        return self.mapping[index].tolist()
+        return self.mapping[index]
 
     def close(self):
         if not self.writer.closed:
@@ -103,7 +103,7 @@ class CompactSamples(Sequence):
         return dict(security_id=self.identities[self.security[i]],
                     signal_index=signal,label_end_index=end,
                     date=self.dates[signal],label_end_date=self.dates[end],
-                    x=list(self.features[start:start+self.feature_count]),
+                    x=self.features[start:start+self.feature_count].tolist(),
                     y=None if isnan(y) else y)
 
     def signal_at(self,i):
@@ -131,3 +131,22 @@ class IndexedRows(Sequence):
         if isinstance(i,slice):
             return IndexedRows(self.source,self.indices[i])
         return self.source[self.indices[i]]
+
+
+class IndexPrefix(Sequence):
+    """Zero-copy expanding-window prefix over sorted valid sample indices."""
+    def __init__(self,indices,length):
+        self.indices=indices
+        self.length=length
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self,i):
+        if isinstance(i,slice):
+            return [self[j] for j in range(*i.indices(self.length))]
+        if i<0:
+            i+=self.length
+        if not 0<=i<self.length:
+            raise IndexError(i)
+        return self.indices[i]

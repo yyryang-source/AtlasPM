@@ -58,9 +58,8 @@ def worker(mode,days,assets,length,budget,root):
     else:
         import pyarrow as pa
         import pyarrow.parquet as pq
-        path=Path(root)/"input.parquet"
         parts=[]
-        # Write one session at a time in a separate input generation step.
+        # Write one session at a time in the measured worker.
         for session in sessions(days,assets):
             rows=[dict(date=session["date"],close_at=session["close_at"],
                        **{k:v for k,v in a.items() if k!="features"},**a["features"])
@@ -101,10 +100,13 @@ def main():
                   "--sequence-length",str(a.sequence_length),"--array-budget-mib",str(a.array_budget_mib),
                   "--root",tmp]
             results.append(json.loads(subprocess.check_output(args,text=True)))
+    equal=results[0]["metrics"]==results[1]["metrics"]
     print(json.dumps(dict(synthetic=True,days=a.days,assets=a.assets,results=results,
-          metrics_equal=results[0]["metrics"]==results[1]["metrics"],
+          metrics_equal=equal,
           scope="whole worker including input generation and model dependencies",
           approved_for_model_training=False,live_execution_enabled=False),indent=2,allow_nan=False))
+    if not equal:
+        raise SystemExit("BENCHMARK_METRIC_MISMATCH")
 
 
 if __name__=="__main__":
