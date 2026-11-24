@@ -6,6 +6,6 @@ The `.gitignore` excludes common environment and credential files, but Git ignor
 
 If a credential is exposed, revoke/rotate it at its provider and follow GitHub's documented process for purging sensitive history. Do not submit leaked credentials in public issues.
 
-AtlasPM v0.1 does not connect to any brokerage and cannot submit orders. Proposed broker features must be designed for least privilege, a paper-trading default and explicit risk controls.
+AtlasPM supports explicitly human-confirmed order submission to Interactive Brokers (IBKR) Paper Trading accounts only. Live-account order submission remains disabled. Paper order execution requires explicit operator authorization, verified Paper account identity, and pre-trade risk controls. Brokerage integrations must follow the principle of least privilege.
 
 For security concerns, contact the maintainer privately rather than posting secrets in a public issue.
