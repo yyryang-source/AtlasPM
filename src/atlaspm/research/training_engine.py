@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -117,6 +117,12 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
+    artifact_store=None
+    if model_artifact_path is not None:
+        from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
+        if set(models)-set(ARTIFACT_MODELS):
+            raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
+        artifact_store=ModelArtifacts(model_artifact_path)
     panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
@@ -144,6 +150,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if artifact_store is not None:
+        config['model_artifact_storage']=str(artifact_store.path)
     store=None
     if checkpoint_path is not None:
         from atlaspm.research.training_checkpoint import FoldStore
@@ -171,6 +179,14 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     predictions[name].extend(rows)
                 else:
                     archive.append(name,rows)
+            if artifact_store is not None:
+                ids=cached["audit"].get("model_artifact_ids",{})
+                if set(ids)!=set(models):
+                    raise ValueError("CHECKPOINT_ARTIFACT_MISMATCH")
+                for name,key in ids.items():
+                    record=artifact_store.load(key)
+                    if record["model"]!=name or record["dataset_sha256"]!=fingerprint or record["fold_index"]!=fold_index:
+                        raise ValueError("CHECKPOINT_ARTIFACT_MISMATCH")
             audit.append(cached["audit"])
             model_settings=dict(cached["audit"]["model_settings"])
             resumed+=1
@@ -199,7 +215,9 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             test/=scale
             ridge=test@coef+intercept
             sequence_train=sequence_test=None
+            artifact_ids={}
             for name in models:
+                saved_weights={}
                 if name=="ridge":
                     values=ridge
                     settings={"alpha":alpha}
@@ -214,9 +232,26 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                         sequence_test=materialize(test_rows)
                     values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
                                                  epochs=sequence_epochs,device=device,batch_size=batch_size,
-                                                 mixed_precision=mixed_precision)
+                                                 mixed_precision=mixed_precision,
+                                                 capture_weights=saved_weights.update if artifact_store is not None else None)
                 else:
                     values,settings=fit_predict(name,z,y,test,seed)
+                if artifact_store is not None:
+                    if name in SEQUENCE_MODELS:
+                        weights=saved_weights
+                        snapshot_settings=settings
+                        length=sequence_length
+                    else:
+                        weights={'coefficients':coef.tolist() if name=='ridge' else [0.]*len(mean)}
+                        snapshot_settings=dict(feature_mean=mean.tolist(),feature_scale=scale.tolist(),intercept=intercept)
+                        length=1
+                    artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,
+                        dataset_sha256=fingerprint,fold_index=fold_index,feature_names=panel['feature_names'],
+                        horizon=horizon,sequence_length=length,dependencies=dependency_versions,
+                        test_start=panel['dates'][fold['test_start_index']],
+                        test_end=panel['dates'][fold['test_end_index']],
+                        latest_train_label=panel['dates'][fold['latest_training_label_end']],
+                        settings=snapshot_settings,weights=weights,**FLAGS))
                 model_settings[name]=settings
                 for row,value in zip(test_rows,values):
                     base={k:row[k] for k in ("security_id","date","label_end_date")}
@@ -230,6 +265,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                               coefficients=coef.tolist(),intercept=intercept,
                               model_settings=dict(model_settings),
                               array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
+            if artifact_store is not None:
+                audit[-1]["model_artifact_ids"]=artifact_ids
             if store is not None:
                 store.save(fold_index,dict(audit=audit[-1],
                            predictions=fold_predictions))
@@ -267,6 +304,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
+                model_artifact_storage=str(artifact_store.path) if artifact_store is not None else None,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,

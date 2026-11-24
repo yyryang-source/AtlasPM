@@ -21,6 +21,8 @@ def experiment(payload, *, config, grid, holdout_start, selection_model="ridge")
         raise ValueError("INVALID_EXPERIMENT_GRID_VALUES")
     if prod(len(v) for v in grid.values())>32:
         raise ValueError("EXPERIMENT_TRIAL_LIMIT")
+    if config.get("model_artifact_path") is not None:
+        raise ValueError("EXPERIMENT_ARTIFACTS_REQUIRE_SELECTED_RUN")
     if config.get("prediction_archive_path") is not None:
         raise ValueError("EXPERIMENT_REQUIRES_MEMORY_PREDICTIONS")
     sessions=payload["sessions"]

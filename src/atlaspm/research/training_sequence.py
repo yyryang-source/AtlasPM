@@ -4,7 +4,40 @@ from __future__ import annotations
 SEQUENCE_MODELS = ("lstm","gru","transformer")
 
 
-def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False):
+def build_sequence_model(name,features,length):
+    from torch import nn
+    import torch
+    if name not in SEQUENCE_MODELS:
+        raise ValueError("UNKNOWN_SEQUENCE_MODEL")
+    hidden=16
+    class Recurrent(nn.Module):
+        def __init__(self):
+            super().__init__()
+            cls=nn.LSTM if name=="lstm" else nn.GRU
+            self.encoder=cls(features,hidden,batch_first=True)
+            self.head=nn.Linear(hidden,1)
+        def forward(self,x):
+            states,_=self.encoder(x)
+            return self.head(states[:,-1]).squeeze(-1)
+
+    class Attention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed=nn.Linear(features,hidden)
+            self.position=nn.Parameter(torch.zeros(1,length,hidden))
+            block=nn.TransformerEncoderLayer(hidden,4,32,dropout=0.,batch_first=True)
+            self.encoder=nn.TransformerEncoder(block,1)
+            self.head=nn.Linear(hidden,1)
+        def forward(self,x):
+            # Full attention is permitted inside the observed trailing window;
+            # no token after the signal date exists in the input.
+            states=self.encoder(self.embed(x)+self.position)
+            return self.head(states[:,-1]).squeeze(-1)
+
+    return Attention() if name=="transformer" else Recurrent()
+
+
+def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_size=64, mixed_precision=False, capture_weights=None):
     import numpy as np
     import torch
     from torch import nn
@@ -46,36 +79,12 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
     length=train.shape[1]
     hidden=16
 
-    class Recurrent(nn.Module):
-        def __init__(self):
-            super().__init__()
-            cls=nn.LSTM if name=="lstm" else nn.GRU
-            self.encoder=cls(features,hidden,batch_first=True)
-            self.head=nn.Linear(hidden,1)
-        def forward(self,x):
-            states,_=self.encoder(x)
-            return self.head(states[:,-1]).squeeze(-1)
-
-    class Attention(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.embed=nn.Linear(features,hidden)
-            self.position=nn.Parameter(torch.zeros(1,length,hidden))
-            block=nn.TransformerEncoderLayer(hidden,4,32,dropout=0.,batch_first=True)
-            self.encoder=nn.TransformerEncoder(block,1)
-            self.head=nn.Linear(hidden,1)
-        def forward(self,x):
-            # Full attention is permitted inside the observed trailing window;
-            # no token after the signal date exists in the input.
-            states=self.encoder(self.embed(x)+self.position)
-            return self.head(states[:,-1]).squeeze(-1)
-
     previous_threads=torch.get_num_threads()
     try:
         torch.set_num_threads(1)
         with torch.random.fork_rng(devices=[] if device=="cpu" else [torch.cuda.current_device()]):
             torch.manual_seed(seed)
-            model=(Attention() if name=="transformer" else Recurrent()).to(device)
+            model=build_sequence_model(name,features,length).to(device)
             optimizer=torch.optim.AdamW(model.parameters(),lr=.003)
             loss_fn=nn.MSELoss()
             # Keep full fold arrays on host; transfer only bounded batches.
@@ -113,6 +122,8 @@ def fit_sequence(name, train, y, test, seed, *, epochs=12, device="cpu", batch_s
                     batch=torch.as_tensor(test[start:start+batch_size],dtype=torch.float32,device=device)
                     result[start:start+len(batch)]=model((batch-mu)/sigma).cpu().numpy().astype(float)*yscale+ymean
             peak_device_bytes=torch.cuda.max_memory_allocated() if device=="cuda" else None
+            if capture_weights is not None:
+                capture_weights({key:value.detach().cpu().tolist() for key,value in model.state_dict().items()})
     finally:
         torch.set_num_threads(previous_threads)
     if result.shape!=(len(test),) or not np.isfinite(result).all():
