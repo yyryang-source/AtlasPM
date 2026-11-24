@@ -169,7 +169,13 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
             objective = variance
         elif method == "mean_variance":
             gamma = float(constraints.get("risk_aversion", 4.0))
-            objective = lambda x: .5*gamma*variance(x) - float(mu @ x)
+            # Annualize a one-way notional turnover cost on the same scale as mu.
+            bps = finite(constraints.get("turnover_cost_bps", 0.), "turnover_cost_bps", minimum=0)
+            interval = finite(constraints.get("rebalance_sessions", 1.), "rebalance_sessions", minimum=1)
+            if bps >= 10000 or interval > 252:
+                raise ValueError("INVALID_TURNOVER_COST_MODEL")
+            penalty = bps / 10000 * 252 / interval
+            objective = lambda x: .5*gamma*variance(x) - float(mu @ x) + penalty*float(np.sum(np.abs(x-current)))
         elif method == "maximum_diversification":
             objective = lambda x: -float(sigma @ x) / sqrt(max(variance(x), 1e-14))
         else:
