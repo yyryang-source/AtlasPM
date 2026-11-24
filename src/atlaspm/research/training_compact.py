@@ -3,10 +3,68 @@ from __future__ import annotations
 from array import array
 from collections.abc import Sequence
 from math import isnan
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from contextlib import contextmanager
+
+
+class DiskFeatures:
+    """Append float64 rows to disk, then expose a read-only memory map."""
+    def __init__(self,path):
+        self.path=Path(path)
+        self.writer=self.path.open('wb')
+        self.count=0
+        self.mapping=None
+        self.itemsize=8
+
+    def extend(self,values):
+        row=array('d',values)
+        row.tofile(self.writer)
+        self.count+=len(row)
+
+    def seal(self):
+        import numpy as np
+        self.writer.close()
+        if self.count:
+            self.mapping=np.memmap(self.path,mode='r',dtype=np.float64,shape=(self.count,))
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self,index):
+        if self.mapping is None:
+            raise ValueError('FEATURE_COLUMN_NOT_SEALED')
+        return self.mapping[index].tolist()
+
+    def close(self):
+        if not self.writer.closed:
+            self.writer.close()
+        if self.mapping is not None:
+            self.mapping._mmap.close()
+            self.mapping=None
+
+
+@contextmanager
+def feature_workspace(directory):
+    if directory is None:
+        yield None
+        return
+    root=Path.cwd().resolve()/'local_data'
+    folder=Path(directory).resolve()
+    if root.is_symlink() or not folder.is_relative_to(root):
+        raise ValueError('FEATURE_CACHE_REQUIRES_LOCAL_DATA')
+    folder.mkdir(parents=True,exist_ok=True)
+    with TemporaryDirectory(prefix='atlaspm-panel-',dir=folder) as tmp:
+        features=DiskFeatures(Path(tmp)/'features.bin')
+        try:
+            yield features
+        finally:
+            features.close()
+
 
 
 class CompactSamples(Sequence):
-    def __init__(self,dates,horizon,feature_count):
+    def __init__(self,dates,horizon,feature_count,feature_column=None):
         self.dates=dates
         self.horizon=horizon
         self.feature_count=feature_count
@@ -15,7 +73,7 @@ class CompactSamples(Sequence):
         self.security=array("I")
         self.session=array("I")
         self.labels=array("d")
-        self.features=array("d")
+        self.features=array("d") if feature_column is None else feature_column
 
     def append(self,sid,signal,x,y):
         code=self.codes.get(sid)
