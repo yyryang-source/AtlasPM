@@ -14,7 +14,7 @@ from atlaspm.data import hf_stock5m
 from atlaspm.data.market_db import private_path
 
 BENCHMARKS = ("AAPL", "MSFT", "NVDA", "SPY", "QQQ", "GOOGL", "AMZN", "META")
-SCHEMA = "atlaspm_hf_5m_research_qc_v2"
+SCHEMA = "atlaspm_hf_5m_research_qc_v3"
 
 
 def _calendar(month: str):
@@ -216,10 +216,6 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             problems.append(f"OUTSIDE_NYSE_SESSIONS:{non_session}")
         if session == "rth" and unexpected_days:
             problems.append("UNEXPECTED_TRADING_DATES")
-        if boundary_minute_overflow:
-            # More observed 1m rows than calendar-open minutes in a partial
-            # 5m bucket cannot be fully explained by exchange RTH alone.
-            problems.append(f"NYSE_BOUNDARY_MINUTE_COUNT_EXCEEDED:{boundary_minute_overflow}")
         if exclusion is None:
             problems.append("NO_CONVERSION_QC_METADATA")
         if total_excluded and not quarantine.is_file():
@@ -241,6 +237,12 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             review.append("HISTORICAL_NYSE_PARTIAL_5M_SESSION_BOUNDARIES")
         if session == "rth" and boundary_bars:
             review.append("PARTIAL_NYSE_BOUNDARY_5M_BARS_REQUIRE_SOURCE_REVIEW")
+        if session == "rth" and boundary_minute_overflow:
+            # The source is an all-US-symbol feed, not an NYSE-only feed.
+            # Calendar-minute overflow proves NYSE timing disagreement, but
+            # cannot prove a bad bar for an unidentified Nasdaq/other-venue
+            # security. Retain the evidence and block training certification.
+            review.append("NYSE_BOUNDARY_MINUTES_EXCEED_EXCHANGE_OPEN_VENUE_UNVERIFIED")
         if session == "all":
             review.append("EXTENDED_HOURS_NOT_VERIFIED_AGAINST_EXCHANGE_SCHEDULE")
         status = ("STRUCTURAL_QC_FAILED" if problems else "REVIEW_REQUIRED")
@@ -282,6 +284,7 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
             "quality_status": status,
             "coverage_verified": False,
             "historical_point_in_time_membership_verified": False,
+            "symbol_primary_listing_exchange_verified": False,
             "corporate_actions_verified": False,
             "data_rights_verified": False,
             "approved_for_model_training": False,
@@ -291,6 +294,7 @@ def audit(month: str, session: str = "rth", save: bool = True) -> dict:
                 "No automatic approval for AI model training or portfolio/order workflows.",
                 "Missing 5m slots may reflect low liquidity, not a vendor outage.",
                 "Non-aligned NYSE open/close times require boundary-minute review; this 5m lake does not reveal exact included 1m timestamps.",
+                "NYSE boundary-minute overflow is a venue-unverified discrepancy for a cross-exchange feed, not independently proven invalid OHLCV.",
                 "Adjusted/raw split and dividend semantics require independent verification.",
                 "Historical company identities, IPO/delist dates and universe are not point-in-time certified.",
                 "Source data rights and secondary redistribution permission are not established.",

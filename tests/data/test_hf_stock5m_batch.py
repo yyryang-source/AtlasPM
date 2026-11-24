@@ -93,6 +93,35 @@ class HF5mBatchAuditTests(unittest.TestCase):
             self.assertEqual(1, d["resumed_months"])
             self.assertEqual(["2026-03"], self.calls[-1:])
 
+    def test_v2_cache_with_nyse_boundary_overflow_forces_rescan(self):
+        # Only affected historic months need a new full Parquet scan after the
+        # venue-unverified overflow classification change in V3.
+        self.seed("2026-03")
+        with patch.object(hf_stock5m_audit, "audit", side_effect=self.fake_audit):
+            batch.run("2026-03", "2026-03")
+            checkpoint = batch._meta_path("2026-03", "rth")
+            data = json.loads(checkpoint.read_text(encoding="utf-8"))
+            data["monthly_audit_schema"] = "atlaspm_hf_5m_research_qc_v2"
+            self.assertEqual(1, data["record"]["nyse_boundary_minute_count_exceeded"])
+            checkpoint.write_text(json.dumps(data), encoding="utf-8")
+            report = batch.run("2026-03", "2026-03")
+        self.assertEqual(2, len(self.calls))
+        self.assertEqual(0, report["resumed_months"])
+
+    def test_compatible_v2_cache_without_overflow_reuses_audit(self):
+        self.seed("2026-03")
+        with patch.object(hf_stock5m_audit, "audit", side_effect=self.fake_audit):
+            batch.run("2026-03", "2026-03")
+            checkpoint = batch._meta_path("2026-03", "rth")
+            data = json.loads(checkpoint.read_text(encoding="utf-8"))
+            data["monthly_audit_schema"] = "atlaspm_hf_5m_research_qc_v2"
+            data["record"]["nyse_boundary_minute_count_exceeded"] = 0
+            checkpoint.write_text(json.dumps(data), encoding="utf-8")
+            report = batch.run("2026-03", "2026-03")
+        self.assertEqual(1, len(self.calls))
+        self.assertEqual(1, report["resumed_months"])
+        self.assertEqual([], report["months_structural_failed"])
+
     def test_old_monthly_audit_schema_forces_rerun(self):
         # The NYSE partial-session calculation changed in v2, so an old
         # checkpoint must not silently masquerade as a current valid audit.

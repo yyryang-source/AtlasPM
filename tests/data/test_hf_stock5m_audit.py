@@ -156,10 +156,30 @@ class HuggingFaceAuditTests(unittest.TestCase):
         self.assertEqual(2, report["partial_nyse_boundary_5m_bars"])
         self.assertEqual(1, report["nyse_boundary_minute_count_exceeded"])
         self.assertEqual(78, report["nyse_expected_rth_slots_per_liquid_symbol"])
-        self.assertEqual("STRUCTURAL_QC_FAILED", report["quality_status"])
-        self.assertIn("NYSE_BOUNDARY_MINUTE_COUNT_EXCEEDED:1", report["structural_issues"])
+        self.assertEqual("REVIEW_REQUIRED", report["quality_status"])
+        self.assertEqual([], report["structural_issues"])
+        self.assertIn("NYSE_BOUNDARY_MINUTES_EXCEED_EXCHANGE_OPEN_VENUE_UNVERIFIED",
+                      report["review_reasons"])
+        self.assertFalse(report["symbol_primary_listing_exchange_verified"])
         self.assertEqual(1, len(report["non_5m_aligned_nyse_sessions"]))
         self.assertIn("HISTORICAL_NYSE_PARTIAL_5M_SESSION_BOUNDARIES",
+                      report["review_reasons"])
+        self.assertFalse(report["approved_for_model_training"])
+        self.assertFalse(report["live_execution_enabled"])
+
+    def test_genuine_invalid_ohlcv_still_fails_with_venue_uncertainty(self):
+        # Never let the venue-unverified boundary issue suppress an unrelated,
+        # independently provable invalid OHLC bar.
+        self.seed(bad_ohlc=True)
+        start = self._ms("2026-03-02T14:32:00+00:00")
+        end = self._ms("2026-03-02T21:00:00+00:00")
+        with patch.object(hf_stock5m_audit, "_calendar",
+                          return_value=[(date(2026, 3, 2), start, end)]):
+            report = hf_stock5m_audit.audit("2026-03", save=False)
+        self.assertEqual("STRUCTURAL_QC_FAILED", report["quality_status"])
+        self.assertIn("INVALID_5M_BARS:1", report["structural_issues"])
+        self.assertEqual(1, report["nyse_boundary_minute_count_exceeded"])
+        self.assertIn("NYSE_BOUNDARY_MINUTES_EXCEED_EXCHANGE_OPEN_VENUE_UNVERIFIED",
                       report["review_reasons"])
         self.assertFalse(report["approved_for_model_training"])
         self.assertFalse(report["live_execution_enabled"])
