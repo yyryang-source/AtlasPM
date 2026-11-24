@@ -22,6 +22,9 @@ def inventory(gateway=DEFAULT_GATEWAY):
         if name=="sec":
             env="ATLASPM_SEC_USER_AGENT"
         configured=bool(os.environ.get(env)) if env else None
+        if name=="xpressapi":
+            configured=bool(os.environ.get("XPRESSAPI_TOKEN") or
+                            (os.environ.get("XPRESSAPI_USERNAME") and os.environ.get("XPRESSAPI_PASSWORD")))
         rights=bool(os.environ.get(RIGHTS_ENV[name])) if name in RIGHTS_ENV else None
         enabled=os.environ.get("ATLASPM_ENABLE_"+name.upper(),"1")=="1"
         ready=enabled and name not in _BLOCKED and configured is not False and rights is not False

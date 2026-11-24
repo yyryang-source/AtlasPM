@@ -72,7 +72,11 @@ def _prepare(topic, evidence, as_of):
             raise ValueError("Invalid or unreviewed evidence")
         normalized_source = re.sub(r"[^a-z0-9]", "", source.casefold())
         restricted_names = {re.sub(r"[^a-z0-9]", "", name) for name in RESTRICTED if name != "hf"}
-        restricted_names.update({"yahoo", "huggingface", "interactivebrokers", "finnhub"})
+        restricted_names.update({"yahoo", "huggingface", "interactivebrokers", "finnhub",
+                                 "spglobal", "standardandpoors", "morningstar", "ftserussell",
+                                 "spdowjones", "goldmansachs", "morganstanley", "jpmorgan",
+                                 "bankofamerica", "citigroup", "ubsresearch", "deutschebank",
+                                 "barclaysresearch", "trace", "emma"})
         if any(name in normalized_source for name in restricted_names):
             raise ValueError("Restricted feed source cannot enter external AI through public excerpts")
         if _timestamp(item["available_at"]) > cutoff:

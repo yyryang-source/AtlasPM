@@ -369,6 +369,70 @@ class Gateway:
             state.last_latency_seconds = self._clock() - started
             return Response(provider, request_id, state.last_success_utc, raw)
 
+    def xpress_token(self, *, refresh_token=None):
+        """Documented auth POST only. Never cache, log, retry or expose credentials in evidence."""
+        require_enabled("xpressapi")
+        local_rights("xpressapi")
+        if refresh_token is None:
+            payload = {"username": os.environ.get("XPRESSAPI_USERNAME", ""),
+                       "password": os.environ.get("XPRESSAPI_PASSWORD", "")}
+            endpoint = "token"
+        else:
+            payload = {"refreshToken": refresh_token}
+            endpoint = "tokenRefresh"
+        if any(not isinstance(v,str) or not 1<=len(v)<=8192 for v in payload.values()):
+            raise GatewayError("Missing or invalid XpressAPI authentication input")
+        request = Request("https://xpressapi.marketplace.spglobal.com/authenticate/api/v1/"+endpoint,
+                          data=urlencode(payload).encode(),method="POST",
+                          headers={"Content-Type":"application/x-www-form-urlencoded",
+                                   "Accept":"application/json","Accept-Encoding":"identity"})
+        state=self._states["xpressapi"]
+        with state.lock:
+            if self._clock()<state.blocked_until:
+                raise GatewayError("XpressAPI circuit open")
+            if state.calls>=request_budget("xpressapi"):
+                raise GatewayError("XpressAPI local request budget exhausted")
+            wait=state.next_request-self._clock()
+            if wait>0:
+                self._sleep(wait)
+            started=self._clock()
+            state.next_request=started+PROVIDERS["xpressapi"].interval
+            state.calls+=1
+            try:
+                with self._open(request,timeout=45) as handle:
+                    raw=handle.read(65537)
+                if len(raw)>65536:
+                    raise ValueError("Auth response too large")
+                value=_strict_json(raw)
+                if str(value.get("token_type","")).casefold()!="bearer":
+                    raise ValueError("Unexpected token type")
+                access,refresh=value.get("access_token"),value.get("refresh_token")
+                ttl=value.get("expires_in_seconds")
+                if (any(not isinstance(v,str) or not 1<=len(v)<=8192 or
+                        any(not 33<=ord(ch)<=126 for ch in v) for v in (access,refresh))
+                        or not isinstance(ttl,str) or not re.fullmatch(r"[0-9]{1,8}",ttl)
+                        or not 1<=int(ttl)<=604800):
+                    raise ValueError("Invalid token response")
+            except HTTPError as exc:
+                code=exc.code
+                delay=self._retry_after(exc.headers)
+                exc.close()
+                state.failures+=1
+                state.last_status=f"AUTH_HTTP_{code}"
+                state.blocked_until=self._clock()+max(60,delay)
+                raise GatewayError(f"XpressAPI authentication HTTP {code}; no automatic retry") from None
+            except (OSError,ValueError,RecursionError):
+                state.failures+=1
+                state.last_status="AUTH_ERROR"
+                state.blocked_until=self._clock()+60
+                raise GatewayError("XpressAPI authentication failed; no automatic retry") from None
+            state.successes+=1
+            state.received_bytes+=len(raw)
+            state.last_status="AUTH_SUCCESS"
+            state.last_latency_seconds=self._clock()-started
+            # Do not mark market data last update or return a Response/evidence containing tokens.
+            return access,refresh,int(ttl)
+
     async def fetch_many(self, requests):
         """At most 32 GETs, at most three active worker threads for this batch.
 

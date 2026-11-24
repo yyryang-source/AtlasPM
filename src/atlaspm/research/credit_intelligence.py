@@ -7,6 +7,8 @@ from issuer to issue or rating to probability of default.
 from __future__ import annotations
 
 from datetime import date
+from threading import Lock
+import time
 from urllib.parse import urlencode
 import re
 from atlaspm.data.api_gateway import DEFAULT_GATEWAY, GatewayError
@@ -38,7 +40,7 @@ def _text(v):
     return v
 
 
-def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENCIES[-1], gateway=DEFAULT_GATEWAY):
+def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENCIES[-1], gateway=DEFAULT_GATEWAY, session=None):
     local_rights("xpressapi")
     pattern = _ID_TYPES.get(scope,{}).get(identifier_type)
     if (pattern is None or not isinstance(identifiers,(tuple,list)) or not 1<=len(identifiers)<=50
@@ -50,7 +52,10 @@ def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENC
         raise ValueError("Future rating query")
     query=urlencode({"identifierType":identifier_type,"identifierValues":",".join(identifiers),
                      "creditRatingAgency":agencies,"asOfDate":day.isoformat()})
-    response=gateway.fetch("xpressapi",BASE+scope+"?"+query)
+    if session is not None and session.gateway is not gateway:
+        raise ValueError("Token session must share the same gateway and budget")
+    token=session.access() if session is not None else None
+    response=gateway.fetch("xpressapi",BASE+scope+"?"+query,key=token)
     body=response.data()
     if any(body.get(k) for k in ("error","spRatingsCapabilityError","moodyRatingsCapabilityError","fitchRatingsCapabilityError")):
         raise GatewayError("Agency Ratings provider/capability error")
@@ -122,3 +127,28 @@ def compare_reviewed(rows, *, common_basis_reviewed=False):
     return {**_FLAGS,"notch_indices":grades,"notch_range":max(grades.values())-min(grades.values()),
             "investment_grade_split":min(grades.values())<=9<max(grades.values()),
             "default_probability":None,"basis_operator_reviewed":True}
+
+
+class XpressSession:
+    """Opt-in in-memory login/refresh, shared transport budget; no disk or repr secrets."""
+    def __init__(self, *, gateway=DEFAULT_GATEWAY, clock=time.monotonic):
+        self.gateway=gateway
+        self._clock=clock
+        self._lock=Lock()
+        self._access=None
+        self._refresh=None
+        self._expires=0.0
+
+    def access(self):
+        with self._lock:
+            if self._access is not None and self._clock()<self._expires:
+                return self._access
+            access,refresh,ttl=self.gateway.xpress_token(refresh_token=self._refresh)
+            self._access,self._refresh=access,refresh
+            self._expires=self._clock()+max(0,ttl-min(30,ttl/2))
+            return access
+
+    def clear(self):
+        with self._lock:
+            self._access=self._refresh=None
+            self._expires=0.0
