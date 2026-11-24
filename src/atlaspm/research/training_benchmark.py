@@ -76,6 +76,36 @@ def worker(mode,days,assets,length,budget,root):
                 peak_buffered_sessions=out["peak_buffered_sessions"])
 
 
+def deep_worker(device,days,assets,length,batch_size,epochs):
+    """Benchmark the actual AtlasPM sequence trainer, not a standalone torch op."""
+    import torch
+    from atlaspm.research.training_engine import train
+    from atlaspm.research.training_sequence import SEQUENCE_MODELS
+    if device=="cuda" and not torch.cuda.is_available():
+        raise ValueError("REQUESTED_SEQUENCE_DEVICE_UNAVAILABLE")
+    start=perf_counter()
+    payload=dict(mode="synthetic",synthetic_fixture=True,
+                 feature_names=["momentum","variation"],sessions=list(sessions(days,assets)))
+    result=train(payload,horizon=1,minimum_train_sessions=10,test_sessions=10,
+                 sequence_length=length,models=list(SEQUENCE_MODELS),
+                 sequence_epochs=epochs,device=device,batch_size=batch_size,
+                 mixed_precision=False)
+    if device=="cuda":
+        torch.cuda.synchronize()
+    peaks=[v["peak_cuda_allocated_bytes"] for fold in result["folds"]
+           for v in fold["model_settings"].values() if v.get("peak_cuda_allocated_bytes") is not None]
+    return dict(synthetic=True,device=device,torch_version=str(torch.__version__),
+                hip_runtime=torch.version.hip,cuda_runtime=torch.version.cuda,
+                gpu=torch.cuda.get_device_name(0) if device=="cuda" else None,
+                total_device_bytes=torch.cuda.get_device_properties(0).total_memory if device=="cuda" else None,
+                peak_device_allocated_bytes=max(peaks) if peaks else None,
+                peak_rss_bytes=peak_bytes(),elapsed_seconds=perf_counter()-start,
+                days=days,assets=assets,sequence_length=length,batch_size=batch_size,
+                epochs=epochs,metrics=result["metrics"],
+                approved_for_model_training=False,live_execution_enabled=False,
+                broker_order_submission_enabled=False)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days",type=int,default=60)
@@ -84,9 +114,17 @@ def main():
     parser.add_argument("--array-budget-mib",type=int,default=32)
     parser.add_argument("--worker",choices=["memory","parquet"])
     parser.add_argument("--root")
+    parser.add_argument("--deep-device",choices=["cpu","cuda"])
+    parser.add_argument("--batch-size",type=int,default=64)
+    parser.add_argument("--epochs",type=int,default=2)
     a=parser.parse_args()
     if not 30<=a.days<=3000 or not 2<=a.assets<=100000 or not 1<=a.sequence_length<=min(252,a.days-22) or a.array_budget_mib<1:
         parser.error("invalid synthetic benchmark dimensions")
+    if a.deep_device:
+        if a.worker or a.sequence_length<2 or not 1<=a.batch_size<=8192 or not 1<=a.epochs<=200:
+            parser.error("invalid deep benchmark settings")
+        print(json.dumps(deep_worker(a.deep_device,a.days,a.assets,a.sequence_length,a.batch_size,a.epochs),indent=2,allow_nan=False))
+        return
     if a.worker:
         print(json.dumps(worker(a.worker,a.days,a.assets,a.sequence_length,a.array_budget_mib,a.root),allow_nan=False))
         return

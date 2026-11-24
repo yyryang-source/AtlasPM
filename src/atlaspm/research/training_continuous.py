@@ -9,17 +9,16 @@ from __future__ import annotations
 import argparse
 import json
 from copy import deepcopy
+from contextlib import closing
 from datetime import date
 from pathlib import Path
-from math import isfinite
 from atlaspm.engine.contracts import Account, finite, timestamp
 from atlaspm.research.training_autonomous import _code_version, _project
 from atlaspm.research.training_dataset import validated_sessions, validate_panel_metadata
 from atlaspm.research.training_engine import train, _fingerprint
-from atlaspm.research.training_registry import FLAGS, load, local_path, register
+from atlaspm.research.training_registry import FLAGS, load, local_path, register, _connect
 from atlaspm.research.training_decision_policy import paper_decision
 from atlaspm.research.training_paper_feedback import record_paper_feedback
-from atlaspm.research.training_sequence import SEQUENCE_MODELS
 
 
 def _qualified(observed,registry_path,run_id):
@@ -99,6 +98,20 @@ def _equity(account,receivable):
     return Account.from_payload(account).net_liquidation+receivable
 
 
+def _reserve_replay(path,run_id,account_id):
+    # One synthetic account trajectory per study. An interrupted replay is
+    # explicitly consumed, not silently resumed from a different opening book.
+    with closing(_connect(local_path(path))) as con,con:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("""CREATE TABLE IF NOT EXISTS continuous_replays (
+            research_run_id TEXT NOT NULL,account_id TEXT NOT NULL,
+            PRIMARY KEY(research_run_id,account_id))""")
+        if con.execute("SELECT 1 FROM continuous_replays WHERE research_run_id=? AND account_id=?",
+                       (run_id,account_id)).fetchone():
+            raise ValueError("CONTINUOUS_ACCOUNT_ALREADY_CONSUMED")
+        con.execute("INSERT INTO continuous_replays VALUES (?,?)",(run_id,account_id))
+
+
 def run_continuous(payload, *, registry_path,run_id,account,constraints,paper=None,
                    max_steps=20,risk_lookback=30,covariance_shrinkage=.3,max_drawdown=.2):
     """Replay a bounded post-holdout interval; settle synthetic sales next session.
@@ -139,10 +152,12 @@ def run_continuous(payload, *, registry_path,run_id,account,constraints,paper=No
     daily=[]
     # Start accounting at the first signal close, using observed prices only.
     previous_time=timestamp(sessions[first]["close_at"],"initial_close")
+    opening_marks=_marks(sessions[first])
     for p in state["positions"]:
-        p.update(mark_price=_marks(sessions[first])["SYN:"+p["symbol"]],
+        p.update(mark_price=opening_marks["SYN:"+p["symbol"]],
                  mark_age_seconds=0,mark_source="synthetic")
     initial_equity=_equity(state,0.)
+    _reserve_replay(registry_path,run_id,initial.account_id)
     peak=initial_equity
     stop=min(first+max_steps+1,len(sessions)-1)
     for i in range(first+1,stop+1):
