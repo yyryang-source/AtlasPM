@@ -25,3 +25,77 @@ training admission in this version. All real-data and live-execution flags remai
 
 ## V2 tabular model adapters
 Install `pip install -e ".[portfolio,research-ml]"`. Optional models argument is a list from historical_mean, ridge, elastic_net, random_forest, lightgbm, xgboost, catboost, mlp. Default remains the original two baselines. All models share identical purged folds and fold-local preprocessing; optional estimators standardize targets using training labels only. Fixed hyperparameters and seeds, CPU single-thread settings where supported, dependency versions and model settings recorded. No automatic model selection, final holdout, sequence networks, persisted weights or deployment approval. Dedicated CI installs all eight adapters and tests aligned predictions and future perturbation invariance.
+
+
+## Integrated low-memory research path
+
+V3–V7 add LSTM/GRU/Transformer, chronological adaptive ensemble,
+bounded hyperparameter search, experiment registry, fold checkpoints,
+optional CUDA AMP, scoped memmaps and disk prediction archives.
+The research-only permission flags remain unchanged.
+
+Install base and IO dependencies:
+```
+python -m pip install -e ".[portfolio,research-io]"
+```
+For optional tabular models add research-ml; for PyTorch use research-deep.
+Choose a CUDA-compatible PyTorch build locally if GPU execution is needed.
+No real historical factor lake is admitted by these interfaces.
+
+### Parquet streaming configuration
+
+Pass a small JSON config to the existing CLI:
+```json
+{
+  "root": "local_data/synthetic_input",
+  "manifest": {
+    "mode": "synthetic",
+    "synthetic_fixture": true,
+    "feature_names": ["momentum", "variation"],
+    "partitions": [
+      {"path": "part-000.parquet", "sha256": "REPLACE_WITH_ACTUAL_SHA256"}
+    ]
+  },
+  "feature_cache_dir": "local_data/feature_cache",
+  "array_budget_mib": 256,
+  "spill_dir": "local_data/training_cache",
+  "prediction_archive_path": "local_data/predictions/run001.sqlite3",
+  "checkpoint_path": "local_data/checkpoints.sqlite3",
+  "minimum_train_sessions": 10,
+  "test_sessions": 5,
+  "horizon": 5,
+  "models": ["ridge", "historical_mean"],
+  "ensemble": {"minimum_dates": 1}
+}
+```
+Each input row has string date, timezone-aware close_at, security_id starting
+with SYN:, source synthetic, observed_at, available_at, positive close,
+and one numeric column for each feature. Partitions must be chronological,
+and one date may span adjacent files. Files must remain unchanged.
+Hashes are verified before and after reading; never consume results from
+an input stream that has not completed successfully.
+
+```
+python -m atlaspm.research.training_engine --file local_data/stream_config.json
+```
+
+The raw session buffer is bounded by horizon + sequence_length. Compact
+security/session/label metadata and valid row indices remain in RAM;
+feature values and optional historical sequence observations use temporary
+disk storage. Model fold arrays may spill to disk; native libraries,
+OS file cache, linear algebra, and estimator internals are not governed
+by the managed array budget. No fixed whole-process memory guarantee.
+Feature caches are temporary, not reusable persistent feature snapshots.
+Prediction archives cannot be overwritten: use a fresh archive path on rerun;
+the fold checkpoint database may be reused for an identical run identity.
+Only COMPLETE prediction archives represent completed runs.
+
+### Reproducible memory benchmark
+
+```
+python -m atlaspm.research.training_benchmark --days 60 --assets 1000 --array-budget-mib 32
+```
+The benchmark starts isolated processes, measures OS-reported peak working
+set/RSS and elapsed time including fixture generation and imports, and compares
+metrics. This is a synthetic benchmark, not a market backtest or throughput
+guarantee. No external data is downloaded.
