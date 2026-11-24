@@ -112,8 +112,6 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     predictions={m:[] for m in models}
     archive=None
     if prediction_archive_path is not None:
-        if ensemble is not None:
-            raise ValueError('DISK_PREDICTIONS_REQUIRE_STREAMING_ENSEMBLE_NOT_YET_SUPPORTED')
         from atlaspm.research.training_predictions import PredictionArchive
         archive=PredictionArchive(prediction_archive_path)
     model_settings={}
@@ -216,10 +214,16 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     if ensemble is not None:
         if not isinstance(ensemble,dict):
             raise ValueError("INVALID_ENSEMBLE_CONFIG")
-        from atlaspm.research.training_ensemble import adaptive_ensemble
-        combined=adaptive_ensemble(predictions,**ensemble)
-        predictions["adaptive_ensemble"]=combined["predictions"]
-        ensemble_audit=combined["weight_history"]
+        from atlaspm.research.training_ensemble import iter_ensemble
+        ensemble_audit=[]
+        streams=predictions if archive is None else {m:archive.rows(m) for m in models}
+        predictions["adaptive_ensemble"]=[]
+        for rows,weights in iter_ensemble({m:streams[m] for m in models},**ensemble):
+            ensemble_audit.append(weights)
+            if archive is None:
+                predictions["adaptive_ensemble"].extend(rows)
+            else:
+                archive.append("adaptive_ensemble",rows)
     metrics={m:_metrics(archive.rows(m) if archive is not None else rows) for m,rows in predictions.items()}
     if archive is not None:
         archive.finalize()
