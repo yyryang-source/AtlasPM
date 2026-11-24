@@ -19,13 +19,23 @@ ROLES = MappingProxyType({
     "sec": "official_filings",
     "fred": "macro_vintages",
     "hf": "existing_historical_archive",
+    "xpressapi": "aggregate_sp_moodys_fitch_ratings",
+    "sp_ratings": "credit_ratings", "moodys": "credit_ratings", "fitch": "credit_ratings",
+    "dbrs": "supplementary_credit_ratings", "kbra": "supplementary_credit_ratings",
+    "investment_banks": "licensed_analyst_research",
+    "sp_dji": "index_events", "msci": "index_events", "ftse_russell": "index_events",
+    "federal_reserve": "policy_announcements", "finra": "bond_transactions",
+    "msrb": "municipal_transactions_and_disclosures",
 })
-RESTRICTED = frozenset({"yahoo_finance", "bloomberg", "unusual_whales", "ibkr", "massive", "hf"})
+RESTRICTED = frozenset(ROLES) - {"treasury", "sec", "fred", "federal_reserve"}
 RIGHTS_ENV = {
     "yahoo_finance": "ATLASPM_YAHOO_NEWS_RIGHTS",
     "bloomberg": "ATLASPM_BLOOMBERG_NEWS_RIGHTS",
     "unusual_whales": "ATLASPM_UW_RIGHTS",
     "ibkr": "ATLASPM_IBKR_MARKET_DATA_RIGHTS",
+    **{name: "ATLASPM_" + name.upper() + "_RIGHTS" for name in (
+        "xpressapi", "sp_ratings", "moodys", "fitch", "dbrs", "kbra",
+        "investment_banks", "sp_dji", "msci", "ftse_russell", "finra", "msrb")},
 }
 
 
@@ -44,11 +54,12 @@ def local_rights(provider, *, retention=False):
 
 
 def request_budget(provider):
-    if provider != "unusual_whales":
+    env = {"unusual_whales":"ATLASPM_UW_MAX_REQUESTS", "xpressapi":"ATLASPM_XPRESSAPI_MAX_REQUESTS"}.get(provider)
+    if env is None:
         raise ValueError("Unknown paid feed budget")
-    raw = os.environ.get("ATLASPM_UW_MAX_REQUESTS", "")
+    raw = os.environ.get(env, "")
     if not re.fullmatch(r"[0-9]{1,4}", raw) or not 1 <= int(raw) <= 1000:
-        raise ValueError("Set ATLASPM_UW_MAX_REQUESTS to a local per-process cap (1..1000)")
+        raise ValueError(f"Set {env} to a local per-process cap (1..1000)")
     return int(raw)
 
 
@@ -59,3 +70,10 @@ def inventory():
                        if provider in RIGHTS_ENV else None,
                        "external_ai_allowed_by_default": False}
             for provider, role in ROLES.items()}
+
+
+def require_enabled(provider):
+    """Explicit opt-out for existing callers; no credentials means no connection."""
+    value = os.environ.get("ATLASPM_ENABLE_" + provider.upper())
+    if value is not None and value != "1":
+        raise ValueError("Provider disabled by local configuration")

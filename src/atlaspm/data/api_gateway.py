@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from atlaspm.data.provider_policy import local_rights, request_budget, inventory
+from atlaspm.data.provider_policy import local_rights, request_budget, inventory, require_enabled
 
 
 class GatewayError(ValueError):
@@ -42,6 +42,7 @@ PROVIDERS = MappingProxyType({
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
     "fred": Provider("api.stlouisfed.org", 1.0, "FRED_API_KEY", "series_specific_rights_review_required"),
+    "xpressapi": Provider("xpressapi.marketplace.spglobal.com", 2.0, "XPRESSAPI_TOKEN", "operator_attested_not_independently_verified"),
     "unusual_whales": Provider("api.unusualwhales.com", 2.0, "UW_TOKEN", "operator_attested_not_independently_verified"),
 })
 
@@ -120,6 +121,7 @@ class Gateway:
 
     @staticmethod
     def _request(provider, url, key):
+        require_enabled(provider)
         spec = PROVIDERS.get(provider)
         if spec is None:
             raise GatewayError("Unknown provider")
@@ -138,6 +140,10 @@ class Gateway:
         if provider == "massive" and not (p.path == "/v3/reference/options/contracts" or
                 re.fullmatch(r"/v2/aggs/ticker/O:[A-Z0-9.]+/range/[0-9]+/(minute|day)/[0-9-]+/[0-9-]+", p.path)):
             raise GatewayError("Massive restricted to optional historical options endpoints")
+        if provider == "xpressapi":
+            local_rights(provider)
+            if p.path not in {"/agencyratings/api/v1/issuer", "/agencyratings/api/v1/issue"}:
+                raise GatewayError("Endpoint outside Agency Ratings scope")
         if provider == "unusual_whales":
             local_rights(provider)
             if not (p.path in {"/api/option-trades/flow-alerts", "/api/market/market-tide"} or
@@ -225,8 +231,8 @@ class Gateway:
             if self._clock() < state.blocked_until:
                 raise GatewayError(f"{provider}: circuit open; retry after cooldown")
             for attempt in range(self._attempts):
-                if provider == "unusual_whales" and state.calls >= request_budget(provider):
-                    raise GatewayError("Unusual Whales local request budget exhausted")
+                if provider in {"unusual_whales", "xpressapi"} and state.calls >= request_budget(provider):
+                    raise GatewayError(f"{provider.replace('_', ' ').title()} local request budget exhausted")
                 wait = state.next_request - self._clock()
                 if wait > 0:
                     self._sleep(wait)
@@ -277,6 +283,7 @@ class Gateway:
         """One explicitly approved inference POST. Never retry an ambiguous billable call."""
         if allow_external is not True or os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI") != "1":
             raise GatewayError("External AI requires explicit local egress approval")
+        require_enabled(provider)
         if provider not in MODEL_ENDPOINTS:
             raise GatewayError("Unsupported external model provider")
         if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", model):
