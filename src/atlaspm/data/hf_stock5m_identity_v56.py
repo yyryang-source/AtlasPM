@@ -175,6 +175,10 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
             params.append(ids)
         issuers=[r[0] for r in cx.execute(f"SELECT DISTINCT cik FROM filings WHERE {where} ORDER BY cik LIMIT ?",[*params,max_issuers+1]).fetchall()]
         selected=issuers[:max_issuers]
+        events=cx.execute("""SELECT cik,form,filed_date,source_url,quarter FROM filings
+            WHERE cik IN (SELECT unnest(?)) AND filed_date BETWEEN ? AND ?
+              AND form IN ('25','25-NSE','25/A','15-12B','15-12G','15-15D','8-A12B','8-A12G','S-1','S-1/A','F-1','F-1/A','S-4','F-4')
+            ORDER BY cik,filed_date,form,source_url LIMIT 10001""",[selected,*params[:2]]).fetchall() if selected else []
         rows=cx.execute(f"""SELECT quarter,cik,issuer,form,filed_date,source_url FROM filings
              WHERE {where} AND cik IN (SELECT unnest(?))
              QUALIFY row_number() OVER (PARTITION BY cik,quarter ORDER BY filed_date DESC,source_url)=1
@@ -186,6 +190,11 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
             "next_after_cik":selected[-1] if len(issuers)>max_issuers else None,
             "missing_index_quarters":sorted(set(expected)-{p[0] for p in partitions}),
             "index_partition_sha256":ev._sha(json.dumps(partitions,separators=(",",":")).encode()),
+            "event_index_truncated":len(events)>10000,
+            "event_index_leads":[{"cik":c,"form":f,"filed_date":d.isoformat(),"source_url":u,"quarter":q,
+                                  "kind":"EXIT_FILING_LEAD" if f.startswith(("25","15-")) else "MERGER_REGISTRATION_LEAD" if f in ("S-4","F-4") else "REGISTRATION_FILING_LEAD",
+                                  "effective_date":None,"security_id":None,"status":"INDEX_LEAD_ONLY"}
+                                 for c,f,d,u,q in events[:10000]],
             "filings":[{"quarter":q,"cik":c,"issuer":i,"form":f,"filed_date":d.isoformat(),"source_url":u}
                        for q,c,i,f,d,u in rows]}
 
@@ -242,8 +251,8 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
                   page_complete=not any(counts[k] for k in ("NOT_CACHED","COLLECTION_OR_CACHE_ERROR")),
                   warning="Sampled SEC cover observations are issuer-level leads, not independent sources, PIT intervals, or verified historical share classes.")
     # Cursor only advances automatically after all selected bodies were processed.
-    report["resume_after_cik"]=report["next_after_cik"] if report["page_complete"] else report["after_cik"]
-    report["page_advance_allowed"]=report["page_complete"] and not report["missing_index_quarters"]
+    report["page_advance_allowed"]=report["page_complete"] and not report["missing_index_quarters"] and not report["event_index_truncated"]
+    report["resume_after_cik"]=report["next_after_cik"] if report["page_advance_allowed"] else report["after_cik"]
     key=ev._sha(json.dumps([year,report["after_cik"],report["selected_issuers"],report["index_partition_sha256"]]).encode())[:24]
     path=BASE/"pages"/(key+".json")
     report["report_path"]=str(private_path(path))
