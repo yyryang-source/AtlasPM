@@ -62,7 +62,7 @@ def set_control(action, *, path=event_queue.PATH):
     return event_queue._transaction(path,change)
 
 
-def tick(*, as_of, holdings=(),limit=20,path=event_queue.PATH):
+def tick(*, as_of, holdings=(),limit=20,path=event_queue.PATH,local_bindings=None):
     cutoff=_time(as_of)
     if cutoff>datetime.now(UTC):
         raise ValueError("FUTURE_SYSTEM_TICK")
@@ -70,7 +70,7 @@ def tick(*, as_of, holdings=(),limit=20,path=event_queue.PATH):
     # One distinct tick per minute. Same tick cannot duplicate local reviews.
     minute=cutoff.replace(second=0,microsecond=0)
     schedule={"phase":phase,"tick_id":digest([minute.isoformat(),phase])}
-    result=event_queue.drain(as_of=as_of,holdings=holdings,limit=limit,path=path,schedule=schedule)
+    result=event_queue.drain(as_of=as_of,holdings=holdings,limit=limit,path=path,schedule=schedule,local_bindings=local_bindings)
     return {**FLAGS,"phase":phase,"tick":schedule["tick_id"],"review":result,
             "scheduled_tasks":{"financial_event_review":result["status"],
                 "market_data":"DISABLED_REAL_CONNECTION_UNVERIFIED",
@@ -311,8 +311,18 @@ def main():
     elif args.action!="run":
         print(json.dumps(set_control(args.action),indent=2))
     else:
+        bindings=[]
+        if args.file:
+            from pathlib import Path
+            from atlaspm.data.market_db import private_path
+            from atlaspm.research.intelligence import validate_local_bindings
+            with private_path(Path(args.file),exists=True).open("rb") as handle:
+                raw=handle.read(65537)
+            if len(raw)>65536:
+                raise ValueError("LOCAL_BINDINGS_FILE_LIMIT")
+            bindings=validate_local_bindings(json.loads(raw))
         for i in range(args.cycles):
-            result=tick(as_of=datetime.now(UTC).isoformat())
+            result=tick(as_of=datetime.now(UTC).isoformat(),local_bindings=bindings)
             print(json.dumps(result))
             if result["review"]["status"]=="PAUSED":
                 break

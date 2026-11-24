@@ -311,3 +311,34 @@ class ContinuousTests(unittest.TestCase):
         lock.unlink()
         self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)
         self.assertEqual(next(iter(event_queue._read_state(event_queue.PATH).values()))["state"],"completed")
+
+
+    def test_bound_event_calls_existing_technical_reader_and_deduplicates(self):
+        from contextlib import closing
+        from atlaspm.data import market_db
+        from atlaspm.research.intelligence import local_specialist_tasks
+        from datetime import date
+        now="2020-01-10T21:00:00Z"
+        start=date(2019,1,10)
+        with closing(market_db.connect(market_db.DB_PATH)) as con, con:
+            con.executemany("INSERT INTO equity_daily VALUES (?,?,?,?)",
+                [("AAA",(start+timedelta(days=j)).isoformat(),100+j*.1,"fixture")
+                 for j in range(365) if (start+timedelta(days=j)).weekday()<5])
+        task={"route":"technical_local","params":{"start":"2019-01-10","end":"2020-01-09","symbols":["AAA"]}}
+        out=local_specialist_tasks([task],as_of=now)["tasks"][0]
+        self.assertEqual(out["status"],"LOCAL_REVIEW_COMPLETED")
+        self.assertGreaterEqual(out["report"]["rows_read"],253)
+        self.assertFalse(out["report"]["numeric_eligible"])
+        row=normalize({"provider":"synthetic","source_id":"SYN:technical","kind":"volume_anomaly",
+            "subjects":["SYN:AAA"],"published_at":now,"first_available_at":now,"effective_at":None,
+            "evidence_sha256":"a"*64,"delivery":"file","expiry_seconds":3600},received_at=now)
+        event_queue.enqueue([row])
+        bindings=[{"kind":"volume_anomaly","subject":"SYN:AAA","task":task}]
+        result=event_queue.drain(as_of=now,local_bindings=bindings)
+        self.assertEqual(result["local_research_calls"],1)
+        saved=next(iter(event_queue._read_state(event_queue.PATH).values()))["report"]["local_specialist_receipts"]
+        self.assertEqual(saved[0]["report_sha256"],out["report_sha256"])
+        self.assertNotIn("report",saved[0])
+        self.assertEqual(event_queue.drain(as_of=now,local_bindings=bindings)["local_research_calls"],0)
+        task["params"]["end"]="2020-01-10"
+        self.assertTrue(local_specialist_tasks([task],as_of=now)["tasks"][0]["status"].startswith("BLOCKED"))

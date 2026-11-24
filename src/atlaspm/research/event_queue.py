@@ -81,7 +81,7 @@ def enqueue(events, *, path=PATH):
     return _transaction(path,add)
 
 
-def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
+def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None, local_bindings=None):
     """At most limit deterministic reviews per call; atomic commit or retry.
     Process restart resumes pending items. No claim of exactly-once external
     delivery; no external side effect is allowed here.
@@ -89,6 +89,8 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
     if type(limit) is not int or not 1<=limit<=100:
         raise ValueError("EVENT_DRAIN_LIMIT")
     from atlaspm.research.financial_events import _time
+    from atlaspm.research.intelligence import validate_local_bindings
+    bindings=validate_local_bindings([] if local_bindings is None else local_bindings)
     cutoff=_time(as_of)
     if cutoff>datetime.now(UTC):
         raise ValueError("FUTURE_EVENT_DRAIN")
@@ -117,7 +119,12 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
         pending=[(k,v) for k,v in visible if v["state"]=="pending"]
         pending.sort(key=lambda kv:(-KINDS[kv[1]["event"]["kind"]],kv[1]["event"]["received_at"],kv[0]))
         complete=failed=0
+        local_calls=0
         for key,task in pending[:limit]:
+            event=task["event"]
+            matches=[b for b in bindings if b["kind"]==event["kind"] and b["subject"] in event["subjects"]]
+            if local_calls+len(matches)>4:
+                break  # keep the remaining tasks pending for the next tick
             task["attempts"]+=1
             try:
                 from atlaspm.data.provider_policy import RIGHTS_ENV,local_rights
@@ -127,11 +134,18 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
                 report=review([task["event"]],as_of=as_of,holdings=holdings)
                 from atlaspm.research.intelligence import event_research
                 research=event_research(report)
+                local_receipts=[]
+                if matches and report["events"] and not report["events"][0]["expired"]:
+                    from atlaspm.research.intelligence import local_specialist_tasks
+                    local_calls+=len(matches)
+                    out=local_specialist_tasks([b["task"] for b in matches],as_of=as_of)
+                    local_receipts=[{k:v for k,v in r.items() if k!="report"} for r in out["tasks"]]
                 task["report"]={"research_requests":report["research_requests"],
                                 "risk_review_requests":report["risk_review_requests"],
                                 "review_sha256":digest(report),"as_of":as_of,
                                 "specialist_tasks":research["research_tasks"],
-                                "blocked_specialist_tasks":research["blocked_tasks"]}
+                                "blocked_specialist_tasks":research["blocked_tasks"],
+                                "local_specialist_receipts":local_receipts}
                 task["state"]="completed"
                 complete+=1
             except (ValueError,TypeError,KeyError):
@@ -141,7 +155,7 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None):
                 failed+=1
         result={**FLAGS,"status":"REVIEWED","completed":complete,"failed_attempts":failed,"superseded":superseded,
                 "pending":sum(t.get("state")=="pending" for t in items.values()),
-                "quarantined":sum(t.get("state")=="failed" for t in items.values())}
+                "quarantined":sum(t.get("state")=="failed" for t in items.values()),"local_research_calls":local_calls}
         if schedule is not None:
             items[CONTROL_KEY]={**control,"last_tick":schedule["tick_id"],"last_as_of":cutoff.isoformat(),
                                 "phase":schedule["phase"],"last_result":result}

@@ -403,6 +403,69 @@ def event_research(event_report, *, include_contracts=False):
             "network_calls":0,"trade_authorized":False}
 
 
+def _local_data_review(route, args, cutoff):
+    """Bounded local, descriptive evidence from the canonical read-only reader.
+
+    Daily availability is deliberately prior New York day. Neither the
+    source version hint nor a symbol is certified PIT or permanent identity.
+    """
+    from contextlib import closing
+    from datetime import date
+    from zoneinfo import ZoneInfo
+    from atlaspm.data.unified import iter_batches,iter_fundamentals
+    from atlaspm.research.training_registry import digest
+    day=_timestamp(cutoff).astimezone(ZoneInfo("America/New_York")).date()
+    start,end=date.fromisoformat(args["start"]),date.fromisoformat(args["end"])
+    symbols=args["symbols"]
+    if (not start<=end<day or (end-start).days>366 or not isinstance(symbols,list)
+        or not 1<=len(symbols)<=8 or any(not isinstance(s,str) or not s for s in symbols)
+        or len(set(symbols))!=len(symbols)):
+        raise ValueError("LOCAL_RESEARCH_DATE_OR_UNIVERSE_SCOPE")
+    params={"start":start.isoformat(),"end":end.isoformat(),"symbols":symbols,
+            "purpose":"exploratory","batch_size":256}
+    if route=="fundamental_local":
+        path=private_path(Path(args["path"]),exists=True)
+        if path.stat().st_size>64*1024*1024:
+            raise ValueError("LOCAL_FUNDAMENTAL_SCAN_BUDGET")
+        batches=iter_fundamentals(path,as_of=day.isoformat(),**params)
+    else:
+        dataset={"technical_local":"equity_daily","sec_local":"sec_filings",
+                 "bond_local":"bond_quotes","factor_local":args.get("dataset")}[route]
+        if route=="factor_local" and dataset not in {"factors_hf","factors_sqlite"}:
+            raise ValueError("LOCAL_FACTOR_DATASET")
+        if route=="sec_local":
+            params["as_of"]=day.isoformat()
+        batches=iter_batches(dataset,**params)
+    count=0
+    receipts=[]
+    prices={}
+    sources={}
+    with closing(batches) as stream:
+        for batch in stream:
+            count+=len(batch.rows)
+            if count>4096:
+                raise ValueError("LOCAL_RESEARCH_ROW_BUDGET")
+            # Decimal/date values are preserved as strings in evidence hashes.
+            receipts.append(digest([batch.dataset,batch.columns,batch.origin,
+                batch.source_version_hint,[[str(v) for v in row] for row in batch.rows]]))
+            if route=="technical_local":
+                for sym,when,price,source in batch.rows:
+                    if sym in sources and sources[sym]!=source:
+                        raise ValueError("MIXED_LOCAL_PRICE_SOURCE")
+                    sources[sym]=source
+                    prices.setdefault(sym,{})[date.fromisoformat(str(when))]=float(price)
+    if not count:
+        raise ValueError("NO_LOCAL_RESEARCH_EVIDENCE")
+    report={"rows_read":count,"evidence_batch_hashes":receipts,"source_date_cutoff":day.isoformat(),
+            "identity_verified":False,"point_in_time_verified":False,
+            "approved_for_model_training":False,"approved_for_backtest":False,
+            "external_ai_allowed":False,"numeric_eligible":False,"trade_authorized":False}
+    if route=="technical_local":
+        from atlaspm.strategies.equity.stock_screener import screen_stocks_from_prices
+        report["technical_screen"]=screen_stocks_from_prices(prices,end.isoformat(),top=len(symbols))
+    return report
+
+
 def local_specialist_tasks(tasks, *, as_of):
     """Explicit bounded local research routes; never fetch provider data.
 
@@ -419,7 +482,12 @@ def local_specialist_tasks(tasks, *, as_of):
         "institutional":{"subject","previous_as_of","unit","period","basis"},
         "credit_history":{"identifier_type","identifier"},
         "factor_admission":{"months"},"local_artifact":{"artifact_db","artifact_id","payload"},
-        "events":{"events"}}
+        "events":{"events"},
+        "technical_local":{"start","end","symbols"},
+        "fundamental_local":{"start","end","symbols","path"},
+        "sec_local":{"start","end","symbols"},
+        "bond_local":{"start","end","symbols"},
+        "factor_local":{"start","end","symbols","dataset"}}
     blocked={"ibkr","unusual_whales","sec","fred","federal_reserve","treasury","finra","msrb",
              "sp_dji","msci","ftse_russell","sp_ratings","moodys","fitch","industry","bond"}
     for task in tasks:
@@ -456,6 +524,8 @@ def local_specialist_tasks(tasks, *, as_of):
                 report=audit_factor_months(args["months"],memory="256MB",threads=1)
             elif route=="local_artifact":
                 report=predict_local_artifact(**args)
+            elif route in {"technical_local","fundamental_local","sec_local","bond_local","factor_local"}:
+                report=_local_data_review(route,args,cutoff)
             else:
                 report=event_research(review(args["events"],as_of=cutoff))
             # Do not persist or print licensed report contents via dispatch.
@@ -465,6 +535,39 @@ def local_specialist_tasks(tasks, *, as_of):
             reports[key]={"route":route,"status":"BLOCKED_INPUT_RIGHTS_OR_DEPENDENCY"}
     return {**FLAGS,"as_of":cutoff,"tasks":[{"task_sha256":k,**v} for k,v in reports.items()],
             "network_calls":0,"trade_authorized":False}
+
+
+def validate_local_bindings(bindings):
+    """Operator-supplied event routing only; never inferred vendor mapping."""
+    from atlaspm.research.financial_events import KINDS
+    allowed={
+        "volume_anomaly":{"technical_local","factor_local"},
+        "sec_disclosure":{"sec_local","fundamental_local"},
+        "earnings":{"fundamental_local"},
+        "earnings_forecast":{"institutional"},
+        "analyst_rating":{"institutional"},
+        "news":{"yahoo_finance","bloomberg"},
+        "credit_rating":{"credit_history","bond_local"},
+        "credit_outlook":{"credit_history"},
+        "credit_watch":{"credit_history"},
+        "bond_trade":{"bond_local"},
+        "index_change":{"factor_local"},
+    }
+    if not isinstance(bindings,list) or len(bindings)>16:
+        raise ValueError("LOCAL_BINDING_CAPACITY")
+    keys=set()
+    for b in bindings:
+        if (not isinstance(b,dict) or set(b)!={"kind","subject","task"} or b["kind"] not in KINDS
+            or not isinstance(b["subject"],str) or not 1<=len(b["subject"])<=160
+            or not isinstance(b["task"],dict) or set(b["task"])!={"route","params"}
+            or b["task"]["route"] not in allowed.get(b["kind"],set())
+            or not isinstance(b["task"]["params"],dict)):
+            raise ValueError("INVALID_LOCAL_RESEARCH_BINDING")
+        key=(b["kind"],b["subject"])
+        if key in keys:
+            raise ValueError("DUPLICATE_LOCAL_RESEARCH_BINDING")
+        keys.add(key)
+    return bindings
 
 
 def offline_model_responses():
