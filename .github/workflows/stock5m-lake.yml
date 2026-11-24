@@ -52,6 +52,9 @@ jobs:
       - name: Verify V5.1 zero-network evidence plan
         run: python -m atlaspm.cli market-db hf-5m-evidence-v51
 
+      - name: Verify V5.2 SEC filing index and evidence extraction offline
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_filings_v52.py" -v
+
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
 
@@ -69,3 +72,12 @@ jobs:
           if ($plan.unavailable_requested_months.Count -ne 8) { throw "Missing 2026-04..11 gap" }
           if ($plan.network_downloads -ne 0) { throw "Dry-run must not download" }
           Write-Host "Offline all-market history planner verified"
+
+      - name: Set up Python for Windows lake regression
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Windows lake extras
+        run: python -m pip install -e ".[lake,calendar]"
+      - name: Verify V5.2 filing evidence cache on Windows
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_filings_v52.py" -v

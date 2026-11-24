@@ -578,3 +578,50 @@ manifest under collector/rejected, and continue independent quarters.
 HTTP/access and network failures still stop that provider for the run.
 This is a collection policy, not proof that rejected records are corrupt.
 The original raw bytes remain the evidence of every omitted row.
+
+
+## V5.2 historical SEC filing intelligence
+
+Build a local DuckDB index of candidate filings by reparsing the original
+V5.1 quarterly master-index objects and verifying their SHA-256. No network
+or canonical price scan. One quarter per transaction; unchanged source
+hash/parser version and matching row count allow reuse. Identical index
+rows are deduplicated; different issuers sharing a key cause a visible
+partition failure. The index covers selected candidate forms, not every
+filing or all corporate actions.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db hf-5m-filings-build-v52
+& $py -m atlaspm.cli market-db hf-5m-filings-select-v52 --ciks 320193 --start 2020-07-01 --end 2020-09-30 --kind split --limit 20
+~~~
+
+CIK 320193 is an example issuer filter, not a historical security ID.
+Supported event categories: split, exit, listing, merger, ticker, dividend.
+Selection filters by **filing date**, not event date. It is deterministic,
+bounded, and reports missing requested quarters and truncation. A failed
+refresh can leave the previous indexed partition intact; inspect the build
+report before relying on any cached selection.
+
+Optional explicitly bounded SEC body retrieval (requires contact agent):
+
+~~~powershell
+& $py -m atlaspm.cli market-db hf-5m-filings-collect-v52 --ciks 320193 --start 2020-07-01 --end 2020-09-30 --kind split --limit 20 --max-requests 20 --fetch
+~~~
+
+Without --fetch only cached bodies are parsed. With --fetch, requests
+are serial with a 0.5 second minimum pause; access/network failure stops
+the download loop. Raw bodies are content-addressed, hashed and retained.
+Extracted hints contain text excerpts, keyword/ratio matches, filing date
+lower bound for knowledge, and ambiguity flags. Effective dates and
+security IDs are deliberately null. Primary-form-only extraction misses
+exhibit-only disclosures; it is not a complete parser. Text regex hits
+can be historical, proposed, negated, canceled, unrelated or ambiguous.
+The header/primary form check is not independent accession/issuer
+authentication. Do not use the hint outputs as V5 certified CSVs.
+No automatic historical ticker-to-CIK mapping or company action approval.
+
+Reports are under local_data/stock_5m/huggingface/quality/certification_v5/filings_v52/
+(index_report.json, evidence_report.json, index.duckdb, hints/).
+No external evidence is redistributed. Data rights and training/live
+approval remain unverified/false. No broker interfaces.

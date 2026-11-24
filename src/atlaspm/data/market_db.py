@@ -344,6 +344,19 @@ def register_parser(sub):
     h.add_argument('--fetch',action='store_true')
     h.add_argument('--refresh',action='store_true')
     h.add_argument('--max-requests',type=int,default=0)
+    h=actions.add_parser('hf-5m-filings-build-v52',help='Build local SEC filing candidate index')
+    h.add_argument('--start-quarter',default='2000-Q1')
+    h.add_argument('--end-quarter',default='2026-Q1')
+    for name in ('hf-5m-filings-select-v52','hf-5m-filings-collect-v52'):
+        h=actions.add_parser(name,help='Select or collect bounded SEC issuer filing evidence')
+        h.add_argument('--ciks',nargs='+',required=True)
+        h.add_argument('--start',required=True)
+        h.add_argument('--end',required=True)
+        h.add_argument('--kind',choices=['split','exit','listing','merger','ticker','dividend'],required=True)
+        h.add_argument('--limit',type=int,default=20)
+        if name.endswith('collect-v52'):
+            h.add_argument('--fetch',action='store_true')
+            h.add_argument('--max-requests',type=int,default=20)
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -495,6 +508,14 @@ def run(args):
             args.start_quarter,args.end_quarter,listing_dates=args.listing_dates,
             current=not args.no_current,fetch=args.fetch,refresh=args.refresh,
             max_requests=args.max_requests)
+    if args.db_action.startswith('hf-5m-filings-'):
+        from atlaspm.data import hf_stock5m_filings_v52 as filings
+        if args.db_action == 'hf-5m-filings-build-v52':
+            return filings.build(args.start_quarter,args.end_quarter)
+        if args.db_action == 'hf-5m-filings-select-v52':
+            return filings.select(args.ciks,args.start,args.end,args.kind,args.limit)
+        return filings.collect(args.ciks,args.start,args.end,args.kind,args.limit,
+                               fetch=args.fetch,max_requests=args.max_requests)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
