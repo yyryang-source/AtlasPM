@@ -10,6 +10,7 @@ from atlaspm.research.training_dataset import build_panel, iter_purged_folds, se
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
+from atlaspm.research.training_memory import FoldArrays
 
 
 def _fingerprint(payload):
@@ -67,7 +68,7 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -98,7 +99,7 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
-                batch_size=batch_size,mixed_precision=mixed_precision)
+                batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
     store=None
     if checkpoint_path is not None:
         from atlaspm.research.training_checkpoint import FoldStore
@@ -109,6 +110,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                        dependencies=dependency_versions,source_hashes=source_hashes,
                        runtime=platform.python_version(),platform=platform.platform()))
     resumed=0
+    # Validate resource settings even when every fold is cached.
+    FoldArrays(array_budget_mib,spill_dir)
     for fold_index,fold in enumerate(folds):
         cached=store.load(fold_index) if store is not None else None
         if cached is not None:
@@ -125,60 +128,59 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             model_settings=dict(cached["audit"]["model_settings"])
             resumed+=1
             continue
-        offsets={m:len(predictions[m]) for m in models}
-        train_rows=[samples[i] for i in fold["train"]]
-        test_rows=[samples[i] for i in fold["test"]]
-        x=np.asarray([r["x"] for r in train_rows],dtype=float)
-        y=np.asarray([r["y"] for r in train_rows],dtype=float)
-        mean=x.mean(axis=0)
-        scale=x.std(axis=0)
-        scale=np.where(scale>1e-12,scale,1.)
-        x-=mean
-        x/=scale
-        z=x
-        intercept=float(y.mean())
-        coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
-        test=np.asarray([r["x"] for r in test_rows],dtype=float)
-        test-=mean
-        test/=scale
-        ridge=test@coef+intercept
-        sequence_train=sequence_test=None
-        for name in models:
-            if name=="ridge":
-                values=ridge
-                settings={"alpha":alpha}
-            elif name=="historical_mean":
-                values=np.full(len(test_rows),intercept)
-                settings={}
-            elif name in SEQUENCE_MODELS:
-                if sequence_train is None:
-                    def materialize(rows):
-                        arr=np.empty((len(rows),sequence_length,len(panel["feature_names"])),dtype=np.float64)
-                        for i,row in enumerate(rows):
-                            arr[i]=sequence_for(panel,row)
-                        return arr
-                    sequence_train=materialize(train_rows)
-                    sequence_test=materialize(test_rows)
-                values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
-                                             epochs=sequence_epochs,device=device,batch_size=batch_size,
-                                             mixed_precision=mixed_precision)
-            else:
-                values,settings=fit_predict(name,z,y,test,seed)
-            model_settings[name]=settings
-            for row,value in zip(test_rows,values):
-                base={k:row[k] for k in ("security_id","date","label_end_date")}
-                base["actual"]=row["y"]
-                predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
-        audit.append(dict(test_start=panel["dates"][fold["test_start_index"]],
-                          test_end=panel["dates"][fold["test_end_index"]],
-                          latest_train_label=panel["dates"][fold["latest_training_label_end"]],
-                          training_rows=len(train_rows),test_rows=len(test_rows),
-                          feature_mean=mean.tolist(),feature_scale=scale.tolist(),
-                          coefficients=coef.tolist(),intercept=intercept,
-                          model_settings=dict(model_settings)))
-        if store is not None:
-            store.save(fold_index,dict(audit=audit[-1],
-                       predictions={m:predictions[m][offsets[m]:] for m in models}))
+        with FoldArrays(array_budget_mib,spill_dir) as arrays:
+            offsets={m:len(predictions[m]) for m in models}
+            train_rows=[samples[i] for i in fold["train"]]
+            test_rows=[samples[i] for i in fold["test"]]
+            x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
+            y=arrays.rows(train_rows,(len(train_rows),),lambda r:r["y"])
+            mean=x.mean(axis=0)
+            scale=x.std(axis=0)
+            scale=np.where(scale>1e-12,scale,1.)
+            x-=mean
+            x/=scale
+            z=x
+            intercept=float(y.mean())
+            coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
+            test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
+            test-=mean
+            test/=scale
+            ridge=test@coef+intercept
+            sequence_train=sequence_test=None
+            for name in models:
+                if name=="ridge":
+                    values=ridge
+                    settings={"alpha":alpha}
+                elif name=="historical_mean":
+                    values=np.full(len(test_rows),intercept)
+                    settings={}
+                elif name in SEQUENCE_MODELS:
+                    if sequence_train is None:
+                        def materialize(rows):
+                            return arrays.rows(rows,(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
+                        sequence_train=materialize(train_rows)
+                        sequence_test=materialize(test_rows)
+                    values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
+                                                 epochs=sequence_epochs,device=device,batch_size=batch_size,
+                                                 mixed_precision=mixed_precision)
+                else:
+                    values,settings=fit_predict(name,z,y,test,seed)
+                model_settings[name]=settings
+                for row,value in zip(test_rows,values):
+                    base={k:row[k] for k in ("security_id","date","label_end_date")}
+                    base["actual"]=row["y"]
+                    predictions[name].append(dict(base,prediction=finite(float(value),"prediction")))
+            audit.append(dict(test_start=panel["dates"][fold["test_start_index"]],
+                              test_end=panel["dates"][fold["test_end_index"]],
+                              latest_train_label=panel["dates"][fold["latest_training_label_end"]],
+                              training_rows=len(train_rows),test_rows=len(test_rows),
+                              feature_mean=mean.tolist(),feature_scale=scale.tolist(),
+                              coefficients=coef.tolist(),intercept=intercept,
+                              model_settings=dict(model_settings),
+                              array_resident_bytes=arrays.resident,array_spilled_bytes=arrays.spilled))
+            if store is not None:
+                store.save(fold_index,dict(audit=audit[-1],
+                           predictions={m:predictions[m][offsets[m]:] for m in models}))
     ensemble_audit=None
     if ensemble is not None:
         if not isinstance(ensemble,dict):
