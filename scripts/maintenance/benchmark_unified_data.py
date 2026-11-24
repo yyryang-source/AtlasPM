@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--dataset", choices=tuple(CATALOG), required=True)
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
+    parser.add_argument("--as-of", help="Required prior-date cutoff for SEC index")
     parser.add_argument("--column", action="append", default=[])
     parser.add_argument("--symbol", action="append", default=[])
     parser.add_argument("--batch-size", type=int, default=2048)
@@ -23,7 +24,7 @@ def main():
     try:
         with closing(iter_batches(args.dataset, start=args.start, end=args.end,
                                   columns=args.column, symbols=args.symbol,
-                                  purpose="exploratory", batch_size=args.batch_size)) as stream:
+                                  purpose="exploratory", as_of=args.as_of, batch_size=args.batch_size)) as stream:
             for batch in stream:
                 size = len(batch.rows)
                 rows += size

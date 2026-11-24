@@ -8,18 +8,23 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+import csv
 from decimal import Decimal
 from math import isfinite
 from pathlib import Path
 import sqlite3
 import re
 from types import MappingProxyType
+from zoneinfo import ZoneInfo
 
 from atlaspm.data import factor_db, hf_stock5m
 from atlaspm.data import hf_stock5m_filings_v52 as filings
 from atlaspm.data import hf_stock5m_security_master_v53 as security_master
 from atlaspm.data.market_db import DB_PATH, private_path
+from atlaspm.data.hf_stock5m_certification_v5 import fingerprint
+from atlaspm.data.stock_fundamentals_import import _PROVENANCE_COLUMNS
+from atlaspm.strategies.equity.stock_screener import FUNDAMENTAL_COLUMNS, fundamental_value_issue
 
 
 class DataUnavailable(ValueError):
@@ -78,7 +83,7 @@ CATALOG = MappingProxyType({
 
 # Explicitly unavailable through this API, not fabricated empty tables.
 UNCONNECTED = frozenset({
-    "equity_realtime", "company_fundamentals",
+    "equity_realtime",
     "macro", "ibkr_accounts",
     "ibkr_positions", "option_contracts", "bond_terms",
 })
@@ -264,6 +269,116 @@ def review_security(*, as_of: str, trade_date: str | None = None):
     report = security_master.snapshot(decision.isoformat(), observed.isoformat(), read_only=True)
     return {**report, "point_in_time_verified": False, "approved_for_model_training": False,
             "approved_for_backtest": False, "live_execution_enabled": False}
+
+
+_SEC_FACT_COLUMNS = ("cik", "accession", "filed_date", "period_end",
+                     "reported_shares_date", "reported_shares", "unadjusted_close")
+
+
+def iter_fundamentals(path: Path, *, start: str, end: str, as_of: str,
+                      purpose: str, symbols=(), batch_size: int = 2048):
+    """Stream either existing provenance-bearing annual fundamental CSV format.
+
+    These are close-derived values: the snapshot day itself is unavailable
+    at a date-only decision cutoff. No forward fill or identity inference.
+    """
+    first, last, cutoff = _day(start), _day(end), _day(as_of)
+    if purpose != "exploratory" or last >= cutoff:
+        raise AdmissionDenied("Fundamental snapshots must precede decision date")
+    if last < first or (last-first).days > 366:
+        raise ValueError("Invalid fundamental date range")
+    if type(batch_size) is not int or not 1 <= batch_size <= 16384:
+        raise ValueError("batch_size must be 1..16384")
+    if isinstance(symbols, str):
+        raise ValueError("symbols must be a sequence")
+    ids = tuple(symbols)
+    if len(ids) > 128 or any(not isinstance(s, str) or not s or len(s) > 128 for s in ids):
+        raise ValueError("Invalid provider identifiers")
+    ids = set(ids)
+    path = private_path(Path(path))
+    if not path.is_file():
+        raise DataUnavailable("Fundamental snapshot CSV missing")
+    version = _version(path)
+    origin = str(path.relative_to(Path.cwd().resolve()))
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        header = tuple(reader.fieldnames or ())
+        # Use the actual outputs of stock_fundamentals_import and
+        # sec_fundamental_history, not generic undated ratio files.
+        if header == FUNDAMENTAL_COLUMNS + _PROVENANCE_COLUMNS:
+            sec = False
+        elif header == FUNDAMENTAL_COLUMNS + _SEC_FACT_COLUMNS:
+            sec = True
+        else:
+            raise DataQualityError("Unrecognized provenance-bearing fundamental schema")
+        rows = []
+        previous = None
+        for row in reader:
+            if None in row or any(v is None or not v.strip() for v in row.values()):
+                raise DataQualityError("Malformed fundamental row")
+            available = _day(row["as_of_date"])
+            key = (available, row["symbol"])
+            if previous is not None and key <= previous:
+                raise DataQualityError("Fundamental snapshots must be sorted and unique")
+            previous = key
+            if available > last:
+                continue
+            if available < first or (ids and row["symbol"] not in ids):
+                continue
+            filed, period = _day(row["filed_date"]), _day(row["period_end"])
+            if not period <= filed <= available:
+                raise DataQualityError("Invalid fundamental filing chronology")
+            if sec:
+                if filed >= available or not re.fullmatch(r"[0-9]{10}", row["cik"]):
+                    raise DataQualityError("Invalid SEC snapshot provenance")
+                if not _day(row["reported_shares_date"]) <= filed:
+                    raise DataQualityError("Shares observation is after filing")
+                for name in ("reported_shares", "unadjusted_close"):
+                    _validate_field("close", float(row[name]))
+            else:
+                accepted = datetime.fromisoformat(row["accepted_at"])
+                if accepted.utcoffset() is None:
+                    raise DataQualityError("Missing acceptance timezone")
+                local = accepted.astimezone(ZoneInfo("America/New_York")).date()
+                if not period <= local <= filed or local >= available:
+                    raise DataQualityError("Acceptance chronology fails")
+            values = {k: float(row[k]) for k in FUNDAMENTAL_COLUMNS[3:]}
+            issue = fundamental_value_issue(values)
+            if issue:
+                raise DataQualityError(issue)
+            rows.append(tuple(values.get(k, row[k]) for k in header))
+            if len(rows) == batch_size:
+                yield Batch("company_fundamentals", header, tuple(rows), origin, version)
+                rows.clear()
+        if rows:
+            yield Batch("company_fundamentals", header, tuple(rows), origin, version)
+    if _version(path) != version:
+        raise DataQualityError("Fundamental source changed during scan")
+
+
+def parquet_manifest(dataset: str, *, start: str, end: str):
+    """Stream SHA-256 fingerprints from existing local partitions; no copying.
+
+    The returned digests are content evidence, not a certificate of authenticity,
+    coverage or data rights. Recompute after updates to detect revisions.
+    """
+    if dataset not in CATALOG or CATALOG[dataset].store != "parquet":
+        raise ValueError("Manifest supports immutable Parquet inputs only")
+    first, last = _day(start), _day(end)
+    if last < first or (last-first).days > 366:
+        raise ValueError("Invalid manifest date range")
+    paths = tuple(_partitions(CATALOG[dataset], first, last))
+    partitions = []
+    for path in paths:
+        version = _version(path)
+        record = fingerprint(path)
+        if _version(path) != version:
+            raise DataQualityError("Partition changed while hashing")
+        partitions.append({"path": str(path.relative_to(Path.cwd().resolve())),
+                           "sha256": record["sha256"], "bytes": record["bytes"]})
+    return {"dataset": dataset, "partitions": partitions, "coverage_verified": False,
+            "approved_for_model_training": False, "approved_for_backtest": False,
+            "live_execution_enabled": False}
 
 
 def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),

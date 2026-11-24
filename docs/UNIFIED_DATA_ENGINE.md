@@ -19,7 +19,7 @@ exploratory batch as a permission token. Existing CLI and raw data are unchanged
 | factors_hf / factors_sqlite | factor_db source-isolated monthly Parquet |
 
 Unconnected catalog entries deliberately raise DataUnavailable:
-equity_realtime, company_fundamentals, macro, ibkr_accounts, ibkr_positions,
+equity_realtime, macro, ibkr_accounts, ibkr_positions,
 option_contracts, bond_terms.
 Several have existing domain modules or raw storage, but adapters are not
 implemented here. This is not a claim of provider availability. Never fill
@@ -101,3 +101,7 @@ Raw minute scans reuse the existing raw QC, reject any invalid source rows, misa
 ### SEC and security evidence
 
 `iter_batches("sec_filings", start="2020-01-01", end="2020-01-02", symbols=("123",), as_of="2020-01-03", purpose="exploratory")` reads the existing V5.2 candidate filing index without creating or rebuilding it. Explicit CIKs, complete requested index-quarter inventory and strictly prior filing dates are required. Index digest and parser version are included by default, but are recorded provenance, not proof of current source authenticity, complete filings or acceptance timestamps. Same-day filings are blocked. The separate `review_security(as_of=..., trade_date=...)` facade reuses the existing read-only evidence snapshot for historical memberships, listing intervals, corporate actions, conflicts and unresolved records. Its existing algorithm materializes the visible ledger; it is not a bounded market-bar stream. It is still a research-only projection, not production PIT certification.
+
+### Fundamental snapshots and file fingerprints
+
+`iter_fundamentals(path, start=..., end=..., as_of=..., purpose="exploratory")` streams both existing annual fundamental CSV formats with their provenance fields, validates their selected ratios using the existing screener validator, rejects same-day close-derived values, and requires unique chronological records. It never assigns a permanent security ID or forward-fills a missing release. CSV rows are scanned rather than indexed. `parquet_manifest(dataset, start=..., end=...)` reuses the existing SHA-256 fingerprint function to hash monthly partitions in chunks. It records content changes without copying data, is not a signed admission receipt, and does not validate the Parquet schema or source authenticity. SQLite and DuckDB databases may have WAL state and are deliberately excluded from this file manifest. The existing data builder and audit checkpoint workflows remain unchanged.

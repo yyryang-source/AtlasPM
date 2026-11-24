@@ -246,3 +246,35 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         with self.assertRaises(unified.AdmissionDenied):
             unified.review_security(as_of="2020-01-03", trade_date="2020-01-04")
+
+    def test_fundamentals_provenance_cutoff_and_duplicates(self):
+        from atlaspm.data.stock_fundamentals_import import _PROVENANCE_COLUMNS
+        from atlaspm.strategies.equity.stock_screener import FUNDAMENTAL_COLUMNS
+        path = Path("local_data/fundamentals.csv")
+        header = ",".join(FUNDAMENTAL_COLUMNS + _PROVENANCE_COLUMNS)
+        record = ("2020-01-03,A,Tech,100,0.1,0.1,0.2,0.03,10,"
+                  "2020-01-02T21:00:00+00:00,2020-01-02,2019-12-31,filing,valuation")
+        path.write_text(header + "\n" + record + "\n", encoding="utf-8")
+        args = dict(start="2020-01-01", end="2020-01-03", as_of="2020-01-04",
+                    purpose="exploratory")
+        batch, = list(unified.iter_fundamentals(path, **args))
+        self.assertEqual(batch.rows[0][3], 100.)
+        self.assertFalse(batch.approved_for_model_training)
+        with self.assertRaises(unified.AdmissionDenied):
+            list(unified.iter_fundamentals(path, **{**args, "as_of":"2020-01-03"}))
+        path.write_text(header + "\n" + record + "\n" + record + "\n", encoding="utf-8")
+        with self.assertRaises(unified.DataQualityError):
+            list(unified.iter_fundamentals(path, **args))
+
+    def test_partition_manifest_changes_and_missing(self):
+        path = hf_stock5m.output_path("2020-01")
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"first")
+        args = dict(start="2020-01-01", end="2020-01-31")
+        first = unified.parquet_manifest("equity_5m", **args)
+        path.write_bytes(b"other")
+        second = unified.parquet_manifest("equity_5m", **args)
+        self.assertNotEqual(first["partitions"][0]["sha256"], second["partitions"][0]["sha256"])
+        self.assertFalse(second["approved_for_model_training"])
+        with self.assertRaises(unified.DataUnavailable):
+            unified.parquet_manifest("equity_5m", **{**args, "end":"2020-02-01"})
