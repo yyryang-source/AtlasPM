@@ -102,15 +102,17 @@ def load_identities(path):
 
 
 def load_actions(path, identities):
-    ids = {i.security_id for i in identities}
+    by_id = defaultdict(list)
+    for i in identities:
+        by_id[i.security_id].append(i)
     result, seen, economic_keys = [], set(), set()
     for r in _read(path, ACTION_FIELDS):
         effective = _date(r["effective_date"])
         known = _date(r["known_date"])
-        if r["event_id"] in seen or r["security_id"] not in ids:
+        if r["event_id"] in seen or r["security_id"] not in by_id:
             raise ValueError("Duplicate event ID or unknown security ID")
         if not any(i.security_id == r["security_id"] and i.valid_from <= effective
-                   and (i.valid_to is None or effective < i.valid_to) for i in identities):
+                   and (i.valid_to is None or effective < i.valid_to) for i in by_id[r["security_id"]]):
             raise ValueError("Action outside security identity lifetime")
         try:
             value = Decimal(r["value"])
