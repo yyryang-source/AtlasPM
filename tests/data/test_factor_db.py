@@ -102,6 +102,23 @@ class FactorDuckDBTests(FactorContractTests):
         self.assertEqual(2, factor_db.status()['months'])
         self.assertFalse(result['approved_for_model_training'])
 
+    def test_factor_audit_rejects_null_close_but_allows_missing_warmup(self):
+        self._write_month("2026-01")
+        factor_db.build("2026-01", memory="256MB", threads=1)
+        path = factor_db._path("2026-01", "hf", "rth", "factors")
+        self.assertTrue(factor_db.audit("2026-01", memory="256MB", threads=1)["valid"])
+        temp = path.with_suffix(".new.parquet")
+        cx = duckdb.connect()
+        try:
+            cx.execute(f"""COPY (SELECT * REPLACE (NULL::DOUBLE AS close)
+                FROM {factor_db._files_sql([path])}) TO {factor_db._quoted(temp)} (FORMAT PARQUET)""")
+        finally:
+            cx.close()
+        os.replace(temp, path)
+        report = factor_db.audit("2026-01", memory="256MB", threads=1)
+        self.assertFalse(report["valid"])
+        self.assertEqual(report["invalid_rows"], report["rows"])
+
     def test_duplicate_hf_rejected_without_output(self):
         self._write_month('2026-02', duplicate=True)
         with self.assertRaisesRegex(ValueError, 'duplicate'):

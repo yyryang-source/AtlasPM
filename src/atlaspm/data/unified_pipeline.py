@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
-from contextlib import closing
 from hashlib import sha256
 import json
 
@@ -157,10 +156,6 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
             record["factor_rows"] = report["rows"]
             if not report["valid"] or (m and m.get("rows") != report["rows"]):
                 record["blockers"].append("FACTOR_STRUCTURE_OR_ROW_COUNT_MISMATCH")
-            with closing(factor_db._db(memory, threads)) as con:
-                relation = factor_db._files_sql([factors])
-                if con.execute(f"SELECT 1 FROM {relation} WHERE close IS NULL LIMIT 1").fetchone():
-                    record["blockers"].append("MISSING_FACTOR_CLOSE")
             if any(unified._version(p) != sig for p, sig in signatures.items()):
                 record["blockers"].append("INPUT_CHANGED_DURING_PREFLIGHT")
         except Exception as exc:

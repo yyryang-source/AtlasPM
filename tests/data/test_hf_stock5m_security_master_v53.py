@@ -59,6 +59,8 @@ class SecurityMasterTests(unittest.TestCase):
         self.assertEqual(len(m.snapshot("2020-06-02")["members"]),1)
         self.assertEqual(m.snapshot("2020-06-03")["members"],[])
         self.assertEqual(len(m.snapshot("2020-06-03","2020-05-31")["members"]),1)
+        self.assertEqual(m.snapshot("2020-06-03","2020-05-31",read_only=True),
+                         m.snapshot("2020-06-03","2020-05-31"))
 
     def test_conflict_retraction_and_same_source_tie(self):
         rows=self.pair("listing1",self.identity())
