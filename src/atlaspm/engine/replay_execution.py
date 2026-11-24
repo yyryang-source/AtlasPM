@@ -8,6 +8,12 @@ def execute_order(symbol, side, requested, mark, cash_limit, previous_volume, po
     """Use previous completed session volume only, never current daily volume."""
     if type(requested) is not int or requested < 1 or side not in {"BUY","SELL"}:
         raise ValueError("INVALID_REPLAY_ORDER")
+    mark = finite(mark,"mark",minimum=.000001)
+    cash_limit = finite(cash_limit,"cash_limit",minimum=0)
+    fee = finite(fee,"fee",minimum=0)
+    slip = finite(slip,"slip",minimum=0)
+    if fee+slip>=.1 or not isinstance(policy,dict):
+        raise ValueError("INVALID_EXECUTION_COST_OR_POLICY")
     participation = finite(policy.get("max_participation",.01),"max_participation",minimum=0)
     impact_bps = finite(policy.get("impact_bps_at_full_participation",50),"impact_bps",minimum=0)
     fraction = finite(policy.get("fill_fraction",1),"fill_fraction",minimum=0)
