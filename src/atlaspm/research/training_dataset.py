@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from array import array
 from bisect import bisect_left
+from collections import deque
 from atlaspm.research.training_compact import CompactSamples, IndexedRows, IndexPrefix
 from atlaspm.engine.contracts import finite, timestamp
 
@@ -92,45 +93,74 @@ class MarketRegimes:
         self.states[day]=state
 
 
+class WindowLabels:
+    """Generate matured labels in one pass over the global session sequence.
+
+    A current consecutive-presence count of h+1 proves that every required
+    future session exists. Eligibility is frozen at the signal session, before
+    any future close is observed. Retain only h+1 raw sessions.
+    """
+    def __init__(self,horizon,length):
+        self.horizon=horizon
+        self.length=length
+        self.window=deque(maxlen=horizon+1)
+        self.streak={}
+        self.missing=0
+        self.incomplete=0
+        self.peak=0
+
+    def observe(self,index,marks):
+        previous=self.streak
+        self.streak={sid:previous.get(sid,0)+1 for sid in marks}
+        eligible=({sid for sid,n in self.streak.items() if n>=self.length}
+                  if self.length>1 else None)
+        self.window.append((marks,eligible))
+        self.peak=max(self.peak,len(self.window))
+        if index<self.horizon:
+            return
+        signal,eligible=self.window[0]
+        i=index-self.horizon
+        for sid,(price,x) in sorted(signal.items()):
+            if eligible is not None and sid not in eligible:
+                self.incomplete+=1
+                continue
+            if self.streak.get(sid,0)<self.horizon+1:
+                y=None
+                self.missing+=1
+            else:
+                y=finite(marks[sid][0]/price-1,"forward_return")
+            yield sid,i,x,y
+
+
 def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates,observations=[],[]
-    for day,marks in validated_sessions(payload["sessions"],features):
-        dates.append(day)
-        observations.append(marks)
-        if tracker is not None:
-            tracker.observe(day,marks)
-    samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
+    keep_observations=not compact or sequence_length>1
+    labels=WindowLabels(horizon,sequence_length)
+    samples,prediction_samples=[],[]
     if compact:
         prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
         valid_indices=array('Q')
-    for i in range(max(0,len(observations)-horizon)):
-        marks=observations[i]
-        for sid,(price,x) in sorted(marks.items()):
-            # Eligibility for prediction depends only on the trailing feature window.
-            if i+1 < sequence_length or any(sid not in observations[j]
-                    for j in range(i-sequence_length+1,i+1)):
-                incomplete_sequences += 1
-                continue
-            sequence = None if compact else [observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
-            missing_path = any(sid not in observations[j] for j in range(i+1,i+horizon+1))
-            y = None if missing_path else observations[i+horizon][sid][0]/price-1
+    for k,(day,marks) in enumerate(validated_sessions(payload["sessions"],features)):
+        dates.append(day)
+        if keep_observations:
+            observations.append(marks)
+        if tracker is not None:
+            tracker.observe(day,marks)
+        for sid,i,x,y in labels.observe(k,marks):
             if compact:
                 prediction_samples.append(sid,i,x,y)
-                if missing_path:
-                    missing+=1
-                else:
+                if y is not None:
                     valid_indices.append(len(prediction_samples)-1)
                 continue
-            sample = dict(security_id=sid,signal_index=i,label_end_index=i+horizon,
-                          date=dates[i],label_end_date=dates[i+horizon],x=x,sequence=sequence,y=y)
+            sequence=[observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
+            sample=dict(security_id=sid,signal_index=i,label_end_index=k,date=dates[i],
+                        label_end_date=dates[k],x=x,sequence=sequence,y=y)
             prediction_samples.append(sample)
-            if missing_path:
-                missing += 1
-            else:
+            if y is not None:
                 samples.append(sample)
     if compact:
         if feature_column is not None:
@@ -140,8 +170,8 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
                 **({'observations':observations} if compact and sequence_length>1 else {}),
                 market_regimes=tracker.states if tracker is not None else None,
-                incomplete_sequences=incomplete_sequences,
-                missing_label_paths=missing,unmatured_final_sessions=min(horizon,len(dates)),
+                incomplete_sequences=labels.incomplete,
+                missing_label_paths=labels.missing,unmatured_final_sessions=min(horizon,len(dates)),
                 research_only=True,approved_for_model_training=False,
                 historical_security_identity_verified=False,live_execution_enabled=False)
 

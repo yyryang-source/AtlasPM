@@ -29,7 +29,7 @@ class StreamPanelTests(unittest.TestCase):
                             self.assertEqual(len(ref["prediction_samples"]),len(out["prediction_samples"]))
                             self.assertEqual(ref["missing_label_paths"],out["missing_label_paths"])
                             self.assertEqual(ref["incomplete_sequences"],out["incomplete_sequences"])
-                            self.assertLessEqual(out["peak_buffered_sessions"],horizon+length)
+                            self.assertLessEqual(out["peak_buffered_sessions"],horizon+1)
                             for a,b in zip(ref["prediction_samples"],out["prediction_samples"]):
                                 self.assertEqual(a,{**b,"sequence":sequence_for(out,b)})
                 self.assertEqual(list(Path("local_data/cache").iterdir()),[])
