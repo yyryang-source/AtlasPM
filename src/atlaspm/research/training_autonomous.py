@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import hashlib
-import sqlite3
 from contextlib import closing
 from pathlib import Path
 from itertools import groupby
@@ -22,17 +21,19 @@ def _code_version():
                    for p in sorted(Path(__file__).parents[1].rglob("*.py"))})
 
 
-def _reserve_holdout(path, start, end, study):
+def _reserve_holdout(path, validation_start, start, end, study):
     # The registry is a local integrity boundary, not a tamper-proof authority.
     # Burn the interval before evaluation, including interrupted/failed runs.
     with closing(_connect(path)) as con,con:
         con.execute("BEGIN IMMEDIATE")
         con.execute("""CREATE TABLE IF NOT EXISTS research_holdouts (
-            start_date TEXT NOT NULL,end_date TEXT NOT NULL,study TEXT PRIMARY KEY)""")
-        if con.execute("SELECT 1 FROM research_holdouts WHERE start_date<=? AND end_date>=? LIMIT 1",
-                       (end,start)).fetchone():
+            validation_start TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,study TEXT PRIMARY KEY)""")
+        if con.execute("""SELECT 1 FROM research_holdouts WHERE
+                       (start_date<=? AND end_date>=?) OR
+                       (validation_start<=? AND end_date>=?) LIMIT 1""",
+                       (end,validation_start,end,start)).fetchone():
             raise ValueError("HOLDOUT_ALREADY_CONSUMED_OR_OVERLAPPING")
-        con.execute("INSERT INTO research_holdouts VALUES (?,?,?)",(start,end,study))
+        con.execute("INSERT INTO research_holdouts VALUES (?,?,?,?)",(validation_start,start,end,study))
 
 
 def _candidates(features, budget, optional_models):
@@ -63,10 +64,14 @@ def _fit(payload, candidate, settings):
 
 def _baselines(rows, sessions, momentum):
     # Momentum field must be explicitly defined by the caller's synthetic schema.
-    values={(s["date"],a["security_id"]):a["features"][momentum]
-            for s in sessions for a in s["assets"]}
-    return {"equal_weight":[{**r,"prediction":0.} for r in rows],
-            "momentum":[{**r,"prediction":values[r["date"],r["security_id"]]} for r in rows]}
+    indexed={s["date"]:s for s in sessions}
+    equal,mom=[],[]
+    for day,group in groupby(rows,key=lambda r:r["date"]):
+        values={a["security_id"]:a["features"][momentum] for a in indexed[day]["assets"]}
+        for r in group:
+            equal.append({**r,"prediction":0.})
+            mom.append({**r,"prediction":values[r["security_id"]]})
+    return {"equal_weight":equal,"momentum":mom}
 
 
 def _identity(rows):
@@ -112,6 +117,15 @@ def research(payload, *, registry_path, holdout_start, momentum_feature,
                   test_sessions=test_sessions,embargo_sessions=embargo_sessions,seed=seed)
     evaluation=dict(top_fraction=top_fraction,cost_bps=cost_bps)
     candidates=_candidates(features,budget,optional_models)
+    config=dict(settings=settings,evaluation=evaluation,candidates=candidates,seed=seed,
+                code_sha256=_code_version(),holdout_start=sessions[holdout_start]["date"],
+                holdout_end=sessions[-1]["date"],momentum_feature=momentum_feature,
+                minimum_validation_periods=minimum_validation_periods,
+                bootstrap_draws=bootstrap_draws,bootstrap_block=bootstrap_block)
+    # Reserve before any fitting, preventing a prior holdout from becoming a
+    # tuning prefix and preventing a prior tuning prefix from becoming holdout.
+    study=digest({"config":config,"validation_dataset":_fingerprint(prefix)})
+    _reserve_holdout(path,sessions[0]["date"],config["holdout_start"],config["holdout_end"],study)
     baseline_config=dict(model="historical_mean",features=features,ridge_alpha=1.)
     rows,versions=_fit(prefix,baseline_config,settings)
     identity=_identity(rows)
@@ -152,17 +166,11 @@ def research(payload, *, registry_path, holdout_start, momentum_feature,
     eligible=[t for t in trials if t["status"]=="CHALLENGER_RESEARCH_ONLY"]
     selected=max(eligible,key=lambda t:(min(x["lower_bound"] for x in t["comparison"].values()),
                                         digest(t["config"]))) if eligible else None
-    config=dict(settings=settings,evaluation=evaluation,candidates=candidates,seed=seed,
-                code_sha256=_code_version(),holdout_start=sessions[holdout_start]["date"],
-                holdout_end=sessions[-1]["date"],momentum_feature=momentum_feature,
-                minimum_validation_periods=minimum_validation_periods,
-                bootstrap_draws=bootstrap_draws,bootstrap_block=bootstrap_block)
     validation=dict(dataset_sha256=_fingerprint(prefix),trials=trials,
                     baselines={m:b["metrics"] for m,b in baselines.items()},
                     selected=selected["config"] if selected else "equal_weight",
                     baseline_dependencies=versions,**FLAGS)
     validation_id=register(path,config,validation,kind="experiment")
-    _reserve_holdout(path,config["holdout_start"],config["holdout_end"],validation_id)
     # Only the selected candidate and fixed references enter the holdout.
     # Refitting is allowed on strictly matured historical labels, never retuning.
     reference,dependencies=_fit(payload,baseline_config,settings)

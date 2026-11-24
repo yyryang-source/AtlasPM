@@ -15,6 +15,8 @@ from atlaspm.engine.contracts import finite
 
 
 def evaluate(rows, sessions, *, top_fraction=.25, cost_bps=10.):
+    if not isinstance(rows,(list,tuple)):
+        raise ValueError("STRATEGY_REQUIRES_REUSABLE_FORECAST_ROWS")
     fraction=finite(top_fraction,"top_fraction",minimum=.000001)
     cost=finite(cost_bps,"cost_bps",minimum=0)/10000
     if fraction>1 or cost>=1:
