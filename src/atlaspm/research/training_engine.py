@@ -60,7 +60,7 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -87,7 +87,38 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     predictions={m:[] for m in models}
     model_settings={}
     audit=[]
-    for fold in folds:
+    fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+    config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
+                embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
+                sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble)
+    store=None
+    if checkpoint_path is not None:
+        from atlaspm.research.training_checkpoint import FoldStore
+        import platform
+        from pathlib import Path
+        source_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
+                       for p in Path(__file__).parent.glob("training_*.py")}
+        store=FoldStore(checkpoint_path,dict(dataset=fingerprint,config=config,
+                       dependencies=dependency_versions,source_hashes=source_hashes,
+                       runtime=platform.python_version(),platform=platform.platform()))
+    resumed=0
+    for fold_index,fold in enumerate(folds):
+        cached=store.load(fold_index) if store is not None else None
+        if cached is not None:
+            if set(cached["predictions"])!=set(models):
+                raise ValueError("CHECKPOINT_MODEL_MISMATCH")
+            expected=[(samples[i]["security_id"],samples[i]["date"],samples[i]["label_end_date"],samples[i]["y"]) for i in fold["test"]]
+            for name, rows in cached["predictions"].items():
+                if [(r["security_id"],r["date"],r["label_end_date"],r["actual"]) for r in rows]!=expected:
+                    raise ValueError("CHECKPOINT_SAMPLE_MISMATCH")
+                for row in rows:
+                    finite(row["prediction"],"checkpoint_prediction")
+                predictions[name].extend(rows)
+            audit.append(cached["audit"])
+            model_settings=dict(cached["audit"]["model_settings"])
+            resumed+=1
+            continue
+        offsets={m:len(predictions[m]) for m in models}
         train_rows=[samples[i] for i in fold["train"]]
         test_rows=[samples[i] for i in fold["test"]]
         x=np.asarray([r["x"] for r in train_rows],dtype=float)
@@ -125,6 +156,9 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                           feature_mean=mean.tolist(),feature_scale=scale.tolist(),
                           coefficients=coef.tolist(),intercept=intercept,
                           model_settings=dict(model_settings)))
+        if store is not None:
+            store.save(fold_index,dict(audit=audit[-1],
+                       predictions={m:predictions[m][offsets[m]:] for m in models}))
     ensemble_audit=None
     if ensemble is not None:
         if not isinstance(ensemble,dict):
@@ -134,9 +168,10 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         predictions["adaptive_ensemble"]=combined["predictions"]
         ensemble_audit=combined["weight_history"]
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
-    return dict(version="synthetic_return_research_v3",dataset_sha256=fingerprint,
+    return dict(version="synthetic_return_research_v6",dataset_sha256=fingerprint,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
-                ensemble_weight_history=ensemble_audit,
+                ensemble_weight_history=ensemble_audit,training_config=config,
+                checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
