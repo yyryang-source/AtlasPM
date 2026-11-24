@@ -41,3 +41,10 @@ class EventTests(unittest.TestCase):
         out=e.review([item],as_of=self.now.isoformat())
         self.assertTrue(out["events"][0]["expired"])
         self.assertEqual(out["research_requests"],0)
+
+    def test_shared_subject_associations_not_causation(self):
+        a=e.normalize(self.row,received_at=self.now.isoformat())
+        b=e.normalize({**self.row,"source_id":"event2"},received_at=self.now.isoformat())
+        result=e.review([a,b],as_of=self.now.isoformat())
+        self.assertEqual(len(result["events"][0]["related_event_ids"]),1)
+        self.assertFalse(result["causal_propagation_verified"])

@@ -152,6 +152,16 @@ def review(rows, *, as_of, holdings=()):
                        "risk_review_requested":not expired and (importance>=5 or bool(affected)),
                        "directional_signal":None})
     events.sort(key=lambda x:(x["importance"],x["received_at"],x["event_id"]),reverse=True)
+    # Bounded association graph: shared explicit subject is not a causal link.
+    index={}
+    for item in events:
+        for subject in item["subjects"]:
+            related=index.setdefault(subject,[])
+            if len(related)<9:
+                related.append(item["event_id"])
+    for item in events:
+        item["related_event_ids"]=sorted({eid for subject in item["subjects"]
+             for eid in index[subject] if eid!=item["event_id"]})[:8]
     return {**FLAGS,"model":"event_review_v1","as_of":cutoff.isoformat(),"events":events,
             "excluded":dict(excluded),"causal_propagation_verified":False,
             "research_requests":sum(e["research_requested"] for e in events),

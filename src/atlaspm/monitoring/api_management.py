@@ -59,6 +59,13 @@ def inventory(gateway=DEFAULT_GATEWAY):
     return result
 
 
+def set_enabled(provider, enabled):
+    """Only local research process configuration; never change order permissions."""
+    if provider not in set(ROLES)|set(MODEL_ENDPOINTS) or type(enabled) is not bool:
+        raise ValueError("Invalid provider enable configuration")
+    os.environ["ATLASPM_ENABLE_"+provider.upper()]="1" if enabled else "0"
+
+
 def public_smoke(gateway=DEFAULT_GATEWAY):
     """Explicit single public Treasury check; no paid endpoint or broker."""
     require_enabled("treasury")

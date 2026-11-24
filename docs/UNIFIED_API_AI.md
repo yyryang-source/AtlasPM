@@ -278,3 +278,105 @@ No live smoke executed here. No account data, proprietary payloads or
 credentials should be shared. True API connectivity, data rights,
 publication time, normalized units, performance, and release approval are
 separate from software tests. All formal training/backtest/live remain disabled.
+
+
+## Financial intelligence and interface-first credential-later batch
+
+This section extends the designated sources; no new commercial vendor selection.
+Frozen #94 remains 5b331ea. Previous #95 head 6246fc3 completed all five returned
+workflows (28 jobs); Windows full gate ran 1054/1054, zero skips or audit errors.
+New feature tests require fresh CI and local acceptance; no real connections.
+
+### Implemented
+
+* XpressAPI Agency Ratings official GET issuer/issue endpoints, bounded
+  50 identifiers, validated documented response groups, agency-specific
+  rating types, action/watch/outlook and effective-date fields. Supports
+  as-of date or bounded 367-day history request. Coverage is always marked
+  incomplete; no guessed pagination, publication timestamps or ID mappings.
+  Explicit comparable global long-term basis review for notch comparison,
+  no issuer/issue mixing, no mapped default/withdrawn grades, no default
+  probability. Action review separates withdrawal from default, does not
+  predict stock/option/bond price impact. No persistent rating store yet.
+* XpressAPI login and refresh using documented form POSTs; in-memory
+  XpressSession expires early and shares Gateway request budget. Explicit
+  use only, no retry after ambiguous failure, no token/credential receipts.
+  FINRA FIP OAuth2 client credentials token issuance reuses same auth POST
+  transport; data query/dataset entitlement and renewal integration pending.
+* SEC submissions recent filings and official Federal Reserve press RSS
+  reuse shared Gateway. SEC acceptance retained separately, not asserted as
+  publication. RSS UTF-8, 1 MiB, DTD/entity rejected, fixed official routes.
+  No complete archive or guaranteed real-time dissemination.
+* financial_events: strict normalized metadata contract across designated
+  sources, separate credit/analyst/index event categories, receipt cutoff,
+  bounded batch (2000), exact revision dedup and latest visible revision,
+  future effective time, expiry, importance, holdings intersection, shared
+  subject related IDs (not causal). Explicit research/risk review requests,
+  no actual automatic research or order actions. Reuses news/option/credit
+  adapters and SEC/Fed results; licensed file input is an internal contract,
+  not invented vendor wire format. No new database or persistence; source
+  reports/evidence remain local. No automatic queue, webhook/WS/stream
+  ingestion, long-running scheduler, or cross-process event dedup yet.
+* API Management page in research_dashboard.py; configuration via local
+  environment (OS vault launcher can inject values). No key UI or plaintext
+  secret file. Readiness, auth mode, process counters, success rate, latest
+  successful data receipt, latency, circuit status, token expiry metadata
+  when supplied, explicit public Treasury smoke. Not provider quota/fee
+  verification; all actual monetary cost values null, no account entitlement
+  claims. Local switches ATLASPM_ENABLE_<PROVIDER>=0 block applicable gateway
+  and rights-guarded adapter calls; no order permission changes. Public
+  legacy calls remain explicit, not auto-started.
+* Existing external AI public excerpt guard extended to recognized ratings,
+  index and investment-bank source names; all event/credit outputs deny
+  egress, formal training/backtest/live. String-based guards cannot detect
+  intentional source mislabeling. No automatic transmission of licensed
+  data or unreviewed model predictions. Statistical fusion and event-driven
+  model execution still pending.
+
+### Consolidated procurement and configuration (no purchase required now)
+
+Contract/retention/AI processing review before setting ATLASPM_<SOURCE>_RIGHTS.
+For earlier Yahoo/Bloomberg and UW/IBKR variables use the previous checklist.
+All commercial prices below are quote/entitlement dependent unless specifically
+published. No fake pricing, no commitment, no vendor data copied into git.
+
+| Provider / official entry | Required package / auth | Cost and blockers |
+| --- | --- | --- |
+| Yahoo Finance [terms](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) | Licensed news feed, actual authentication/delivery spec | Quote; no official news wire contract available; normalized authorized file only |
+| Bloomberg [Event-Driven Feeds](https://professional.bloomberg.com/products/data/enterprise-catalog/event-driven-feeds/) | Licensed machine-readable news and institutional research, non-display rights | Quote; licensed wire schema and permissions pending |
+| [Unusual Whales API](https://unusualwhales.com/public-api) | UW_TOKEN, authorized option flow + context endpoints; ATLASPM_UW_RIGHTS, ATLASPM_UW_MAX_REQUESTS | Previously documented Starter $99/mo; higher coverage/rates by plan; verify at purchase |
+| [IBKR](https://www.interactivebrokers.com/campus/ibkr-api-page/webapi-doc/) | Existing Gateway login/TLS and actual data entitlement; available lines; no unattended MFA bypass | Exchange/account-specific; no duplicate execution system |
+| [XpressAPI Agency Ratings](https://xpressapi.marketplace.spglobal.com/swagger/) / [request information](https://pages.marketintelligence.spglobal.com/RatingsXpress-Info-Request.html) | Aggregate S&P/Moody's/Fitch issuer & issue rights; XPRESSAPI_TOKEN or XPRESSAPI_USERNAME + XPRESSAPI_PASSWORD; ATLASPM_XPRESSAPI_RIGHTS, ATLASPM_XPRESSAPI_MAX_REQUESTS | Quote; prioritize one aggregate contract, confirm each agency entitlement, no independent vendor purchase by default |
+| Morningstar DBRS / KBRA | Supplement only when coverage gap proven; licensed export and schema | Quote; direct adapter blocked pending spec |
+| Global investment banks | Authorized research distribution, analyst estimates and rating history; each license/firm delivery specs | Quote; no scraping/paywall bypass or invented endpoint |
+| [S&P DJI](https://www.spglobal.com/spdji/en/about-us/data-index-licensing/), [MSCI](https://www.msci.com/eqb/gimi/stdindex/index_review.html), [FTSE Russell](https://solutions.lseg.com/ftse-russell-client-service) | Licensed announcement/constituent/weight feeds, effective dates and vendor IDs | Quote; normalized event intake only until wire specs |
+| [SEC](https://www.sec.gov/search-filings/edgar-application-programming-interfaces) | ATLASPM_SEC_USER_AGENT; companyfacts and submissions JSON | Free public API; fair access, publication/identity validation |
+| [Federal Reserve RSS](https://www.federalreserve.gov/feeds/feeds.htm) / [FRED](https://fred.stlouisfed.org/docs/api/fred/) | Public RSS; FRED_API_KEY for data; series rights review | Public RSS free; FRED series-specific conditions |
+| [Treasury FiscalData](https://fiscaldata.treasury.gov/api-documentation/) | Existing public API | Free, not secondary-market executable price |
+| [FINRA Developer Center](https://developer.finra.org/APICredentials) / [fixed-income terms](https://developer.finra.org/specific-terms-fixed-income-data) | FINRA_CLIENT_ID + FINRA_CLIENT_SECRET; ATLASPM_FINRA_RIGHTS + ATLASPM_FINRA_MAX_REQUESTS; OAuth2 client credentials; exact licensed TRACE dataset | Credential/dataset-specific fees; token adapter only, no bond transaction query yet |
+| [MSRB data subscription](https://www.msrb.org/Market-Data-and-Research/Data-Subscription-Services-and-Products) | EMMA/RTRS applicable subscription, licensed delivery schema | Public EMMA access differs from paid realtime feed; quote/fee schedule, direct data adapter blocked |
+| Local history & Massive | Existing archive; optional MASSIVE_API_KEY for historical only | No repeat download or realtime purchase; separate RC rights/PIT certification |
+| OpenAI / Claude / Gemini | Existing API keys and explicit external public evidence egress opt-in | Usage-based, model-specific; no commercial feed egress by default |
+
+No fees estimated for unavailable contracts. The actual procurement decision
+must include written non-display/internal research, historical retention,
+derived data and external AI/training rights. A public website or Terminal
+subscription does not prove machine-readable redistribution rights.
+
+### Concentrated offline acceptance
+
+New tests expected count 1067 (previous confirmed 1054 + 13); this is
+an expectation, not measured. Use prior Windows review checkout flow,
+replace minimum-passed with 1067, leave external AI and Paper opt-in unset.
+No credentials needed and no paid connection should occur in tests.
+Existing workbench extra (Streamlit) needed only to open API page; use
+`python -m streamlit run src/atlaspm/research_dashboard.py --server.address 127.0.0.1`
+from the review checkout. Do not expose dashboard to public networks.
+After legitimate credentials are configured, an explicit aggregate ratings
+schema smoke:
+`python -m atlaspm.research.credit_intelligence --scope issuer --identifier-type LEI --identifier <reviewed-LEI> --as-of <date>`
+(or --login with username/password configured; do not include keys in CLI).
+Only sanitized aggregate evidence printed; no live API test run here.
+FINRA OAuth and all paid feed smoke require separate operator action.
+Official documented schemas are candidates until tested against entitled
+responses. Formal training, formal backtest, automated live remain disabled.

@@ -516,7 +516,7 @@ class Gateway:
                     "circuit_open": self._clock() < state.blocked_until,
                     "credential_configured": bool(os.environ.get(key_env)) if key_env else
                         (bool(os.environ.get("ATLASPM_SEC_USER_AGENT")) if name == "sec" else True),
-                    "rights_status": spec.rights if spec else "external_processing_review_required",
+                    "rights_status": spec.rights if spec else ("operator_attested_not_independently_verified" if name=="finra" else "external_processing_review_required"),
                     "cost_usd": None,  # do not infer subscription/overage costs
                 }
         return result

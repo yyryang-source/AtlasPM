@@ -40,7 +40,7 @@ def _text(v):
     return v
 
 
-def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENCIES[-1], gateway=DEFAULT_GATEWAY, session=None):
+def fetch_ratings(scope, identifier_type, identifiers, *, as_of, start_date=None, agencies=_AGENCIES[-1], gateway=DEFAULT_GATEWAY, session=None):
     local_rights("xpressapi")
     pattern = _ID_TYPES.get(scope,{}).get(identifier_type)
     if (pattern is None or not isinstance(identifiers,(tuple,list)) or not 1<=len(identifiers)<=50
@@ -50,8 +50,16 @@ def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENC
     day=date.fromisoformat(as_of)
     if day>date.today():
         raise ValueError("Future rating query")
-    query=urlencode({"identifierType":identifier_type,"identifierValues":",".join(identifiers),
-                     "creditRatingAgency":agencies,"asOfDate":day.isoformat()})
+    params={"identifierType":identifier_type,"identifierValues":",".join(identifiers),
+            "creditRatingAgency":agencies}
+    if start_date is None:
+        params["asOfDate"]=day.isoformat()
+    else:
+        first=date.fromisoformat(start_date)
+        if not first<=day or (day-first).days>366:
+            raise ValueError("Historical rating request capped at 367 calendar days")
+        params.update(startDate=first.isoformat(),endDate=day.isoformat())
+    query=urlencode(params)
     if session is not None and session.gateway is not gateway:
         raise ValueError("Token session must share the same gateway and budget")
     token=session.access() if session is not None else None
@@ -98,7 +106,7 @@ def fetch_ratings(scope, identifier_type, identifiers, *, as_of, agencies=_AGENC
                                  "agency_issue_id":entry.get("rxMaturityId",entry.get("issueId")),
                                  "published_at":None,"first_available_at":None})
     return {**_FLAGS,"provider":"xpressapi","model":"agency_ratings_schema_v1",
-            "as_of_date":day.isoformat(),"transport":response.evidence(),"ratings":rows,
+            "as_of_date":day.isoformat(),"history_start_date":start_date,"transport":response.evidence(),"ratings":rows,
             "missing_identifiers":sorted(set(identifiers)-seen),
             "coverage_complete":False,"total_pages_reported":body.get("totalPages"),
             "cross_agency_basis_verified":False}
@@ -152,3 +160,48 @@ class XpressSession:
         with self._lock:
             self._access=self._refresh=None
             self._expires=0.0
+
+
+def review_actions(report):
+    """Classify explicit vendor action text; never infer default from withdrawal."""
+    results=[]
+    mapping={"upgrade":"upgrade","downgrade":"downgrade","withdrawal":"withdrawal",
+             "withdrawn":"withdrawal","affirmed":"affirmation","affirmation":"affirmation",
+             "new rating":"new_rating","new":"new_rating","default":"default"}
+    for row in report["ratings"]:
+        action=mapping.get((row.get("action_raw") or "").strip().casefold(),"unclassified")
+        results.append({"agency":row["agency"],"identifier":row["identifier"],"scope":row["scope"],
+                        "rating":row["rating"],"rating_type":row["rating_type"],
+                        "effective_raw":row["effective_raw"],"action":action,
+                        "watch_outlook_raw":row.get("watch_outlook_raw"),
+                        "credit_review_requested":action in {"downgrade","withdrawal","default"},
+                        "default_probability":None,"cross_asset_price_impact":None})
+    return {**_FLAGS,"model":"credit_action_rules_v1","transport":report["transport"],"actions":results}
+
+
+def main():
+    from argparse import ArgumentParser
+    import json
+    parser=ArgumentParser(description=__doc__)
+    parser.add_argument("--scope",choices=("issuer","issue"),required=True)
+    parser.add_argument("--identifier-type",required=True)
+    parser.add_argument("--identifier",action="append",required=True)
+    parser.add_argument("--as-of",required=True)
+    parser.add_argument("--start-date")
+    parser.add_argument("--login",action="store_true",help="Explicit in-memory login; otherwise use XPRESSAPI_TOKEN")
+    args=parser.parse_args()
+    session=XpressSession() if args.login else None
+    try:
+        report=fetch_ratings(args.scope,args.identifier_type,args.identifier,as_of=args.as_of,
+                             start_date=args.start_date,session=session)
+        # No proprietary rating values or private identifiers on stdout.
+        summary={k:v for k,v in report.items() if k not in {"ratings","missing_identifiers"}}
+        summary.update(rating_count=len(report["ratings"]),missing_identifier_count=len(report["missing_identifiers"]))
+        print(json.dumps(summary,indent=2))
+    finally:
+        if session:
+            session.clear()
+
+
+if __name__=="__main__":
+    main()
