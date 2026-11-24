@@ -183,6 +183,67 @@ for training or live trading by the audit.
 
 This is a local research data inspection, not a performance backtest.
 
+## Full-history offline quality audit V2 (resumable, 315 months)
+
+After locally confirming the 315 month-level 5m Parquet and conversion QC
+files for 2000-01 through 2026-03 exist, run a **read-only** quality scan.
+This work reads only the local converted Parquet and local conversion QC;
+it neither downloads the original dataset nor changes any price record,
+trading permissions, or training eligibility.
+
+~~~powershell
+cd C:\Users\Kevin\Desktop\AtlasPM
+git switch main
+git pull --ff-only origin main
+$py = ".\.venv\Scripts\python.exe"
+& $py -m pip install -e ".[lake,calendar,hf]"
+
+# Verify planned coverage without any Parquet scans or network:
+& $py -m atlaspm.cli market-db hf-5m-audit-batch --dry-run
+
+# Initial small scan, to inspect first two months:
+& $py -m atlaspm.cli market-db hf-5m-audit-batch --start-month 2000-01 --end-month 2000-02
+
+# All 315 published months (or resume a prior interrupted run):
+& $py -m atlaspm.cli market-db hf-5m-audit-batch
+
+# Force a full re-audit after upgrading QC logic (no downloads):
+& $py -m atlaspm.cli market-db hf-5m-audit-batch --no-resume
+~~~
+
+Monthly audit results remain at
+`local_data/stock_5m/huggingface/quality/audits/session=rth/YYYY-MM.json`.
+The aggregate summary and per-month CSV are stored under
+`local_data/stock_5m/huggingface/quality/batch/session=rth/` as
+`latest_summary.json` and `latest_months.csv`. Per-month metadata
+checkpoints live under the same directory in `months/`, so interruption
+does not discard finished checks. Each resumed month checks source Parquet
+size/mtime, QC metadata size/mtime, and a SHA-256 hash of the small
+monthly audit JSON. This is **cache invalidation, not cryptographic
+verification of the source Parquet**: when provenance changes without file
+metadata changes, use `--no-resume` to force a fresh scan.
+
+Statuses are `REVIEW_REQUIRED` (structurally audited, still unverified),
+`STRUCTURAL_QC_FAILED` (actual structural issue found), `MISSING_FILE`
+(no local converted Parquet), and `AUDIT_ERROR` (audit did not finish).
+Failures and missing partitions are not cached as successes and do not block
+auditing subsequent months. Whole missing NYSE sessions appear as review
+reasons; they are distinct from evidence of corrupted OHLCV rows. An absent
+current-day issuer/ticker does not automatically indicate a source outage:
+historical IPO dates, ticker reuse and delisted identities need a separate
+point-in-time reference.
+
+The aggregate report includes selected/audited month counts, per-month
+statuses, missing market sessions, source-anomaly counts, total quarantined
+5-minute buckets, and pointers to inspectable local JSON and CSV.
+`all_months_structurally_audited=true` means only **structural** auditing
+finished without failures. The output always has
+`coverage_verified=false`, `data_rights_verified=false`,
+`historical_point_in_time_membership_verified=false`,
+`approved_for_model_training=false`, `research_only=true`, and
+`live_execution_enabled=false`. Never translate `REVIEW_REQUIRED` into
+a model-training or trading authorization.
+
 ## Independent daily reference comparison
 
 This next check compares selected liquid symbols' local RTH 5m-derived

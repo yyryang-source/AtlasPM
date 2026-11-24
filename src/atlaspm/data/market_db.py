@@ -318,6 +318,13 @@ def register_parser(sub):
     h.add_argument('--month',required=True)
     h.add_argument('--session',choices=['rth','all'],default='rth')
     h.add_argument('--no-save',action='store_true')
+    h=actions.add_parser('hf-5m-audit-batch',help='Offline resumable full-history HF 5m quality audit')
+    h.add_argument('--start-month',default='2000-01')
+    h.add_argument('--end-month',default='2026-03')
+    h.add_argument('--max-months',type=int,default=0)
+    h.add_argument('--session',choices=['rth','all'],default='rth')
+    h.add_argument('--dry-run',action='store_true')
+    h.add_argument('--no-resume',action='store_true')
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -447,6 +454,12 @@ def run(args):
     if args.db_action == 'hf-5m-audit':
         from atlaspm.data import hf_stock5m_audit
         return hf_stock5m_audit.audit(args.month,session=args.session,save=not args.no_save)
+    if args.db_action == 'hf-5m-audit-batch':
+        from atlaspm.data import hf_stock5m_batch
+        return hf_stock5m_batch.run(
+            args.start_month, args.end_month, session=args.session,
+            max_months=args.max_months, resume=not args.no_resume,
+            dry_run=args.dry_run)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':

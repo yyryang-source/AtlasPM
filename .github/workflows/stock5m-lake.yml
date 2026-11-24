@@ -32,6 +32,10 @@ jobs:
         run: python -m atlaspm.cli market-db hf-5m-backfill --start-month 2000-01 --end-month 2026-03 --max-months 0 --dry-run
       - name: Test offline NYSE session and benchmark HF data audit
         run: python -m unittest discover -s tests -p "test_hf_stock5m_audit.py" -v
+      - name: Test resumable offline full-history QC and cache invalidation
+        run: python -m unittest discover -s tests -p "test_hf_stock5m_batch.py" -v
+      - name: Verify full-archive audit CLI plan (no data, no network)
+        run: python -m atlaspm.cli market-db hf-5m-audit-batch --start-month 2000-01 --end-month 2026-03 --dry-run
 
       - name: Verify independent daily reconciliation without remote requests
         run: python -m unittest discover -s tests -p "test_hf_stock5m_reconcile.py" -v
