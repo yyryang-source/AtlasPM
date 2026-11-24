@@ -380,6 +380,19 @@ def register_parser(sub):
     h.add_argument('--per-event',type=int,default=5)
     h.add_argument('--max-requests',type=int,default=20)
     h.add_argument('--fetch',action='store_true')
+    t=actions.add_parser('training-dataset-v6',help='Build real-data research samples; training remains blocked')
+    t.add_argument('--start-month',required=True)
+    t.add_argument('--end-month',required=True)
+    t.add_argument('--features',nargs='+',default=['mom_5d','mom_21d','volatility_21d','price_vs_sma_20d','volume_ratio_20d'])
+    t.add_argument('--horizons',nargs='+',type=int,default=[1,5,21])
+    t.add_argument('--minimum-train-sessions',type=int,default=60)
+    t.add_argument('--test-sessions',type=int,default=20)
+    t.add_argument('--embargo-sessions',type=int,default=1)
+    t.add_argument('--memory',default='2GB')
+    t.add_argument('--threads',type=int,default=2)
+    t.add_argument('--plan-only',action='store_true')
+    t=actions.add_parser('training-dataset-inspect-v6',help='Verify local research dataset hashes')
+    t.add_argument('--dataset-id',required=True)
     # Offline, source-isolated daily factor mart; no new top-level CLI family.
     f = actions.add_parser('factor-catalog', help='List documented equity factors')
     for name in ('factor-status', 'factor-build', 'factor-audit', 'factor-query', 'factor-batch'):
@@ -557,6 +570,14 @@ def run(args):
         return discovery.investigate(args.month,max_events=args.max_events,
                                      per_event=args.per_event,fetch=args.fetch,
                                      max_requests=args.max_requests)
+    if args.db_action in ('training-dataset-v6','training-dataset-inspect-v6'):
+        from atlaspm.research import real_dataset_v6 as dataset
+        if args.db_action == 'training-dataset-inspect-v6':
+            return dataset.inspect(args.dataset_id)
+        return dataset.build(args.start_month,args.end_month,features=args.features,
+                             horizons=args.horizons,minimum_train_sessions=args.minimum_train_sessions,
+                             test_sessions=args.test_sessions,embargo_sessions=args.embargo_sessions,
+                             memory=args.memory,threads=args.threads,plan_only=args.plan_only)
     if args.db_action.startswith('hf-5m-'):
         from atlaspm.data import hf_stock5m
         if args.db_action == 'hf-5m-status':
