@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -305,6 +305,14 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             else:
                 archive.append("adaptive_ensemble",rows)
     metrics={m:_metrics(archive.rows(m) if archive is not None else rows) for m,rows in predictions.items()}
+    monitoring_report=None
+    if monitoring is not None:
+        if not isinstance(monitoring,dict):
+            raise ValueError("INVALID_MONITOR_CONFIG")
+        from atlaspm.research.training_monitor import monitor_predictions
+        monitoring_report=monitor_predictions(
+            {m:archive.rows(m) if archive is not None else rows for m,rows in predictions.items()},
+            **monitoring)
     if archive is not None:
         archive.finalize()
     return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
@@ -315,6 +323,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 compact_sample_numeric_bytes=samples.numeric_bytes,
                 prediction_archive_path=str(archive.path) if archive is not None else None,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
+                monitoring=monitoring_report,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
                 model_artifact_storage=str(artifact_store.path) if artifact_store is not None else None,

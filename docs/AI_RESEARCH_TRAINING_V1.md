@@ -123,3 +123,7 @@ device and training configuration must be used. The loader uses PyTorch's
 restricted weights-only deserialization for local checkpoints; do not import
 untrusted databases. Interrupted partial epochs restart from the preceding
 completed epoch. CPU replay is tested; CUDA reproducibility is not guaranteed.
+
+### Maturity-aware monitoring
+
+Set `"monitoring": {"window_dates": 30, "minimum_dates": 10, "coverage": 0.9, "baseline": "historical_mean"}` to produce chronological rolling MAE, reference-window drift alerts, residual-based interval half-widths and a research-only champion comparison. Only label blocks whose final maturity is strictly before the prediction date enter calibration and selection. The baseline must be included among predictions. Daily maximum absolute residuals calibrate a cross-sectional band; coverage is descriptive and is not guaranteed under dependence or regime changes. No automatic model admission or execution is enabled.
