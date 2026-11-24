@@ -54,7 +54,7 @@ def inventory(gateway=DEFAULT_GATEWAY):
                 "bearer" if name in {"xpressapi","unusual_whales","massive","openai","anthropic"} else
                 "api_key" if name in {"fred","gemini"} else "contact_header" if name=="sec" else "none",
             "calls":state.get("calls",0),"success_rate":state.get("success_rate"),
-            "last_success_utc":state.get("last_success_utc"),"latency_seconds":state.get("last_latency_seconds"),
+            "last_success_utc":state.get("last_success_utc"),"last_latency_seconds":state.get("last_latency_seconds"),
             "last_status":state.get("last_status","NOT_CONTACTED"),"circuit_open":state.get("circuit_open",False),
             "cost_usd":None,"subscription_quota_verified":False,"connection_verified":False})
     return result
