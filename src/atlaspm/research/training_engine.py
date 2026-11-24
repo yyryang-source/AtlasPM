@@ -6,10 +6,17 @@ import json
 from math import sqrt
 from pathlib import Path
 from statistics import fmean
-from atlaspm.research.training_dataset import build_panel, purged_folds
+from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
+
+
+def _fingerprint(payload):
+    digest=hashlib.sha256()
+    for chunk in json.JSONEncoder(sort_keys=True,separators=(",",":"),allow_nan=False).iterencode(payload):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _correlation(a,b):
@@ -69,8 +76,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
     if any(m in SEQUENCE_MODELS for m in models) and sequence_length < 2:
         raise ValueError('SEQUENCE_MODELS_REQUIRE_MULTIPLE_SESSIONS')
-    panel=build_panel(payload,horizon,sequence_length)
-    folds=purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
+    panel=build_panel(payload,horizon,sequence_length,compact=True)
+    folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions)
     try:
         import numpy as np
@@ -87,7 +94,7 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     predictions={m:[] for m in models}
     model_settings={}
     audit=[]
-    fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+    fingerprint=_fingerprint(payload)
     config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
@@ -127,11 +134,16 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         mean=x.mean(axis=0)
         scale=x.std(axis=0)
         scale=np.where(scale>1e-12,scale,1.)
-        z=(x-mean)/scale
+        x-=mean
+        x/=scale
+        z=x
         intercept=float(y.mean())
         coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
         test=np.asarray([r["x"] for r in test_rows],dtype=float)
-        ridge=((test-mean)/scale)@coef+intercept
+        test-=mean
+        test/=scale
+        ridge=test@coef+intercept
+        sequence_train=sequence_test=None
         for name in models:
             if name=="ridge":
                 values=ridge
@@ -140,12 +152,19 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 values=np.full(len(test_rows),intercept)
                 settings={}
             elif name in SEQUENCE_MODELS:
-                values,settings=fit_sequence(name,np.asarray([r["sequence"] for r in train_rows]),y,
-                                             np.asarray([r["sequence"] for r in test_rows]),seed,
+                if sequence_train is None:
+                    def materialize(rows):
+                        arr=np.empty((len(rows),sequence_length,len(panel["feature_names"])),dtype=np.float64)
+                        for i,row in enumerate(rows):
+                            arr[i]=sequence_for(panel,row)
+                        return arr
+                    sequence_train=materialize(train_rows)
+                    sequence_test=materialize(test_rows)
+                values,settings=fit_sequence(name,sequence_train,y,sequence_test,seed,
                                              epochs=sequence_epochs,device=device,batch_size=batch_size,
                                              mixed_precision=mixed_precision)
             else:
-                values,settings=fit_predict(name,z,y,(test-mean)/scale,seed)
+                values,settings=fit_predict(name,z,y,test,seed)
             model_settings[name]=settings
             for row,value in zip(test_rows,values):
                 base={k:row[k] for k in ("security_id","date","label_end_date")}
@@ -187,7 +206,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file",required=True,type=Path)
     args=parser.parse_args()
-    print(json.dumps(train(**json.loads(args.file.read_text(encoding="utf-8"))),indent=2,allow_nan=False))
+    import sys
+    json.dump(train(**json.loads(args.file.read_text(encoding="utf-8"))),sys.stdout,indent=2,allow_nan=False)
+    print()
 
 
 if __name__=="__main__":
