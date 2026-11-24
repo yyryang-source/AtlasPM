@@ -271,3 +271,64 @@ versions are retained. This is synthetic research only and does not
 demonstrate actual market alpha or authorize real model training.
 The existing fixed-model experiment, model artifact registry and
 ensemble implementations remain intact.
+
+
+## V6.3–V6.5 unified synthetic search and lifecycle
+
+Use training_autonomy with a single JSON request:
+
+~~~powershell
+& $py -m atlaspm.research.training_autonomy --file local_data/autonomy.json
+~~~
+
+Example request structure (payload is the existing explicitly synthetic
+panel object, not a real-data V6 manifest):
+
+~~~json
+{
+  "config": {"horizon": 5, "minimum_train_sessions": 20,
+             "test_sessions": 5, "embargo_sessions": 1},
+  "spaces": [
+    {"model": "historical_mean", "grid": {}},
+    {"model": "ridge", "grid": {"ridge_alpha": [0.1, 1, 10]}},
+    {"model": "random_forest", "grid": {"n_estimators": [32, 64],
+                                       "max_depth": [3, 5]}}
+  ],
+  "holdout_start": 46,
+  "budget": 8,
+  "search_seed": 42,
+  "selection_metric": "mean_daily_rank_ic",
+  "ensemble": {"window_dates": 20, "minimum_dates": 5},
+  "regime_ensemble": {"market": {"lookback": 20}, "weights": {}},
+  "monitoring": {"window_dates": 20, "minimum_dates": 5},
+  "patience": 3,
+  "cooldown_dates": 10
+}
+~~~
+
+Include payload before execution, with enough sessions for the specified
+holdout and label horizon. Grid keys features (list of feature-name
+lists), ridge_alpha and sequence_epochs select explicit candidates;
+other keys are model-specific bounded parameters from training_models.
+The search is deterministic, model-balanced finite-grid sampling, at
+most 4096 raw combinations and 32 evaluated candidates. It is not Bayesian
+optimization. Feature selection is limited to explicit subsets, compared
+using the same pre-holdout prediction universe. The seed is fixed, not
+tuned. The estimator architecture and single-thread controls remain fixed.
+
+The pipeline selects using prefix-only trials, then evaluates the selected
+estimator and historical mean in one full-panel walk-forward pass. The
+existing adaptive and optional regime-conditioned ensemble only use
+matured errors. Monitoring and ensemble settings are fixed before the
+holdout, not selected using holdout outcomes. The monitor reports coverage,
+error drift and research champion candidates. Repeated drift can emit
+review requests with patience and cooldown; it does not autonomously
+change live models or execute a new drift-triggered fit. Scheduled
+walk-forward refits are actual research fits. Existing incremental Ridge,
+artifact and checkpoint APIs remain available separately.
+
+The output keeps summaries, model configuration, selected features,
+holdout metrics, weight history and retraining review requests rather
+than duplicate prediction arrays. The V6 real dataset is still blocked
+from this synthetic runner. Full certification, economic strategy
+evaluation and deployment controls are separate prerequisites.
