@@ -35,7 +35,32 @@ def versions(models):
     return result
 
 
-def fit_predict(name, x, y, test, seed, *, capture_weights=None):
+# Bounded hyperparameters only; preserve existing artifact architecture and
+# single-threaded estimator settings. No arbitrary constructor arguments.
+PARAMETERS = {
+    "elastic_net":{"alpha":(float,1e-8,10.),"l1_ratio":(float,0.,1.)},
+    "random_forest":{"n_estimators":(int,8,256),"max_depth":(int,2,12),"min_samples_leaf":(int,1,64)},
+    "lightgbm":{"n_estimators":(int,8,256),"num_leaves":(int,3,63),"min_child_samples":(int,2,128),"learning_rate":(float,.001,.3)},
+    "xgboost":{"n_estimators":(int,8,256),"max_depth":(int,2,10),"learning_rate":(float,.001,.3)},
+    "catboost":{"iterations":(int,8,256),"depth":(int,2,8),"learning_rate":(float,.001,.3)},
+    "mlp":{"alpha":(float,1e-6,10.),"max_iter":(int,50,1000)},
+}
+
+
+def validate_parameters(name, params):
+    if not isinstance(params,dict) or set(params)-set(PARAMETERS.get(name,{})):
+        raise ValueError("INVALID_MODEL_PARAMETERS:"+name)
+    result={}
+    for key,value in sorted(params.items()):
+        kind,low,high=PARAMETERS[name][key]
+        if (type(value) not in ((int,) if kind is int else (int,float))
+                or not isfinite(value) or not low<=value<=high):
+            raise ValueError("MODEL_PARAMETER_OUT_OF_RANGE:"+name+":"+key)
+        result[key]=kind(value)
+    return result
+
+
+def fit_predict(name, x, y, test, seed, *, capture_weights=None, parameters=None):
     """Fit only the provided training fold. Fixed settings, no OOS tuning."""
     if name == "elastic_net":
         from sklearn.linear_model import ElasticNet
@@ -65,6 +90,9 @@ def fit_predict(name, x, y, test, seed, *, capture_weights=None):
                                   allow_writing_files=False)
     else:
         raise ValueError("UNKNOWN_OPTIONAL_MODEL")
+    params=validate_parameters(name,{} if parameters is None else parameters)
+    if params:
+        model.set_params(**params)
     # Normalize the target using training labels only; especially important
     # for neural models predicting small daily returns.
     import numpy as np
