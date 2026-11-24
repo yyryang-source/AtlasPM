@@ -167,10 +167,12 @@ def sequence_for(panel,row):
     return [panel["observations"][j][sid][1] for j in range(i-length+1,i+1)]
 
 
-def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0):
+def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0, training_window_sessions=None):
     for v,lo in ((minimum_train_sessions,1),(test_sessions,1),(embargo_sessions,0)):
         if type(v) is not int or v<lo:
             raise ValueError("INVALID_FOLD_CONFIG")
+    if training_window_sessions is not None and (type(training_window_sessions) is not int or not minimum_train_sessions<=training_window_sessions<=5000):
+        raise ValueError("INVALID_TRAINING_WINDOW")
     horizon=panel["horizon"]
     samples=panel.get("prediction_samples",panel["samples"])
     end=len(panel["dates"])-horizon
@@ -191,12 +193,15 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
         raise ValueError("INSUFFICIENT_SESSIONS_FOR_FOLDS")
     for start in range(first,end,test_sessions):
         stop=min(start+test_sessions,end)
-        cutoff=offsets[max(0,start-embargo_sessions-horizon)]
+        cutoff_session=max(0,start-embargo_sessions-horizon)
+        cutoff=offsets[cutoff_session]
+        lower=offsets[max(0,cutoff_session-training_window_sessions)] if training_window_sessions is not None else 0
         if isinstance(samples,CompactSamples) and isinstance(panel['samples'],IndexedRows):
             valid=panel['samples'].indices
-            train=IndexPrefix(valid,bisect_left(valid,cutoff))
+            lo=bisect_left(valid,lower)
+            train=IndexPrefix(valid,bisect_left(valid,cutoff)-lo,start=lo)
         else:
-            train=[i for i in range(cutoff) if samples[i]['y'] is not None]
+            train=[i for i in range(lower,cutoff) if samples[i]['y'] is not None]
         test=range(offsets[start],offsets[stop])
         if not train or not test:
             raise ValueError("EMPTY_PURGED_FOLD")

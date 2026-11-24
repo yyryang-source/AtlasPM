@@ -153,9 +153,10 @@ class IndexedRows(Sequence):
 
 class IndexPrefix(Sequence):
     """Zero-copy expanding-window prefix over sorted valid sample indices."""
-    def __init__(self,indices,length):
+    def __init__(self,indices,length,*,start=0):
         self.indices=indices
         self.length=length
+        self.start=start
 
     def __len__(self):
         return self.length
@@ -167,4 +168,4 @@ class IndexPrefix(Sequence):
             i+=self.length
         if not 0<=i<self.length:
             raise IndexError(i)
-        return self.indices[i]
+        return self.indices[self.start+i]

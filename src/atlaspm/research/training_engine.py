@@ -108,7 +108,7 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, next_session=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, next_session=None, training_window_sessions=None):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -123,6 +123,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         raise ValueError('EPOCH_CHECKPOINT_REQUIRES_SEQUENCE_MODEL')
     if type(incremental_ridge) is not bool or (incremental_ridge and set(models)-{'ridge','historical_mean'}):
         raise ValueError('INCREMENTAL_RIDGE_REQUIRES_LINEAR_BASELINES')
+    if incremental_ridge and training_window_sessions is not None:
+        raise ValueError('ROLLING_WINDOW_REQUIRES_FULL_REFIT')
     artifact_store=None
     if model_artifact_path is not None:
         from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
@@ -136,7 +138,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     if model_artifact_path is not None:
         artifact_store=ModelArtifacts(model_artifact_path)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
-                       test_sessions=test_sessions,embargo_sessions=embargo_sessions)
+                       test_sessions=test_sessions,embargo_sessions=embargo_sessions,training_window_sessions=training_window_sessions)
     try:
         import numpy as np
     except ImportError as exc:
@@ -161,6 +163,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if training_window_sessions is not None:
+        config['training_window_sessions']=training_window_sessions
     if next_session is not None:
         config['next_session']=next_session
     if incremental_ridge:
