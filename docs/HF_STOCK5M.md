@@ -413,3 +413,47 @@ Logs and a durable summary are private, under:
 Do not push local_data/ or the source data to GitHub. No background
 execution is performed by ChatGPT: this command runs only on your
 Windows computer while PowerShell is executing.
+
+
+## V4 offline session diagnostics (non-destructive)
+
+The original RTH converter uses a fixed 09:30–16:00 ET envelope. The
+canonical file is deliberately unchanged: it is not a certified
+exchange-session dataset. V4 uses the exact historical NYSE calendar
+already used by V3 and reports the mismatch by date and category.
+
+PowerShell from the repository root:
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m unittest discover -s tests -p "test_hf_stock5m_session_v4.py" -v
+& $py -m atlaspm.cli market-db hf-5m-session-v4 --dry-run
+& $py -m atlaspm.cli market-db hf-5m-session-v4
+~~~
+
+Default targets are failed, partial-boundary, missing or old-schema audit
+months; other V3 review months are listed as skipped, not newly verified.
+Use --all-months to explicitly scan every selected partition. No downloads
+or raw-file modifications occur. The summary is stored under
+local_data/stock_5m/huggingface/quality/session_v4/latest.json.
+It contains counts by category/date, the source size/mtime signature,
+calendar SHA-256, reconciliation against V3 counts, and unresolved
+structural issues. Size/mtime is not a cryptographic source hash.
+A count match is not a content identity proof. Prior audit files and
+their structural-failure statuses are not rewritten.
+
+Python consumers may explicitly call
+hf_stock5m_session_v4.install_research_view(connection, month).
+This creates a temporary DuckDB view named v4_research_bars containing
+only buckets wholly inside the NYSE reference session, with a
+bar_available_at_ms column equal to the bucket end (not a verified
+vendor publication timestamp). Partial buckets are excluded, not
+reconstructed from unknown minute composition. The view is a candidate
+session projection, not an OHLCV/identity-certified dataset. It does not
+silently replace existing factor or training inputs. Use one connection
+per active month or reinstall the view for each month.
+
+Historical listing venue/PIT identity, independent reference comparison,
+corporate actions and licensing still require real evidence. V4 never
+sets training or live-execution approval. After-close and non-NYSE-date
+categories are calendar disagreements, not proof of bad prices.
