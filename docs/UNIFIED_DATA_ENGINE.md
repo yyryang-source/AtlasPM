@@ -158,3 +158,144 @@ Python allocation peak and OS process lifetime peak RSS (Windows working
 set / Linux or macOS resource usage). Peak RSS includes interpreter/native
 allocations and is not the query's isolated memory usage. No measured
 performance improvement is claimed until actual reports are available.
+
+
+## Final acceptance audit — 2026-11-24
+
+Baseline PR #94 at 70792ed: six workflows passed (Unified reader, selection,
+factor database, portfolio, stock lake and historical replay); AI research
+still running and Python checks queued at the latest baseline observation.
+These are historical observations, not approval of subsequent commits.
+The release remains draft and main unchanged. See current PR head CI.
+
+Review corrections: 3153b1c validates synthetic metadata at trainer entry
+and rejects caller-supplied prepared panels at public training entrypoints;
+canonical preflight checks the same manifest before and after scanning,
+checks factor lineage again and eliminates an extra manifest scan. V6
+build/inspect/preflight explicitly deny formal training, formal backtest,
+registry and broker order privileges. Python is not a security sandbox:
+a caller rewriting the code or disguising actual observations as synthetic
+is outside this API contract. c9f8a78 adds OS process I/O metrics and optional
+untraced benchmark execution. 41bc6a7 adds an actual fixture subprocess
+benchmark assertion, source file footprint for emitted batches and a
+deterministic ID even for blocked quality reports.
+
+### Source verification register
+
+Public-source review on 2026-11-24:
+- https://huggingface.co/datasets/mito0o852/OHLCV-1m states Finnhub origin,
+  monthly Parquet and minute start timestamps. No stable listing ID, original
+  publication/revision timestamps or independent proof of completeness are
+  established by the card. Its hosted viewer reports incompatible file formats.
+- https://finnhub.io/terms-of-service restricts redistribution, derived result
+  sharing and business use without appropriate permission. A public mirror,
+  a code license, and matching file hashes do not establish data-use rights.
+  Obtain applicable written authorization/contract and retention terms before
+  processing or sharing restricted data; no legal entitlement is inferred.
+- SEC historical index and filing body evidence: historical membership/action
+  coverage, accepted timestamps and source-independent corroboration remain
+  unverified in local files. A filing date is not an intraday release time.
+- Alpha Vantage listing observations: historical completeness, date semantics,
+  access rights and independent corroboration remain unverified.
+- Yahoo via unofficial yfinance: adjusted-close basis, revisions and use
+  rights remain unverified; sample agreement is not independent certification.
+- Massive option data: entitlement, contract lifecycle, timestamp availability,
+  adjustment and quote completeness remain unverified.
+- Treasury Fiscal Data and local bond/IBKR captures: actual source records,
+  revisions, contract mappings, entitlements and capture freshness remain
+  unverified for this release. Real-time equity, macro and other unconnected
+  catalog entries remain unavailable through the unified reader.
+
+No local archive, independent reference CSV, provider agreement, or real
+reviewed ledger was available in this GitHub review environment. No actual
+production data quality pass, licensing pass, PIT approval, or measured
+production throughput is claimed. Do not share market data or derived
+reports outside the authorized scope. No formal training/backtest or live
+orders are approved.
+
+### Call-chain and resource acceptance
+
+market-db training-dataset-v6 -> research.data_admission.build_research_dataset
+-> real_dataset_v6.build -> unified_pipeline.factor_preflight before/after
+-> existing factor_db and Parquet -> existing V6 content-bound manifest.
+market-db training-preflight-v61 -> data_admission.inspect_research_dataset
+-> real_dataset_preflight_v61.run -> inspect / source and feature comparison /
+label reconciliation / purged fold counts / final manifest and lineage check.
+Actual feature availability, historical identifier completeness and total
+return are not proven; the V6 labels remain exploratory close-to-close
+symbol-based price returns. Synthetic JSON and Parquet trainers check the
+existing metadata and reject externally supplied prepared panels. No
+positive real-data admission path exists.
+
+The older training_admission audit still serves source-specific calendar and
+volume diagnostics, including SQLite. Do not delete it merely because some
+checks overlap with unified factor preflight. Existing 66 shims and historical
+benchmarks are retained until dependency and regression evidence supports
+removal. Source audit identifies structural errors and exact duplicate-body
+candidates; it is not proof that all semantically redundant code is absent.
+Monthly historical quality review materializes the visible ledger per session;
+hashing and final lineage checks intentionally trade I/O for correctness.
+Measure before further optimization. DuckDB memory setting is not a hard
+whole-process cap.
+
+### Single local validation procedure
+
+Run in the review checkout against the latest fetched #94 head. No new virtual
+environment, downloads, order submission, or model training on actual data.
+Software gate must pass with zero skips. If optional dependencies are absent,
+install the same optional extras as the release CI using the existing
+environment, then rerun the full gate; do not reduce the gate. Actual local
+data steps require authorized access and a stable, completed archive. Use
+one representative month first (2000-02 is an example, not verified coverage).
+Keep all logs local and share only non-sensitive aggregate results as permitted.
+
+```powershell
+& {
+    $ErrorActionPreference = "Stop"
+    $root = "C:\Users\Kevin\Desktop\AtlasPM"
+    $review = "C:\Users\Kevin\Desktop\AtlasPM-data-review"
+    $py = Join-Path $root ".venv\Scripts\python.exe"
+    $month = "2000-02"
+    $authorizedLocalReview = $false # Set true only if the applicable data rights permit this use.
+    Set-Location $review
+    git fetch origin
+    if ($LASTEXITCODE -ne 0) { throw "Fetch failed" }
+    git switch --detach origin/integration/final-data-research
+    if ($LASTEXITCODE -ne 0) { throw "Switch failed" }
+    $env:PYTHONPATH = Join-Path $review "src"
+    Remove-Item Env:ATLASPM_ALLOW_PAPER_ORDERS -ErrorAction SilentlyContinue
+    $head = git rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Git head failed" }
+    & $py -m pip check
+    if ($LASTEXITCODE -ne 0) { throw "Dependency check failed" }
+    $out = Join-Path $root ("local_data\release_validation\" + $head)
+    New-Item -ItemType Directory -Force $out | Out-Null
+    & $py scripts/maintenance/verify_release.py --minimum-passed 742 > (Join-Path $out "software.json")
+    if ($LASTEXITCODE -ne 0) { throw "Software release gate failed: $out" }
+    Write-Host "SOFTWARE GATE PASSED (not data certification): $head" -ForegroundColor Green
+    if (-not $authorizedLocalReview) {
+        Write-Host "REAL DATA STAGE NOT RUN: authorization not confirmed"
+        return
+    }
+    Set-Location $root
+    $first = "$month-01"
+    $last = (Get-Date -Date $first).AddMonths(1).AddDays(-1).ToString("yyyy-MM-dd")
+    & $py -m atlaspm.data.unified_pipeline factor-preflight --start-month $month --end-month $month > (Join-Path $out "factor.json")
+    $factorExit = $LASTEXITCODE
+    & $py -m atlaspm.data.quality_review --month $month > (Join-Path $out "quality.json")
+    $qualityExit = $LASTEXITCODE
+    & $py (Join-Path $review "scripts/maintenance/benchmark_unified_data.py") --dataset equity_5m --start $first --end $last --column close --memory 256MB --threads 1 --no-tracemalloc > (Join-Path $out "benchmark.json")
+    $benchmarkExit = $LASTEXITCODE
+    [PSCustomObject]@{ Commit=$head; Software=$true; FactorExit=$factorExit; QualityExit=$qualityExit; BenchmarkExit=$benchmarkExit; DataCertified=$false; Reports=$out } | Format-List
+}
+```
+
+A quality-review exit of zero means the report was emitted, not that the
+data are certified. Windows I/O transfer counters include non-disk I/O;
+Linux process accounting distinguishes logical and storage bytes. Neither
+establishes device-level activity or peak spill space. Emitted source file
+bytes are the footprint of files producing batches, not actual bytes read,
+nor the whole archive. Use identical workloads/cache conditions and record
+hardware before performance comparisons. Latest-head CI and actual local
+results are still required before final release review. No merge based on
+the old green workflows.
