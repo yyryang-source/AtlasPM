@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import date, datetime, timezone
@@ -29,6 +30,12 @@ BROKER_STATUS = {
 TERMINAL = {"filled", "cancelled", "rejected", "expired"}
 SIDES = {"B": "BUY", "S": "SELL", "BUY": "BUY", "SELL": "SELL"}
 
+# Fixed, conservative USD limit-ticket notional limits; no CLI override.
+PAPER_ACCOUNT_PATTERN = re.compile(r"DU[0-9]{1,20}")
+MAX_PAPER_ORDER_SHARES = 1_000
+MAX_PAPER_ORDER_NOTIONAL = Decimal("25000")
+MAX_PAPER_BATCH_NOTIONAL = Decimal("100000")
+
 
 def _broker_status(value: object) -> str:
     return BROKER_STATUS.get(re.sub(r"[\s_-]", "", str(value)).lower(), "unknown")
@@ -51,10 +58,37 @@ def _check_ticket(ticket: dict) -> None:
         raise ValueError("Expected an AtlasPM whole-share DAY limit ticket")
 
 
+def _require_submit_authorization(account_id: str) -> None:
+    if not isinstance(account_id, str) or not PAPER_ACCOUNT_PATTERN.fullmatch(account_id):
+        raise ValueError("Paper submission requires a DU account with an ASCII numeric suffix")
+    if os.environ.get("ATLASPM_ALLOW_PAPER_ORDERS") != "1":
+        raise ValueError("Paper submission requires ATLASPM_ALLOW_PAPER_ORDERS=1")
+
+
+def _paper_order_notional(ticket: dict) -> Decimal:
+    _check_ticket(ticket)
+    if ticket["quantity"] > MAX_PAPER_ORDER_SHARES:
+        raise ValueError("Paper order share limit exceeded")
+    notional = Decimal(ticket["quantity"]) * Decimal(str(ticket["price"]))
+    if notional > MAX_PAPER_ORDER_NOTIONAL:
+        raise ValueError("Paper order notional limit exceeded")
+    return notional
+
+
+def _check_paper_batch(legs: list[dict]) -> None:
+    if not legs:
+        raise ValueError("Empty Paper batch")
+    # Gross submitted limit notional, including buys AND sells.
+    if sum((_paper_order_notional(leg["ticket"]) for leg in legs), Decimal(0)) > MAX_PAPER_BATCH_NOTIONAL:
+        raise ValueError("Paper batch notional limit exceeded")
+
+
 class PaperTransport(PreviewTransport):
     def place(self, account_id: str, ticket: dict) -> object:
-        _check_ticket(ticket)
+        _require_submit_authorization(account_id)
+        _paper_order_notional(ticket)
         _require_paper(self, account_id)
+        _require_submit_authorization(account_id)
         return self._send_json(Request(
             self.base_url + f"/iserver/account/{account_id}/orders",
             data=json.dumps({"orders": [ticket]}, allow_nan=False).encode(),
@@ -114,21 +148,25 @@ def submit(
     transport, journal: PaperJournal, reviewed: dict, original: dict, account_id: str,
     mapping: dict[str, int], *, now: datetime | None = None,
 ) -> dict:
+    _require_submit_authorization(account_id)
     if (reviewed["status"] != "reviewed" or reviewed.get("parent_id") != original["id"]
             or not reviewed.get("broker_estimates") or any(not check["passed"] for check in reviewed["checks"])
             or reviewed.get("account_id_sha256") != hashlib.sha256(account_id.encode()).hexdigest()):
         raise ValueError("A reviewed next-day plan for this Paper account is required")
     if journal.get(reviewed["id"]):
         raise ValueError("This Paper batch already exists. Use reconcile to recover order status.")
+    _check_paper_batch(reviewed["broker_estimates"])
     reviewed_limits = {(row["symbol"], row["ticket"]["side"]): Decimal(str(row["ticket"]["price"]))
                        for row in reviewed["broker_estimates"]}
     fresh = next_day_review(transport, original, account_id, mapping, now=now, reviewed_limits=reviewed_limits)
+    if fresh["status"] == "review":
+        _check_paper_batch(fresh["broker_estimates"])
     if fresh["status"] != "review" or not _within_review(fresh, reviewed):
         return {"status": "review_required", "review": fresh}
     if fresh["next_day_snapshot"].get("total_cash") is None:
         raise ValueError("The broker total cash observation is required to reconcile this batch")
-    for leg in fresh["broker_estimates"]:
-        _check_ticket(leg["ticket"])
+    _require_paper(transport, account_id)
+    _require_submit_authorization(account_id)
     _, _, session_close = next_session_window(date.fromisoformat(original["as_of"]))
     deadline = min(session_close.timestamp(), *(row["updated_epoch"] + 30 for row in fresh["next_day_quotes"].values()))
     if (now or datetime.now(timezone.utc)).timestamp() > deadline:
@@ -137,6 +175,7 @@ def submit(
     for leg in fresh["broker_estimates"]:
         if (now or datetime.now(timezone.utc)).timestamp() > deadline:
             break
+        _require_submit_authorization(account_id)
         ticket = leg["ticket"]
         client_id = ticket["cOID"]
         journal.transition(client_id, "sending", "Paper submit intent recorded", previous={"not_sent"})

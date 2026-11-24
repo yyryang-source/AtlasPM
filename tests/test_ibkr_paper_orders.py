@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -13,7 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from atlaspm.ibkr_paper_orders import PaperTransport, cancel, main, reconcile, submit
+from atlaspm.ibkr_paper_orders import PaperTransport, cancel, main, reconcile, submit, _paper_order_notional, _check_paper_batch
 from atlaspm.close_drafts import draft_after_close
 from atlaspm.ibkr_next_day import next_day_review
 from atlaspm.market_close import prepare_close
@@ -60,6 +61,9 @@ class PaperGateway:
 @unittest.skipUnless(importlib.util.find_spec("pandas_market_calendars"), "calendar extra required")
 class PaperLifecycleTests(unittest.TestCase):
     def setUp(self):
+        authorization = patch.dict(os.environ, {"ATLASPM_ALLOW_PAPER_ORDERS": "1"})
+        authorization.start()
+        self.addCleanup(authorization.stop)
         private = tempfile.TemporaryDirectory()
         self.addCleanup(private.cleanup)
         self.journal = PaperJournal(Path(private.name) / "paper.sqlite3")
@@ -107,6 +111,93 @@ class PaperLifecycleTests(unittest.TestCase):
                 "symbol": "XYZ", "side": "B", "currency": "USD", "sec_type": "STK", "tif": "DAY",
                 "order_type": "LIMIT", "total_size": "5.0", "size": "2.0", "cum_fill": "3.0",
                 "order_time": self.time.strftime("%y%m%d%H%M%S")}
+
+    def test_submission_rejections_leave_no_journal_or_writes(self):
+        with patch("atlaspm.ibkr_paper_orders.next_day_review") as preview:
+            for account in ("U1234567", "DU", "du123", "DU12X", "DU１２３", " DU123"):
+                with self.subTest(account=account), self.assertRaisesRegex(ValueError, "DU account"):
+                    submit(self.gateway, self.journal, self.reviewed, self.original, account, {}, now=self.time)
+            for value in (None, "0", "true", " 1", "01"):
+                with self.subTest(value=value), patch.dict(os.environ):
+                    if value is None:
+                        os.environ.pop("ATLASPM_ALLOW_PAPER_ORDERS", None)
+                    else:
+                        os.environ["ATLASPM_ALLOW_PAPER_ORDERS"] = value
+                    with self.assertRaisesRegex(ValueError, "ATLASPM_ALLOW_PAPER_ORDERS"):
+                        self.submit_direct()
+            preview.assert_not_called()
+        self.assertEqual(self.gateway.calls, [])
+        self.assertIsNone(self.journal.get(self.reviewed["id"]))
+
+    def submit_direct(self):
+        return submit(self.gateway, self.journal, self.reviewed, self.original, self.account, {}, now=self.time)
+
+    def test_whole_batch_is_rejected_before_any_order_or_claim(self):
+        for quantities, prices, message in (
+            ([1, 1001], [100, 1], "share limit"),
+            ([1, 251], [100, 100], "order notional"),
+            ([250]*4+[1], [100]*5, "batch notional"),
+        ):
+            with self.subTest(message=message):
+                legs = []
+                for i, (quantity, price) in enumerate(zip(quantities, prices)):
+                    leg = deepcopy(self.fresh["broker_estimates"][0])
+                    leg["symbol"] = f"TEST{i}"
+                    leg["ticket"].update(quantity=quantity, price=price, cOID="ATL-"+f"{i:040x}",
+                                         side="SELL" if i % 2 else "BUY")
+                    legs.append(leg)
+                with patch.dict(self.reviewed, {"broker_estimates": legs}), self.assertRaisesRegex(ValueError, message):
+                    self.submit()
+                self.assertIsNone(self.journal.get(self.reviewed["id"]))
+                self.assertEqual(self.gateway.calls, [])
+
+    def test_fresh_batch_rechecked_before_claim(self):
+        self.fresh["broker_estimates"][0]["ticket"].update(quantity=1001, price=1)
+        with patch("atlaspm.ibkr_paper_orders._within_review", return_value=True):
+            with self.assertRaisesRegex(ValueError, "share limit"):
+                self.submit()
+        self.assertIsNone(self.journal.get(self.reviewed["id"]))
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_changed_fresh_over_limit_rejected_without_new_review_or_writes(self):
+        original_leg = deepcopy(self.fresh["broker_estimates"][0])
+        for changes, error in (({"quantity": 1001, "price": 1}, "share limit"),
+                               ({"quantity": 1, "price": 25000.01}, "order notional")):
+            leg = deepcopy(original_leg)
+            leg["ticket"].update(changes)
+            with self.subTest(error=error), patch.dict(self.fresh, {"broker_estimates": [leg]}):
+                with self.assertRaisesRegex(ValueError, error):
+                    self.submit()
+                self.assertIsNone(self.journal.get(self.reviewed["id"]))
+                self.assertEqual(self.gateway.calls, [])
+        legs = []
+        for i in range(5):
+            leg = deepcopy(original_leg)
+            leg["symbol"] = f"TEST{i}"
+            leg["ticket"].update(quantity=1000 if i < 4 else 1, price=25,
+                                 side="BUY" if i % 2 else "SELL", cOID="ATL-"+f"{i:040x}")
+            legs.append(leg)
+        with patch.dict(self.fresh, {"broker_estimates": legs}):
+            with self.assertRaisesRegex(ValueError, "batch notional"):
+                self.submit()
+        self.assertIsNone(self.journal.get(self.reviewed["id"]))
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_paper_session_rechecked_before_claim(self):
+        with patch.object(self.gateway, "get", return_value={"accounts":[self.account],
+                          "selectedAccount":self.account,"isPaper":False}):
+            with self.assertRaisesRegex(ValueError, "Paper session"):
+                self.submit()
+        self.assertIsNone(self.journal.get(self.reviewed["id"]))
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_disabled_submission_keeps_reconciliation_and_cancel_available(self):
+        batch = self.submit()["batch"]
+        self.gateway.open_orders = [self.order(0, "Submitted")]
+        with patch.dict(os.environ, {"ATLASPM_ALLOW_PAPER_ORDERS": "0"}):
+            self.assertEqual(self.sync()["status"], "pending")
+            with patch("atlaspm.ibkr_paper_orders.collect_cash_equity_snapshot", return_value=self.snapshot):
+                self.assertEqual(cancel(self.gateway,self.journal,batch["id"],self.account,self.ref)["status"],"cancel_requested")
 
     def test_partial_fill_cancel_and_reconciliation_are_persisted(self):
         batch = self.submit()["batch"]
@@ -351,3 +442,48 @@ class PaperLifecycleTests(unittest.TestCase):
             "order_ref": ticket["cOID"], "price": "100.05", "trade_time_r": int(next_day.timestamp() * 1000),
         }]
         self.assertEqual(reconcile(gateway, self.journal, fresh_id, self.account)["status"], "matched")
+
+
+class PaperSubmissionGuardTests(unittest.TestCase):
+    def ticket(self, **changes):
+        return dict(conid=99, orderType="LMT", side="BUY", tif="DAY",
+                    quantity=1, price=100, cOID="ATL-"+"a"*40, outsideRTH=False) | changes
+
+    def test_exact_limits_and_gross_batch(self):
+        self.assertEqual(_paper_order_notional(self.ticket(quantity=1000, price=25)),25000)
+        for ticket, error in ((self.ticket(quantity=1001,price=1),"share limit"),
+                              (self.ticket(quantity=1,price=25000.01),"order notional")):
+            with self.assertRaisesRegex(ValueError,error):
+                _paper_order_notional(ticket)
+        legs=[{"ticket": self.ticket(quantity=1000,price=25,side=side)} for side in ("BUY","SELL","BUY","SELL")]
+        _check_paper_batch(legs)
+        with self.assertRaisesRegex(ValueError,"batch notional"):
+            _check_paper_batch(legs+[{"ticket":self.ticket(side="SELL",price=.01)}])
+
+    def test_direct_place_guards_no_http(self):
+        client=PaperTransport()
+        with patch.object(client,"get") as session, patch.object(client,"_send_json") as network:
+            with patch.dict(os.environ,{"ATLASPM_ALLOW_PAPER_ORDERS":"1"}):
+                for account,ticket in (("U1234567",self.ticket()),("DU123",self.ticket(quantity=1001,price=1)),
+                                       ("DU123",self.ticket(price=25000.01))):
+                    with self.assertRaises(ValueError):
+                        client.place(account,ticket)
+            with patch.dict(os.environ,{"ATLASPM_ALLOW_PAPER_ORDERS":"0"}):
+                with self.assertRaisesRegex(ValueError,"ATLASPM_ALLOW_PAPER_ORDERS"):
+                    client.place("DU123",self.ticket())
+            session.assert_not_called()
+            network.assert_not_called()
+
+    def test_direct_place_positive_boundary_and_live_session_denied(self):
+        client=PaperTransport()
+        paper={"accounts":["DU123"],"selectedAccount":"DU123","isPaper":True}
+        ticket=self.ticket(quantity=1000,price=25)
+        with patch.dict(os.environ,{"ATLASPM_ALLOW_PAPER_ORDERS":"1"}), \
+             patch.object(client,"get",return_value=paper) as session, \
+             patch.object(client,"_send_json",return_value=[]) as network:
+            self.assertEqual(client.place("DU123",ticket),[])
+            self.assertEqual(json.loads(network.call_args.args[0].data),{"orders":[ticket]})
+            session.return_value=paper | {"isPaper":False}
+            with self.assertRaisesRegex(ValueError,"Paper session"):
+                client.place("DU123",ticket)
+            network.assert_called_once()
