@@ -98,10 +98,17 @@ def review_schedule(monitor,*,holdout_start,patience=3,cooldown_dates=10):
 
 def run(payload,*,config,spaces,holdout_start,budget=12,search_seed=42,selection_metric="mae",
         ensemble=None,regime_ensemble=None,monitoring=None,patience=3,cooldown_dates=10):
+    if not isinstance(config,dict):
+        raise ValueError("INVALID_AUTONOMY_CONFIG")
+    review_schedule({"daily":[],"baseline":"historical_mean"},holdout_start="",patience=patience,cooldown_dates=cooldown_dates)
+    if any(x is not None and not isinstance(x,dict) for x in (ensemble,regime_ensemble,monitoring)):
+        raise ValueError("INVALID_AUTONOMY_POLICY")
+    if monitoring is not None and monitoring.get("baseline","historical_mean")!="historical_mean":
+        raise ValueError("AUTONOMY_REQUIRES_HISTORICAL_MEAN_BASELINE")
     validate_panel_metadata(payload,config.get("horizon",5),config.get("sequence_length",1))
     candidates=search_candidates(spaces,config,budget=budget,seed=search_seed)
     selection=tournament(payload,config=config,candidates=candidates,
-                         holdout_start=holdout_start,selection_metric=selection_metric)
+                         holdout_start=holdout_start,selection_metric=selection_metric,selection_only=True)
     selected=selection["selected_config"]
     winner=selection["selected_model"]
     baseline="historical_mean"
@@ -118,11 +125,14 @@ def run(payload,*,config,spaces,holdout_start,budget=12,search_seed=42,selection
     opts["monitoring"]={**monitor_config,"baseline":baseline}
     result=train(project_features(payload,selection["selected_features"]),**opts)
     day=selection["holdout_start"]
+    if day not in {f["test_start"] for f in result["folds"]}:
+        raise ValueError("HOLDOUT_MUST_START_ON_REFIT_BOUNDARY")
     metrics={name:_metrics(r for r in rows if r["date"]>=day)
              for name,rows in result["predictions"].items()}
     requests=review_schedule(result["monitoring"],holdout_start=day,patience=patience,cooldown_dates=cooldown_dates)
-    # Keep summaries rather than duplicate full prediction arrays in the report.
-    selection.pop("holdout_predictions")
+    # Selection and final policy use a single full-panel fitting pass.
+    selection.update(holdout_evaluated=True,holdout=metrics[winner],dataset_sha256=result["dataset_sha256"],
+                     holdout_mode="selected_model_and_fixed_baseline_walk_forward")
     return {"schema":"atlaspm_synthetic_autonomy_v65","dataset_sha256":result["dataset_sha256"],
             "selection":selection,"holdout_metrics":metrics,"fixed_policy_config":opts,
             "ensemble_weight_history":result["ensemble_weight_history"],
