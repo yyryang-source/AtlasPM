@@ -8,7 +8,7 @@ AtlasPM groups source files by domain. Legacy `atlaspm.selection.*`, `atlaspm.qu
 | `atlaspm.research` | AI rankers, walk-forward, model experiments | Research code moved |
 | `atlaspm.strategies.equity` | Stock screen, 20 signals, monthly candidates, alpha gate | Research code moved |
 | `atlaspm.risk` | RiskNet/FusionNet, financing, stress, risk budget | Research code moved |
-| `atlaspm.execution` | Offline ledger, preflight, synthetic OMS, read-only IBKR | No live orders |
+| `atlaspm.execution` | Offline ledger, preflight, synthetic OMS, IBKR read-only and human-confirmed Paper orders | Live-account orders disabled |
 | `atlaspm.monitoring` | Historical performance, audits, HTML risk snapshot | Offline only |
 | `atlaspm.engine` | Unified portfolio, allocation, historical replay and analytics | Synthetic research |
 | `atlaspm.commands` | Stable CLI adapters and domain dispatch | Existing |
@@ -89,3 +89,30 @@ New code should import canonical paths. `atlaspm/portfolio.py` is the compatibil
 - `atlaspm.quant.portfolio` → `atlaspm.engine.portfolio`
 
 These implementations are moved byte-for-byte; old root and quant import paths resolve to the same canonical module object. Baseline algorithms remain available for reproducible comparisons.
+
+
+### Paper workflow relocation
+
+- `atlaspm.ibkr_paper_orders` → `atlaspm.execution.ibkr_paper_orders`
+- `atlaspm.ibkr_whatif` → `atlaspm.execution.ibkr_whatif`
+- `atlaspm.ibkr_next_day` → `atlaspm.execution.ibkr_next_day`
+- `atlaspm.ibkr_equity_snapshot` → `atlaspm.execution.ibkr_equity_snapshot`
+- `atlaspm.paper_order_journal` → `atlaspm.execution.paper_order_journal`
+- `atlaspm.close_drafts` → `atlaspm.execution.close_drafts`
+- `atlaspm.market_close` → `atlaspm.execution.market_close`
+
+Existing root IBKR risk, mapping and monitoring modules already resolve
+to their canonical domains; no additional implementation copies are
+created. The seven relocated root paths remain direct module-identity
+aliases with DeprecationWarning. Existing private helper imports, mock
+patch targets, and CLI invocations using python -m remain compatible.
+New code and documentation use canonical paths.
+
+Human-confirmed Paper submission still requires the reviewed run and
+matching --confirm-run. The submission guard additionally requires a
+DU account with an ASCII numeric suffix and the exact environment value
+ATLASPM_ALLOW_PAPER_ORDERS=1. Limits: 1,000 shares and USD 25,000 limit
+notional per ticket; USD 100,000 gross limit notional per batch (both
+sides summed). These are submitted limit notionals, not a guarantee
+of execution value. Reconciliation and cancellation remain available
+without the environment opt-in. Live-account order submission is disabled.

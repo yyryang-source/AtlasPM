@@ -8,7 +8,7 @@
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[market,calendar,portfolio]"
-.\.venv\Scripts\python.exe -m atlaspm.market_close --symbols AAPL IBM MSFT ORCL --schedule month-end
+.\.venv\Scripts\python.exe -m atlaspm.execution.market_close --symbols AAPL IBM MSFT ORCL --schedule month-end
 ```
 
 命令获取最近一个过了收盘缓冲的 NYSE 交易日，默认缓冲为 20 分钟。末尾的 `--watch` 按默认 900 秒轮询。Windows 也可用 PowerShell 注册当前用户登录时启动的任务。选择唯一任务名，`-StartNow` 从当前登录启动。
@@ -44,12 +44,12 @@
 IBKR 只读入口使用已认证的本机 Client Portal Gateway 和受信 TLS。适用账户是专用 USD 现金账户，所有持仓与工作中的限价订单均为美股整数股。命令读取账本、持仓和当前订单，两次订单快照需要一致。可用资金取现金和资金字段的保守下界，未成交挂单只使用剩余股数。提供 `--market-audit` 时，审计通过后读取账户并生成草案。 [IBKR 只读安装](IBKR_READONLY.md) · [IBKR 未成交订单字段](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/order-monitoring/live-orders)
 
 ```powershell
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_equity_snapshot --account $accountId --dedicated-cash-equities --allow-local-gateway --market-audit $auditPath --allocation quant
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_equity_snapshot --account $accountId --dedicated-cash-equities --allow-local-gateway --market-audit $auditPath --allocation quant
 ```
 
 Paper 账户只读验收可将 `--account $accountId` 换成 `--selected-paper-account`，直接使用浏览器登录后选中的 Paper 账户。省略 `--market-audit` 时只采集账户快照，控制台显示持仓与挂单数量及总现金字段是否可用。
 
-如需在收盘审计通过后自动生成待审核草案，可给 `atlaspm.market_close` 添加 `--draft-account $accountId --dedicated-cash-equities --allocation quant`。Windows 注册脚本对应参数是 `-DraftAccount $accountId -DedicatedCashEquities -Allocation quant`，本地受信证书可用 `-GatewayCaFile` 指定。流程只在调仓日和收盘后四小时内读账户。池外持仓或挂单需要补参考价时，补齐后再次读取账户。新出现的持仓或挂单若仍缺参考价，本次先拦截。同一审计、账户和完整策略参数复用已有草案，采集窗口结束后仍可查看。
+如需在收盘审计通过后自动生成待审核草案，可给 `atlaspm.execution.market_close` 添加 `--draft-account $accountId --dedicated-cash-equities --allocation quant`。Windows 注册脚本对应参数是 `-DraftAccount $accountId -DedicatedCashEquities -Allocation quant`，本地受信证书可用 `-GatewayCaFile` 指定。流程只在调仓日和收盘后四小时内读账户。池外持仓或挂单需要补参考价时，补齐后再次读取账户。新出现的持仓或挂单若仍缺参考价，本次先拦截。同一审计、账户和完整策略参数复用已有草案，采集窗口结束后仍可查看。
 
 审计与账户输入版本记录在调仓报告，可在本地审核台查看。当前券商路径已使用合成 Gateway 响应验证账户类型、时间戳、部分成交、现金和合约映射。
 
@@ -58,7 +58,7 @@ Paper 账户只读验收可将 `--account $accountId` 换成 `--selected-paper-a
 在审核台记录人工审核后，使用审核台报告中的运行 ID。现有持仓及挂单里的合约 ID 自动读取，新标的按股票代码查询唯一美国股票合约。预览会用 Gateway 的合约详情核对标的、币种及证券类型。有歧义或无法查询时，可追加 `--contracts` 并提供代码到券商合约号的 JSON，例如 `{"AAPL": 265598}`。 [IBKR 按代码查询](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/contract/security-stocks-by-symbol) · [IBKR 合约详情](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/contract/contract-information-by-contract-id)
 
 ```powershell
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_whatif --run $runId --account $paperAccountId --allow-paper-preview --output local_data\rebalance\whatif.json
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_whatif --run $runId --account $paperAccountId --allow-paper-preview --output local_data\rebalance\whatif.json
 ```
 
 这个预览验证 Paper 会话、实时双边报价、与已审草案相关的持仓和挂单变化，并逐笔保存精确限价单、佣金及初始与维持保证金估计。现金校验计入买入挂单预留和估计佣金。券商警告、报价偏离、手续费超出资金或持仓变化会拦截。 [IBKR What-If](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/orders/preview-order-what-if-order)
@@ -74,15 +74,20 @@ Paper 账户只读验收可将 `--account $accountId` 换成 `--selected-paper-a
 逐笔 What-If 结束后会重新读取 Paper 账户并确认报价仍在 30 秒有效期内、NYSE 正常时段仍开放。预览前后持仓、挂单、现金或合约发生变化时，本次草案拦截，报告保留复核结果。
 
 ```powershell
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_next_day --run $closeRunId --account $paperAccountId --allow-paper-preview
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_next_day --run $closeRunId --account $paperAccountId --allow-paper-preview
 ```
 
-Paper 提交通过独立命令显式确认，要求使用已审核的次日运行 ID。提交前再次执行完整复核。实时买卖盘在已审核限价的 0.5% 内时保留原限价，仍会按当前市值计算股数和风控。仓位、挂单、资金或票据变更，以及券商费用或保证金增量上升时，命令保存一份新结果供审核。逐单发送前先保存客户订单号，遇回执不明、超时或券商警告时停止后续订单，把当前结果交给对账。每个账户和交易日只接受一个已登记批次。 [IBKR 下单与回执](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/orders/place-order)
+Paper 提交通过独立命令显式确认，要求使用已审核的次日运行 ID。提交前再次执行完整复核。实时买卖盘在已审核限价的 0.5% 内时保留原限价，仍会按当前市值计算股数和风控。仓位、挂单、资金或票据变更，以及券商费用或保证金增量上升时，命令保存一份新结果供审核。逐单发送前先保存客户订单号，遇回执不明、超时或券商警告时停止后续订单，把当前结果交给对账。每个账户和交易日只接受一个已登记批次。新增下单授权要求：DU 加 ASCII 数字的 Paper 账号、环境变量 ATLASPM_ALLOW_PAPER_ORDERS 精确等于 1，且单笔不超过 1,000 股及 25,000 美元限价名义金额，单批买卖绝对限价名义金额合计不超过 100,000 美元。任何超限批次在发送之前整体拒绝。实际成交金额可能不同；撤单、对账不需要此环境变量。 [IBKR 下单与回执](https://www.interactivebrokers.com/docs/web-api/v1/endpoints/orders/place-order)
 
 ```powershell
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_paper_orders submit --run $nextDayRunId --confirm-run $nextDayRunId --account $paperAccountId
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_paper_orders reconcile --run $nextDayRunId --account $paperAccountId --watch
-.\.venv\Scripts\python.exe -m atlaspm.ibkr_paper_orders cancel --run $nextDayRunId --account $paperAccountId --client-id $clientOrderId
+$env:ATLASPM_ALLOW_PAPER_ORDERS = "1"
+try {
+    .\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_paper_orders submit --run $nextDayRunId --confirm-run $nextDayRunId --account $paperAccountId
+} finally {
+    Remove-Item Env:ATLASPM_ALLOW_PAPER_ORDERS -ErrorAction SilentlyContinue
+}
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_paper_orders reconcile --run $nextDayRunId --account $paperAccountId --watch
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_paper_orders cancel --run $nextDayRunId --account $paperAccountId --client-id $clientOrderId
 ```
 
 页面可从已登记 Paper 批次的「同步成交与对账」执行单次只读查询。它使用 Gateway 当前选中的 Paper 账户，保存订单和成交状态、现金和持仓差额，并提供对账 JSON 下载。需要持续跟踪时，使用命令行的 `reconcile --watch`。

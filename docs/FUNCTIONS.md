@@ -137,11 +137,11 @@ RegimeNet 与交易执行约束中的不交易区间属于原生模型研究路�
 | --- | --- |
 | 浏览器 | 通过 [统一工作台](quant/RESEARCH_WORKBENCH.md) 打开「调仓审核」，也可单独通过 Streamlit 运行 `src/atlaspm/rebalance_dashboard.py`。 |
 | 独立后端命令 | `.\.venv\Scripts\python.exe -m atlaspm.rebalance_workbench --demo`，也可指定日期和四份输入文件。 |
-| 收盘行情与审计 | `python -m atlaspm.market_close`，支持 NYSE 收盘轮询、独立参考价和输入审计。 |
-| IBKR 只读快照 | `python -m atlaspm.ibkr_equity_snapshot`，可用通过的审计和本机 Gateway 账户快照生成草案。 |
-| IBKR Paper 预览 | `python -m atlaspm.ibkr_whatif`，绑定已审草案的精确限价单与券商佣金和保证金估算。 |
-| IBKR 次日复核 | `python -m atlaspm.ibkr_next_day`，用真实报价接口和账户数据重新计算目标数量、风险及逐笔预估。 |
-| IBKR Paper 订单 | `python -m atlaspm.ibkr_paper_orders`，提供显式提交、撤单与成交对账，并保存状态。 |
+| 收盘行情与审计 | `python -m atlaspm.execution.market_close`，支持 NYSE 收盘轮询、独立参考价和输入审计。 |
+| IBKR 只读快照 | `python -m atlaspm.execution.ibkr_equity_snapshot`，可用通过的审计和本机 Gateway 账户快照生成草案。 |
+| IBKR Paper 预览 | `python -m atlaspm.execution.ibkr_whatif`，绑定已审草案的精确限价单与券商佣金和保证金估算。 |
+| IBKR 次日复核 | `python -m atlaspm.execution.ibkr_next_day`，用真实报价接口和账户数据重新计算目标数量、风险及逐笔预估。 |
+| IBKR Paper 订单 | `python -m atlaspm.execution.ibkr_paper_orders`，提供经人工确认、DU 账号、环境变量显式授权及硬性限额保护的 Paper 提交、撤单与成交对账，并保存状态；实盘提交禁用。 |
 
 已用合成账户验收两种仓位算法、拦截和审核记录，用真实日线复验收盘行情审计。IBKR 同步、What-If、次日复核、Paper 下单和成交对账已用合成响应测试，实际会话仍待验收。 [收盘行情和 IBKR 入口](quant/MARKET_CLOSE_REBALANCE.md) · [启动和输入格式](quant/REBALANCE_WORKBENCH.md) · [待开发清单](TODO.md#7-收盘调仓与审核)
 
