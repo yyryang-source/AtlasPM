@@ -60,7 +60,7 @@ def _metrics(rows):
 
 
 def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False):
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
@@ -90,7 +90,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
     config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
-                sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble)
+                sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
+                batch_size=batch_size,mixed_precision=mixed_precision)
     store=None
     if checkpoint_path is not None:
         from atlaspm.research.training_checkpoint import FoldStore
@@ -141,7 +142,8 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             elif name in SEQUENCE_MODELS:
                 values,settings=fit_sequence(name,np.asarray([r["sequence"] for r in train_rows]),y,
                                              np.asarray([r["sequence"] for r in test_rows]),seed,
-                                             epochs=sequence_epochs,device=device)
+                                             epochs=sequence_epochs,device=device,batch_size=batch_size,
+                                             mixed_precision=mixed_precision)
             else:
                 values,settings=fit_predict(name,z,y,(test-mean)/scale,seed)
             model_settings[name]=settings
@@ -168,7 +170,7 @@ def train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         predictions["adaptive_ensemble"]=combined["predictions"]
         ensemble_audit=combined["weight_history"]
     fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
-    return dict(version="synthetic_return_research_v6",dataset_sha256=fingerprint,
+    return dict(version="synthetic_return_research_v7",dataset_sha256=fingerprint,
                 model_settings=model_settings,dependency_versions=dependency_versions,seed=seed,
                 ensemble_weight_history=ensemble_audit,training_config=config,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
