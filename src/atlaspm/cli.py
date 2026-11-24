@@ -9,7 +9,7 @@ import sys
 from atlaspm.commands import broker_cli, quant_cli, selection_cli, portfolio_engine_cli
 from atlaspm.data import market_db
 # Backward-compatible public injection point used by offline data CLI tests.
-from atlaspm.quant.historical import download_yahoo_adjusted_prices
+from atlaspm.data.historical import download_yahoo_adjusted_prices
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,7 +43,8 @@ def main(argv: list[str] | None = None) -> int:
             report = quant_cli.run(args, price_downloader=download_yahoo_adjusted_prices)
         else:
             raise ValueError("Unsupported AtlasPM command")
-        print(json.dumps(report, indent=2, sort_keys=True))
+        json.dump(report, sys.stdout, indent=2, sort_keys=True)
+        print()
         if args.command == "stock-sync-market" and report.get("stop_reason") == "USER_INTERRUPTED":
             # Preserve partial cache before the Windows runner exits.
             return 130
