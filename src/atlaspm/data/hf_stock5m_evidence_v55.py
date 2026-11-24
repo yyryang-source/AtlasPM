@@ -81,7 +81,9 @@ def match_split(event,filing,data):
         return result
     extracted=filings.extract(data,filing)
     ticker=re.escape(event["symbol"])
-    ticker_re=re.compile(r"\b(?:trading|ticker)\s+symbol\s+(?:of\s+|is\s+|[:\s]*)[\"'“]?"+ticker+r"(?![A-Za-z0-9.\-])",re.I)
+    # A terminal sentence period is punctuation, while .B or -B is a
+    # share-class suffix and must not be mistaken for the requested ticker.
+    ticker_re=re.compile(r"\b(?:trading|ticker)\s+symbol\s+(?:of\s+|is\s+|[:\s]*)[\"'“]?"+ticker+r"(?![A-Za-z0-9]|[.\-][A-Za-z0-9])",re.I)
     terms=set()
     observed=float(event["price_ratio"])
     if not math.isfinite(observed) or observed<=0:
