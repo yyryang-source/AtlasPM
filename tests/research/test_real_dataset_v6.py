@@ -1,0 +1,122 @@
+"""V6 research sample registry and exact-session label tests."""
+from datetime import date
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from atlaspm.research import real_dataset_v6 as v
+from atlaspm.research.training_dataset import validate_panel_metadata
+
+CAL=[("2020-01-30",0,600000),("2020-01-31",600000,1200000),
+     ("2020-02-03",1200000,1800000),("2020-02-04",1800000,2400000),
+     ("2020-02-05",2400000,3000000),("2020-02-06",3000000,3600000)]
+
+
+class RealDatasetTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        old=Path.cwd()
+        os.chdir(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(os.chdir,old)
+        Path("local_data").mkdir()
+
+    def seed(self,duplicate=False):
+        try:
+            import duckdb
+        except ImportError:
+            self.skipTest("Install lake extras")
+        cx=duckdb.connect()
+        try:
+            for month in ("2020-01","2020-02"):
+                p=v.factor._path(month,"hf","rth","factors")
+                p.parent.mkdir(parents=True,exist_ok=True)
+                cx.execute("""CREATE OR REPLACE TABLE fixture(symbol VARCHAR,trade_date DATE,
+                    close DOUBLE,last_observed_bar_ms BIGINT,mom_5d DOUBLE)""")
+                rows=[]
+                for i,(d,o,c) in enumerate(CAL):
+                    if not d.startswith(month):
+                        continue
+                    rows.append(("ABC",d,10+i,c-300000,.1 if i else None))
+                    if i!=2:
+                        rows.append(("GAP",d,20+i,c-300000,.2))
+                if duplicate:
+                    rows.append(rows[0])
+                cx.executemany("INSERT INTO fixture VALUES (?,?,?,?,?)",rows)
+                cx.execute(f"COPY fixture TO {v.factor._quoted(p)} (FORMAT PARQUET)")
+                p.with_suffix(".json").write_text(json.dumps({"version":v.factor.VERSION,
+                    "month":month,"source":"hf","session":"rth"}),encoding="utf-8")
+        finally:
+            cx.close()
+
+    def build(self):
+        with patch.object(v,"_calendar",return_value=CAL):
+            return v.build("2020-01","2020-02",features=["mom_5d"],horizons=[1,5],
+                           minimum_train_sessions=1,test_sessions=1,embargo_sessions=1)
+
+    def test_missing_plan_no_training(self):
+        r=v.build("2020-01","2020-02",plan_only=True)
+        self.assertEqual(r["missing_factor_months"],["2020-01","2020-02"])
+        self.assertFalse(r["approved_for_model_training"])
+        self.assertFalse(r["synthetic_fixture"])
+
+    def test_calendar_labels_no_bridge_and_cross_month(self):
+        self.seed()
+        r=self.build()
+        self.assertEqual(r["rows"],11)
+        self.assertFalse(r["approved_for_model_training"])
+        self.assertFalse(r["live_execution_enabled"])
+        cx=v.factor._db("512MB",1)
+        try:
+            src=v.factor._files_sql([Path(x["path"]) for x in r["partitions"]])
+            a=cx.execute(f"""SELECT label_1d,label_end_index_1d FROM {src}
+                          WHERE symbol='ABC' AND trade_date='2020-01-31'""").fetchone()
+            self.assertAlmostEqual(a[0],12/11-1)
+            self.assertEqual(a[1],2)
+            self.assertIsNone(cx.execute(f"""SELECT label_1d FROM {src}
+                          WHERE symbol='GAP' AND trade_date='2020-01-31'""").fetchone()[0])
+            self.assertIsNone(cx.execute(f"""SELECT label_5d FROM {src}
+                          WHERE symbol='GAP' AND trade_date='2020-01-30'""").fetchone()[0])
+            self.assertIsNone(cx.execute(f"""SELECT label_1d FROM {src}
+                          WHERE symbol='ABC' AND trade_date='2020-02-06'""").fetchone()[0])
+        finally:
+            cx.close()
+        self.assertEqual(v.inspect(r["dataset_id"])["dataset_id"],r["dataset_id"])
+        self.assertEqual(self.build()["dataset_id"],r["dataset_id"])
+        with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+            validate_panel_metadata(r,1,1)
+
+    def test_duplicate_partition_blocks_publication(self):
+        self.seed(duplicate=True)
+        with self.assertRaisesRegex(ValueError,"duplicates=True"):
+            self.build()
+        self.assertFalse((v.BASE/"latest.json").exists())
+
+    def test_corruption_detected_and_rebuilt(self):
+        self.seed()
+        r=self.build()
+        p=Path(r["partitions"][0]["path"])
+        p.write_bytes(b"bad")
+        with self.assertRaisesRegex(ValueError,"integrity"):
+            v.inspect(r["dataset_id"])
+        rebuilt=self.build()
+        self.assertEqual(rebuilt["dataset_id"],r["dataset_id"])
+        self.assertEqual(v.inspect(r["dataset_id"])["rows"],11)
+
+    def test_purged_folds(self):
+        folds=v._folds(CAL,1,1,1,1)
+        self.assertEqual(len(folds),2)
+        for f in folds:
+            self.assertLess(f["latest_training_label_end_index"],f["test_start_index"]-1)
+            self.assertEqual(f["train_end_index"]+1,f["latest_training_label_end_index"])
+        self.assertEqual(v._folds(CAL,5,1,1,1),[])
+
+    def test_configuration_rejects_feature_injection(self):
+        for features in (["label_1d"],["mom_5d","mom_5d"],["close"]):
+            with self.assertRaises(ValueError):
+                v.build("2020-01","2020-02",features=features)
+        with self.assertRaises(ValueError):
+            v.build("2020-01","2020-02",horizons=[2])
