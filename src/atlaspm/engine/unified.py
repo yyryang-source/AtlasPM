@@ -176,6 +176,25 @@ def _risk_gate(candidates: list[Candidate], account: Account,
     margin["annual_interest_rate_upshock_cost"] = account.debt*(
         float(constraints.get("annual_margin_rate", .065))+margin_rate_shock)
     margin["liquidity_haircut_equity_loss"] = risky*liquidity_haircut*account.net_liquidation
+    named = market.get("historical_scenarios", {})
+    if not isinstance(named, dict):
+        raise ValueError("historical_scenarios must be a mapping")
+    scenario_results: dict[str, float] = {}
+    for regime in ("2008", "2020", "2022"):
+        if regime not in named:
+            continue
+        row = object_map(named[regime], "historical_scenario")
+        if set(row) != set(symbols):
+            raise ValueError(f"HISTORICAL_SCENARIO_SYMBOL_MISMATCH:{regime}")
+        scenario_results[regime] = sum(weights[s]*finite(row[s], f"scenario.{regime}.{s}")
+                                       for s in symbols)
+    if "max_named_scenario_loss_fraction" in constraints:
+        if set(scenario_results) != {"2008","2020","2022"}:
+            blockers.append("HISTORICAL_SCENARIOS_REQUIRED_FOR_LIMIT")
+        elif min(scenario_results.values()) < -finite(
+                constraints["max_named_scenario_loss_fraction"],
+                "max_named_scenario_loss_fraction", minimum=0):
+            blockers.append("NAMED_STRESS_SCENARIO_LIMIT")
     return {
         "decision": "BLOCK" if blockers else "PASS_SYNTHETIC_RESEARCH",
         "block_reasons": sorted(set(blockers)),
@@ -186,7 +205,8 @@ def _risk_gate(candidates: list[Candidate], account: Account,
         "historical_max_drawdown": drawdown,
         "illustrative_uniform_shock_loss_fraction": risky*shock,
         "historical_named_regimes_available": False,
-        "historical_scenario_status": "2008_2020_2022_REQUIRE_DATED_ALIGNED_REAL_HISTORY",
+        "user_supplied_regime_shocks_illustrative": scenario_results,
+        "historical_scenario_status": "SUPPLIED_SCENARIOS_ARE_UNVERIFIED_NOT_HISTORICAL_REPLAY",
         "stylized_equity_shocks_not_historical_backtests": {
             "2008_like": -.55*risky, "2020_like": -.34*risky,
             "2022_like": -.25*risky,
