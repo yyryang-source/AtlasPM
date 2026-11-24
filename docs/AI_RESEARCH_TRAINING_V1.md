@@ -425,3 +425,41 @@ not IBKR margin requirements or liquidation prices. The report
 does not modify simulated cash trades, permit borrowing, choose
 leverage or transmit orders. Actual broker margin, order-bound
 What-If, position identity and collateral need independent review.
+
+
+## Consolidated synthetic acceptance and local OMS recovery
+
+From the checkout root, with the existing portfolio and research extras:
+
+~~~powershell
+& $py -m atlaspm.research.training_acceptance
+~~~
+
+This runs a generated synthetic panel through model and strategy selection,
+cash execution, the fixed risk policy and hypothetical financing. Separately
+it runs the existing institutional synthetic OMS example with partial fills
+and a duplicate event, persists its result and verifies idempotent retrieval.
+The smoke checks actual outputs and fails on missing reconciliation,
+audit-chain corruption or unexpected execution permission. The fixture
+does not read real history or use the network. Temporary receipt files are
+cleaned up. GitHub CI invokes the smoke on Windows and Linux. A smoke PASS
+does not substitute for the full regression suite or certify real data.
+
+To persist an explicit synthetic OMS simulation result locally:
+
+~~~powershell
+& $py -m atlaspm.execution.synthetic_oms_receipts --db local_data/paper/receipts.sqlite3 --request-id SYN:example-001 --file examples/unified_portfolio_synthetic.json
+& $py -m atlaspm.execution.synthetic_oms_receipts --db local_data/paper/receipts.sqlite3 --request-id SYN:example-001
+~~~
+
+The same request ID and identical canonical payload return the committed
+report; a changed payload under that ID fails. SQLite serializes the
+local transaction. An interrupted uncommitted simulation can be repeated
+because it has no external side effects. The result is checked against
+the existing portfolio safety and reconciliation contract. This is a
+local synthetic receipt, not a broker idempotency key or exactly-once
+external execution mechanism. Local hashes are unsigned; a malicious
+editor capable of rewriting both data and digests is outside this
+integrity check. No new borrowing, real training or broker order route
+is enabled. The institutional example and the historical cash replay
+remain separate acceptance stages, not a continuous live order bridge.
