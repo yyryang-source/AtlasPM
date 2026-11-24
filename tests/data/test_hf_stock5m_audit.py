@@ -85,6 +85,25 @@ class HuggingFaceAuditTests(unittest.TestCase):
         self.assertEqual(0,spy["five_minute_bars"])
         self.assertGreater(aapl["expected_rth_five_minute_slots"],4)
 
+    def test_source_anomaly_quarantine_is_explicit_in_audit(self):
+        self.seed()
+        _,meta_path=hf_stock5m.quality_paths(self.out)
+        with meta_path.open("w",encoding="utf-8") as f:
+            json.dump({
+                "excluded_ambiguous_5m_buckets": 0,
+                "excluded_invalid_source_5m_buckets": 1,
+                "excluded_total_5m_buckets": 1,
+                "invalid_source_rows": 1
+            }, f)
+        result=hf_stock5m_audit.audit("2026-03",save=False)
+        self.assertEqual(0,result["ambiguous_buckets_quarantined"])
+        self.assertEqual(1,result["invalid_source_5m_buckets_quarantined"])
+        self.assertEqual(1,result["total_5m_buckets_quarantined"])
+        self.assertEqual(1,result["invalid_raw_source_rows"])
+        self.assertIn("QUARANTINED_INVALID_SOURCE_5M_BUCKETS",result["review_reasons"])
+        self.assertIn("RAW_SOURCE_OHLCV_ANOMALIES",result["review_reasons"])
+        self.assertFalse(result["approved_for_model_training"])
+
     def test_detects_out_of_session_timestamp(self):
         self.seed(before_open=True)
         report=hf_stock5m_audit.audit("2026-03",save=False)
