@@ -243,8 +243,10 @@ class V3DuckDB(V3Contracts):
         kw = {**self._kwargs(), "factors": ["mom_5d"],
               "holdout_start": "2026-01-08", "weighting": "ic_train"}
         res = factor_v3.analyze(**kw, exploratory=True)
-        self.assertEqual("INSUFFICIENT_MATURED_TRAINING_IC",
+        self.assertEqual("NO_SELECTED_FACTORS",
                          res["multi_factor"]["weighting_state"])
+        self.assertEqual(["mom_5d"],
+                         res["redundancy_selection"]["excluded_insufficient_standardized_dates"])
         self.assertIsNone(res["multi_factor"]["composite"])
 
     def test_sqlite_adjusted_source_kept_separate(self):
