@@ -41,6 +41,9 @@ class HF5mBatchAuditTests(unittest.TestCase):
             "invalid_five_minute_bars": 0, "duplicate_symbol_timestamp_rows": 0,
             "out_of_nyse_session_bars": 0, "sparse_five_minute_buckets": 20,
             "total_5m_buckets_quarantined": 2, "invalid_raw_source_rows": 1,
+            "non_5m_aligned_nyse_sessions": [{"date": f"{month}-01"}],
+            "partial_nyse_boundary_5m_bars": 3,
+            "nyse_boundary_minute_count_exceeded": 1,
             "review_reasons": ["RAW_SOURCE_OHLCV_ANOMALIES"],
         }
         if save:
@@ -69,6 +72,9 @@ class HF5mBatchAuditTests(unittest.TestCase):
             self.assertEqual(200, a["total_five_minute_bars"])
             self.assertEqual(4, a["total_quarantined_5m_buckets"])
             self.assertEqual(2, a["total_invalid_raw_source_rows"])
+            self.assertEqual(["2026-02", "2026-03"],
+                             a["months_with_partial_nyse_sessions"])
+            self.assertEqual(2, a["total_nyse_boundary_minute_count_exceeded"])
             self.assertTrue(a["all_months_structurally_audited"])
             self.assertFalse(a["approved_for_model_training"])
             self.assertFalse(a["data_rights_verified"])
@@ -86,6 +92,20 @@ class HF5mBatchAuditTests(unittest.TestCase):
             d = batch.run("2026-02", "2026-03")
             self.assertEqual(1, d["resumed_months"])
             self.assertEqual(["2026-03"], self.calls[-1:])
+
+    def test_old_monthly_audit_schema_forces_rerun(self):
+        # The NYSE partial-session calculation changed in v2, so an old
+        # checkpoint must not silently masquerade as a current valid audit.
+        self.seed("2026-03")
+        with patch.object(hf_stock5m_audit, "audit", side_effect=self.fake_audit):
+            batch.run("2026-03", "2026-03")
+            checkpoint = batch._meta_path("2026-03", "rth")
+            data = json.loads(checkpoint.read_text(encoding="utf-8"))
+            data["monthly_audit_schema"] = "atlaspm_hf_5m_research_qc_v1"
+            checkpoint.write_text(json.dumps(data), encoding="utf-8")
+            rerun = batch.run("2026-03", "2026-03")
+        self.assertEqual(2, len(self.calls))
+        self.assertEqual(0, rerun["resumed_months"])
 
     def test_corrupt_cached_audit_forces_rescan(self):
         self.seed("2026-03")

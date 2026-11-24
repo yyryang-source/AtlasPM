@@ -22,6 +22,8 @@ FIELDS = (
     "nyse_expected_sessions", "observed_trade_dates", "missing_nyse_sessions",
     "invalid_five_minute_bars", "duplicate_symbol_timestamp_rows",
     "out_of_nyse_session_bars", "sparse_five_minute_buckets",
+    "non_5m_aligned_nyse_sessions", "partial_nyse_boundary_5m_bars",
+    "nyse_boundary_minute_count_exceeded",
     "total_5m_buckets_quarantined", "invalid_raw_source_rows", "review_reasons",
     "error",
 )
@@ -100,6 +102,12 @@ def _record(month: str, report: dict) -> dict:
         "duplicate_symbol_timestamp_rows": int(report["duplicate_symbol_timestamp_rows"]),
         "out_of_nyse_session_bars": report.get("out_of_nyse_session_bars"),
         "sparse_five_minute_buckets": int(report["sparse_five_minute_buckets"]),
+        "non_5m_aligned_nyse_sessions": len(
+            report.get("non_5m_aligned_nyse_sessions") or []),
+        "partial_nyse_boundary_5m_bars": int(
+            report.get("partial_nyse_boundary_5m_bars") or 0),
+        "nyse_boundary_minute_count_exceeded": int(
+            report.get("nyse_boundary_minute_count_exceeded") or 0),
         "total_5m_buckets_quarantined": int(
             report.get("total_5m_buckets_quarantined")
             if report.get("total_5m_buckets_quarantined") is not None
@@ -221,6 +229,10 @@ def run(start_month: str = "2000-01", end_month: str = "2026-03", *,
                                               for r in records),
         "total_missing_nyse_sessions": sum(r.get("missing_nyse_sessions", 0)
                                             for r in records),
+        "months_with_partial_nyse_sessions": [
+            r["month"] for r in records if r.get("non_5m_aligned_nyse_sessions", 0)],
+        "total_nyse_boundary_minute_count_exceeded": sum(
+            r.get("nyse_boundary_minute_count_exceeded", 0) for r in records),
         "all_months_structurally_audited": audited == len(chosen) and counts[STRUCTURAL] == 0,
         "warning": "Structural QC is not a data license, PIT universe or model-training approval.",
     }
