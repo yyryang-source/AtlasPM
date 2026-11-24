@@ -5,7 +5,6 @@ purged walk-forward metadata. The existing synthetic trainer remains isolated.
 """
 from __future__ import annotations
 
-from datetime import date
 import json
 from pathlib import Path
 import re
