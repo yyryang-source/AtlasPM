@@ -314,6 +314,11 @@ def _paired(current, previous, metric, *, relative=False, positive=False):
     for key,(_,claim,_) in current.items():
         if key[1]!=metric or key not in previous:
             continue
+        # Revision-event factor: an unchanged carried-forward observation is
+        # not an event. A genuinely new report reiterating the same value is
+        # an event with zero revision. Consensus still includes both actors.
+        if current[key][2]==previous[key][2]:
+            continue
         old=previous[key][1]["value"]
         if metric=="rating":
             result.append(_RATING[claim["value"]]-_RATING[old])
@@ -396,6 +401,7 @@ def factors(*, subject, as_of, previous_as_of, unit, period, basis,
             "recommendation_decay":_avg(weighted)}
     return {**FLAGS,"subject":subject,"as_of":now.isoformat(),"previous_as_of":prior.isoformat(),
             "model":"institutional_factors_v1","values":values,"unit":unit,"period":period,"basis":basis,
+            "revision_policy":"new_visible_receipt_vs_prior_matched_forecast",
             "sample_counts":{"ratings":len(ratings),"target_prices":len(targets),"eps":len(eps),"revenue":len(revenue),
                              "paired_ratings":len(rating_changes),"paired_targets":len(target_changes),
                              "paired_eps":len(eps_changes),"paired_revenue":len(revenue_changes),

@@ -181,3 +181,14 @@ class UnifiedResearchTests(unittest.TestCase):
         result=event_queue.drain(as_of=now.isoformat())
         self.assertEqual(result["completed"],1)
         self.assertEqual(result["superseded"],1)
+
+
+    def test_exit_share_adapter_preserves_integral_values_rejects_fraction(self):
+        from atlaspm.framework.autonomous_cycle import _exit_positions
+        row={"type":"equity","identifier":"AAA","shares":120.0}
+        out=_exit_positions({"positions":[row]},{"AAA":95},{"AAA":"tech"})
+        self.assertIs(type(out[0]["shares"]),int)
+        self.assertEqual(out[0]["shares"],120)
+        for qty in (120.5,-1,True,float("nan")):
+            with self.subTest(qty=qty),self.assertRaises(ValueError):
+                _exit_positions({"positions":[{**row,"shares":qty}]},{"AAA":95},{"AAA":"tech"})

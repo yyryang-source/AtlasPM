@@ -100,6 +100,9 @@ class InstitutionalTests(unittest.TestCase):
                        previous_as_of="2020-01-03T00:00:00Z",unit="USD",period="2020-03-31",basis="GAAP")
         self.assertEqual(out["sample_counts"]["ratings"],2)
         self.assertAlmostEqual(out["values"]["analyst_rating_momentum"],-1)
+        self.assertEqual(out["sample_counts"]["paired_targets"],1)
+        self.assertEqual(out["sample_counts"]["paired_eps"],1)
+        self.assertEqual(out["sample_counts"]["target_prices"],2)
         self.assertAlmostEqual(out["values"]["target_price_revision"],.1)
         self.assertAlmostEqual(out["values"]["eps_revision_momentum"],.5)
         self.assertAlmostEqual(out["values"]["revenue_revision_momentum"],.2)
@@ -191,3 +194,17 @@ class InstitutionalTests(unittest.TestCase):
         self.assertFalse(report["weights_enabled"])
         early=ir.review_rating_outcomes(subject="conid:123",as_of="2020-01-19T00:00:00Z",outcomes_file=file)
         self.assertEqual(early["evaluated"],0)
+
+
+    def test_new_reiteration_counts_zero_but_carried_forward_does_not(self):
+        self.report()
+        self.report("r2",analyst="a2",firm="Morgan Stanley",
+                    text="Target Price (USD, 2020-03-31, GAAP): 120")
+        self.report("r3",received="2020-01-04",published="2020-01-03",
+                    text="Target Price (USD, 2020-03-31, GAAP): 100")
+        out=ir.factors(subject="conid:123",as_of="2020-01-05T00:00:00Z",
+                       previous_as_of="2020-01-03T00:00:00Z",unit="USD",period="2020-03-31",basis="GAAP")
+        self.assertEqual(out["sample_counts"]["paired_targets"],1)
+        self.assertEqual(out["sample_counts"]["target_prices"],2)
+        self.assertEqual(out["values"]["target_price_revision"],0)
+        self.assertEqual(out["consensus_values"]["target_price"],110)

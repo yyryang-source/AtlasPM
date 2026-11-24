@@ -2,13 +2,33 @@
 from __future__ import annotations
 from copy import deepcopy
 from datetime import timedelta
-from atlaspm.engine.contracts import Account,timestamp
+from atlaspm.engine.contracts import Account,timestamp,finite
 from atlaspm.engine.autonomous_decision import portfolio_cycle
 from atlaspm.engine.unified import _build_paper_inputs
 from atlaspm.execution.institutional_batch import propose_multi_asset_batch
 from atlaspm.execution.paper_oms import replay_paper_orders
 from atlaspm.research.financial_events import FLAGS
 from atlaspm.research.training_registry import digest
+
+
+def _exit_positions(snapshot, marks, sectors):
+    """Strict adapter from OMS numeric valuation to whole-share Account.
+
+    No rounding/truncation of fractional shares or silent dropping of other
+    asset types. The Account contract and all risk limits remain unchanged.
+    """
+    positions=[]
+    for row in snapshot["positions"]:
+        symbol=row["identifier"]
+        if row["type"]!="equity" or symbol not in marks or symbol not in sectors:
+            raise ValueError("UNSUPPORTED_EXIT_POSITION")
+        qty=finite(row["shares"],"exit_shares",minimum=0)
+        if qty!=int(qty) or qty>2**53-1:
+            raise ValueError("NONINTEGRAL_EXIT_SHARES:"+symbol)
+        if qty:
+            positions.append({"symbol":symbol,"sector":sectors[symbol],
+                              "shares":int(qty),"mark_price":marks[symbol]})
+    return positions
 
 
 def run_fixture(payload):
@@ -54,10 +74,12 @@ def run_fixture(payload):
     # Fixed next-session synthetic mark shock triggers an independent exit.
     marks={h.symbol:h.price*.95 for h in account.holdings}
     sectors={h.symbol:h.sector for h in account.holdings}
-    positions=[{"symbol":p["identifier"],"sector":sectors[p["identifier"]],"shares":p["shares"],
-                "mark_price":marks[p["identifier"]]} for p in snapshot["positions"] if p["type"]=="equity" and p["shares"]>0]
-    exit_account=Account.from_payload({"account_id":account.account_id,"account_type":"cash",
-                    "settled_cash":snapshot["settled_cash"],"margin_debt":0,"positions":positions})
+    try:
+        positions=_exit_positions(snapshot,marks,sectors)
+        exit_account=Account.from_payload({"account_id":account.account_id,"account_type":"cash",
+                        "settled_cash":snapshot["settled_cash"],"margin_debt":0,"positions":positions})
+    except (ValueError,TypeError,KeyError,OverflowError) as exc:
+        return {**FLAGS,"decision":"EXIT_BLOCKED","reason":str(exc),"entry":entry}
     if not positions:
         return {**FLAGS,"decision":"NO_POSITION_TO_MONITOR","entry":entry}
     exit_at=now+timedelta(days=3)
