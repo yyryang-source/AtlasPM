@@ -7,7 +7,6 @@ Only small JSON/CSV audit metadata is written under gitignored local_data/.
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
