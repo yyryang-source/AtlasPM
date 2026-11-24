@@ -562,3 +562,19 @@ permission for market-data training or redistribution.
 Local report: local_data/stock_5m/huggingface/quality/certification_v5/collector/latest.json.
 No canonical price partitions scanned or changed, no training or order
 permission granted.
+
+
+### V5.1 SEC index anomaly handling
+
+A quarterly SEC index can contain isolated records that fail date, field,
+or path validation. The collector now retains the original response bytes
+and omits those records from normalized candidates. Rejection counts,
+categories and up to 25 line-numbered examples appear in manifest stats.
+The conservative provisional threshold is at most 100 rejected rows and
+at most 0.1% of observed rows, with at least one valid row. A run containing
+such a quarter reports CANDIDATES_COLLECTED_WITH_REVIEW, not clean coverage.
+Larger anomalies or missing headers fail that quarter, store a rejection
+manifest under collector/rejected, and continue independent quarters.
+HTTP/access and network failures still stop that provider for the run.
+This is a collection policy, not proof that rejected records are corrupt.
+The original raw bytes remain the evidence of every omitted row.
