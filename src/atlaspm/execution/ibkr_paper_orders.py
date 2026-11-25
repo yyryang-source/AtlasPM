@@ -246,6 +246,8 @@ def _broker_observations(batch: dict, orders: list[dict], trades: object, accoun
     if not isinstance(trades, list):
         raise ValueError("Broker trade snapshot is incomplete")
     indexed = {order["client_id"]: order for order in batch["orders"]}
+    if len(indexed)!=len(batch["orders"]):
+        raise ValueError("Duplicate journaled client reference")
     id_index = {order["order_id"]: order["client_id"] for order in batch["orders"] if order["order_id"] is not None}
     if len(id_index) != sum(order["order_id"] is not None for order in batch["orders"]):
         raise ValueError("Broker order ID is shared by multiple journaled tickets")
@@ -265,6 +267,7 @@ def _broker_observations(batch: dict, orders: list[dict], trades: object, accoun
         ticket = order["ticket"]
         broker_id = _order_id(broker_id)
         if (client_id in seen or broker_id in observed_ids or order["state"] == "not_sent"
+                or order["order_id"] not in (None,broker_id)
                 or row.get("acct", row.get("account")) != account
                 or row.get("conid") != ticket["conid"] or row.get("side") != ticket["side"]):
             raise ValueError("Broker order identity conflicts with the journaled Paper ticket")
@@ -273,7 +276,8 @@ def _broker_observations(batch: dict, orders: list[dict], trades: object, accoun
         filled = _quantity(row.get("filledQuantity"), "broker filled quantity")
         remaining = _quantity(row.get("remainingQuantity"), "broker remaining quantity")
         state = _broker_status(row.get("status"))
-        if (filled + remaining > ticket["quantity"] or state == "filled" and filled != ticket["quantity"]
+        if ((order["broker_filled"] is not None and filled<order["broker_filled"])
+                or filled + remaining > ticket["quantity"] or state == "filled" and filled != ticket["quantity"]
                 or state in {"working", "partial", "cancel_requested"} and filled + remaining != ticket["quantity"]):
             raise ValueError("Broker fill quantities conflict with the journaled Paper ticket")
         if order["state"] in TERMINAL and order["state"] != state:
@@ -289,6 +293,7 @@ def _broker_observations(batch: dict, orders: list[dict], trades: object, accoun
         observations.append({"client_id": client_id, "state": state, "detail": detail,
                              "order_id": broker_id, "broker_filled": filled, "expected": {order["state"]}})
     fills = []
+    execution_ids=set()
     started = datetime.fromisoformat(batch["created_at"]).timestamp()
     for row in trades:
         if not isinstance(row, dict):
@@ -304,6 +309,9 @@ def _broker_observations(batch: dict, orders: list[dict], trades: object, accoun
                 or row.get("conid") != ticket["conid"] or side != ticket["side"]
                 or not isinstance(execution_id, str) or not execution_id):
             raise ValueError("Broker execution identity conflicts with the journaled Paper ticket")
+        if execution_id in execution_ids:
+            raise ValueError("Duplicate broker execution ID in snapshot")
+        execution_ids.add(execution_id)
         stamp = _number(row.get("trade_time_r"), "execution timestamp", limit=10**15) / 1000
         if float(stamp) < started - 1:
             raise ValueError("Broker execution predates the Paper batch")
@@ -387,6 +395,11 @@ def review_profile_recovery(transport, journal, account, orders):
     new_fills = 0
     missing_commission = 0
     broker_fill_conflicts = 0
+    missing_execution_detail_count = 0
+    unconfirmed_execution_total_count = 0
+    unobserved_nonterminal_count = 0
+    execution_owners = {}
+    observed_id_owners = {}
     reasons = set()
     if inventory["stopped"]:
         reasons.add("PAPER_JOURNAL_OPERATOR_STOPPED")
@@ -416,6 +429,13 @@ def review_profile_recovery(transport, journal, account, orders):
         # Reuse exact ticket, order identity, state and fill validation.
         observations, fills = _broker_observations(batch, orders["orders"], trades, account)
         observed_count += len(observations)
+        by_ref={row["client_id"]:row for row in observations}
+        for row in observations:
+            oid,ref=row["order_id"],row["client_id"]
+            if observed_id_owners.setdefault(oid,ref)!=ref:
+                raise ValueError("RECOVERY_BROKER_ORDER_ID_REUSED")
+            if oid in all_ids and not any(o["order_id"]==oid and o["client_id"]==ref for o in batch["orders"]):
+                raise ValueError("RECOVERY_BROKER_ORDER_ID_CONFLICT")
         matching_active.update(str(row["order_id"]) for row in observations
                                if row["state"] in {"working","partial","cancel_requested","cancel_unknown"})
         stored = {item["execution_id"]:item for item in batch["fills"]}
@@ -434,14 +454,46 @@ def review_profile_recovery(transport, journal, account, orders):
             elif previous!=fill and (previous["commission"] is not None or
                     previous | {"commission":fill["commission"]} != fill):
                 broker_fill_conflicts += 1
-            candidate[key] = fill
+            if previous is None or previous==fill or (
+                    previous["commission"] is None and fill["commission"] is not None
+                    and previous | {"commission":fill["commission"]} == fill):
+                candidate[key] = fill
+            # Retain stored evidence when the new snapshot conflicts.
         quantities = Counter()
         for fill in candidate.values():
-            quantities[fill["client_id"]] += fill["shares"]
+            ref=fill["client_id"]
+            if execution_owners.setdefault(fill["execution_id"],ref)!=ref:
+                raise ValueError("RECOVERY_EXECUTION_ID_REUSED_ACROSS_BATCHES")
+            quantities[ref] += fill["shares"]
             missing_commission += fill["commission"] is None
         for order in batch["orders"]:
-            if quantities[order["client_id"]] > order["ticket"]["quantity"]:
-                broker_fill_conflicts += 1
+            ref=order["client_id"]
+            obs=by_ref.get(ref)
+            state=obs["state"] if obs else order["state"]
+            reported=obs["broker_filled"] if obs else order["broker_filled"]
+            quantity=quantities[ref]
+            if not obs and state not in TERMINAL | {"not_sent"}:
+                unobserved_nonterminal_count+=1
+            if (quantity>order["ticket"]["quantity"] or
+                    state in {"not_sent","rejected"} and quantity):
+                broker_fill_conflicts+=1
+            elif reported is None:
+                if state!="not_sent":
+                    unconfirmed_execution_total_count+=1
+            elif quantity<reported:
+                missing_execution_detail_count+=1
+            elif quantity>reported:
+                # A live working snapshot can lag its executions. Terminal
+                # totals, however, must not contradict detailed executions.
+                if state in TERMINAL:
+                    broker_fill_conflicts+=1
+                else:
+                    unconfirmed_execution_total_count+=1
+        # New observations cannot claim IDs belonging to later local batches.
+        for order in batch["orders"]:
+            oid,ref=order["order_id"],order["client_id"]
+            if oid is not None and observed_id_owners.get(oid,ref)!=ref:
+                raise ValueError("RECOVERY_BROKER_ORDER_ID_CONFLICT")
     external = sum(row["id"] not in matching_active for row in active)
     if external:
         reasons.add("UNMATCHED_WORKING_BROKER_ORDERS")
@@ -451,6 +503,12 @@ def review_profile_recovery(transport, journal, account, orders):
         reasons.add("BROKER_FILL_EVIDENCE_CONFLICT")
     if missing_commission:
         reasons.add("EXECUTION_COMMISSION_INCOMPLETE")
+    if missing_execution_detail_count:
+        reasons.add("BROKER_EXECUTION_DETAILS_INCOMPLETE")
+    if unconfirmed_execution_total_count:
+        reasons.add("BROKER_EXECUTION_TOTAL_UNCONFIRMED")
+    if unobserved_nonterminal_count:
+        reasons.add("NONTERMINAL_ORDER_NOT_OBSERVED")
     return {**FLAGS,"status":"PAPER_RECOVERY_REVIEW_COMPLETED",
             "journal_state":inventory["journal_state"],
             "journal_operator_stopped":inventory["stopped"],
@@ -460,7 +518,11 @@ def review_profile_recovery(transport, journal, account, orders):
             "ambiguous_intent_count":unknown_count,"broker_working_order_count":len(active),
             "unmatched_working_order_count":external,"observed_journal_order_count":observed_count,
             "new_broker_fill_candidates":new_fills,"missing_commission_count":missing_commission,
-            "fill_conflict_count":broker_fill_conflicts,"trade_snapshot_requested":bool(batches),
+            "fill_conflict_count":broker_fill_conflicts,
+            "orders_missing_execution_details":missing_execution_detail_count,
+            "orders_with_unconfirmed_execution_total":unconfirmed_execution_total_count,
+            "unobserved_nonterminal_order_count":unobserved_nonterminal_count,
+            "trade_snapshot_requested":bool(batches),
             "block_reasons":sorted(reasons),"journal_updated":False,
             "account_cash_reconciled":False,"feedback_eligible_for_training":False,
             "auto_resend_enabled":False,"auto_cancel_enabled":False,"trade_authorized":False}

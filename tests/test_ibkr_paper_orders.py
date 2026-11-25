@@ -243,6 +243,49 @@ class PaperLifecycleTests(unittest.TestCase):
         self.assertEqual([json.loads(line)["status"] for line in output.getvalue().splitlines()],
                          ["waiting_for_broker", "pending", "matched"])
 
+    def test_readonly_recovery_distinguishes_missing_details_and_terminal_conflicts(self):
+        from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+        batch=self.submit()["batch"]
+        def review():
+            return review_profile_recovery(self.gateway,self.journal,self.account,
+                {"snapshot":True,"orders":self.gateway.open_orders})
+        self.gateway.open_orders=[self.order(3,"Cancelled")]
+        result=review()
+        self.assertEqual(result["orders_missing_execution_details"],1)
+        self.assertIn("BROKER_EXECUTION_DETAILS_INCOMPLETE",result["block_reasons"])
+        self.assertEqual(result["fill_conflict_count"],0)
+        self.gateway.trades=[self.fill(4,"0.25")]
+        result=review()
+        self.assertEqual(result["fill_conflict_count"],1)
+        self.assertIn("BROKER_FILL_EVIDENCE_CONFLICT",result["block_reasons"])
+        self.gateway.trades=[self.fill(3,None)]
+        result=review()
+        self.assertEqual(result["orders_missing_execution_details"],0)
+        self.assertEqual(result["missing_commission_count"],1)
+        self.assertFalse(result["feedback_eligible_for_training"])
+        self.assertFalse(result["journal_updated"])
+        self.assertEqual(batch,self.journal.get(batch["id"]))
+        self.assertEqual([c[0] for c in self.gateway.calls],["place"])
+
+    def test_recovery_rejects_order_id_change_and_regressing_fill_total(self):
+        from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+        batch=self.submit()["batch"]
+        self.gateway.open_orders=[self.order(3,"Submitted")]
+        self.gateway.trades=[self.fill(3,"0.25")]
+        self.snapshot.update(positions={"XYZ":6},total_cash=9700.05)
+        self.sync()
+        stored=self.journal.get(batch["id"])
+        for row in (self.order(3,"Cancelled") | {"orderId":152},self.order(2,"Cancelled")):
+            self.gateway.open_orders=[row]
+            with self.assertRaisesRegex(ValueError,"conflict"):
+                review_profile_recovery(self.gateway,self.journal,self.account,
+                    {"snapshot":True,"orders":[row]})
+        self.gateway.open_orders=[self.order(3,"Cancelled")]
+        self.gateway.trades=[self.fill(3,"0.25"),self.fill(3,"0.25")]
+        with self.assertRaisesRegex(ValueError,"Duplicate broker execution ID"):
+            self.sync()
+        self.assertEqual(stored,self.journal.get(batch["id"]))
+
     def test_missing_live_order_can_recover_cached_cancellation_and_partial_execution(self):
         batch_id = self.submit()["batch"]["id"]
         self.gateway.order_details["151"] = self.terminal_order()
