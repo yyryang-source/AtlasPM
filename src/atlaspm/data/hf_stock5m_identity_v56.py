@@ -13,7 +13,7 @@ import os
 import re
 import time
 
-from atlaspm.data import sec_legacy_cover
+from atlaspm.data import sec_legacy_cover, sec_legacy_listing
 from atlaspm.data import hf_stock5m_evidence_v51 as ev
 from atlaspm.data import hf_stock5m_filings_v52 as filings
 from atlaspm.data import hf_stock5m_evidence_v55 as matching
@@ -105,7 +105,9 @@ def _legacy_listing_leads(primary, filing):
     clean=" ".join("".join(parser.parts).split())
     leads=[]
     seen=set()
-    for match in _LEGACY_LISTING.finditer(clean):
+    from itertools import chain
+    for match in chain(_LEGACY_LISTING.finditer(clean),
+                       sec_legacy_listing.listing_matches(clean,filing.get("issuer"))):
         symbol=match["symbol"]
         if not SYMBOL.fullmatch(symbol):
             continue
@@ -120,7 +122,7 @@ def _legacy_listing_leads(primary, filing):
                       "valid_from":None,"valid_to":None,"status":"UNVERIFIED_LEGACY_LISTING_TEXT"})
         if len(leads)>=20:
             break
-    return leads
+    return leads, sec_legacy_listing.change_leads(clean,filing["filed_date"])
 
 
 def extract(data,filing):
@@ -182,10 +184,11 @@ def extract(data,filing):
                 "security_id":None,"valid_from":None,"valid_to":None,
                 "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
     conflicts={s for s,n in Counter(o["symbol"] for o in observations).items() if n>1}
-    leads = (_legacy_listing_leads(primary[0],filing) if filing["form"] in ev.PERIODIC_FORMS
-             and not re.search(r"<\s*ix:",primary[0],re.I) else [])
+    leads, changes = (_legacy_listing_leads(primary[0],filing) if filing["form"] in ev.PERIODIC_FORMS
+                      and not re.search(r"<\s*ix:",primary[0],re.I) else ([],[]))
     return {"observations":[o for o in observations if o["symbol"] not in conflicts],
             "legacy_listing_text_leads":leads,
+            "legacy_symbol_change_text_leads":changes,
             "conflicting_symbols":sorted(conflicts),"rejected_tagged_rows":rejected,
             "status":"COVER_OBSERVATIONS_REVIEW_REQUIRED" if observations and not conflicts
                      else "AMBIGUOUS_COVER_OBSERVATIONS" if conflicts else "NO_SUPPORTED_COVER_FACTS"}
@@ -309,6 +312,7 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
     report.update(results=results,status_counts=dict(counts),
                   cover_observations=sum(len(x.get("observations",[])) for x in results),
                   legacy_listing_text_lead_count=sum(len(x.get("legacy_listing_text_leads",[])) for x in results),
+                  legacy_symbol_change_text_lead_count=sum(len(x.get("legacy_symbol_change_text_leads",[])) for x in results),
                   filings_selected=len(results),filings_with_bodies=sum("sha256" in x for x in results),
                   certified_identities=0,claims_ingested=0,
                   page_complete=not any(counts[k] for k in ("NOT_CACHED","COLLECTION_OR_CACHE_ERROR")),

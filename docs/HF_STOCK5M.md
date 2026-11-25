@@ -927,3 +927,15 @@ to supported cover observations, even if a match is unique. It cannot
 resolve temporal scope, share-class identity or ownership of a ticker;
 no lead is ingested automatically. Exhibit-only text, tagged documents,
 unquoted ticker guesses and generic issuer name matches are not supported.
+
+### Expanded legacy Item 5 diagnostic leads
+
+The 2000 local pilot exposed several explicit listing syntaxes missed by the
+initial matcher. The additional matcher is bounded to Item 5 market sections
+and retains reported exchange text (including combined venues), named share
+classes and explicit ticker punctuation. It never assigns a primary MIC,
+security ID or historical interval. Dated ticker/venue transition statements
+are emitted in a separate review-only list, preserving the filing-known date
+and leaving effective_date unset. Duplicate primary documents remain blocked.
+The existing cover and text-lead contracts, review and permission gates remain.
+Re-run the same 20-issuer periodic pilot without --fetch to reuse cached files.

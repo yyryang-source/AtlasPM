@@ -82,6 +82,52 @@ class ExtractTests(unittest.TestCase):
         exhibit="<DOCUMENT>\n<TYPE>EX-99\n<TEXT>"+exact+"</TEXT></DOCUMENT>"
         self.assertEqual(v.extract(body(x,"",extra=exhibit),x)["legacy_listing_text_leads"],[])
 
+    def test_item5_real_legacy_syntax_regressions(self):
+        # Reproduce syntax seen in the user's 2000 diagnostic, not full
+        # archived filings. These are synthetic regression inputs.
+        cases=[
+            ("K TRON INTERNATIONAL INC","The Company's Common Stock trades on the Nasdaq National Market under the symbol \"KTII.\"","KTII"),
+            ("ACMAT CORP","ACMAT's Class A Stock trades on the Nasdaq Stock Market under the symbol ACMTA.","ACMTA"),
+            ("ACME ELECTRIC CORP","Acme's Common Stock is traded on the NASDAQ National Market, ticker symbol ACEE.","ACEE"),
+            ("AFFILIATED COMPUTER SERVICES INC","Our Class A common stock is traded on the New York Stock Exchange under the symbol \"ACS.\"","ACS"),
+            ("ADVANCED MICRO DEVICES INC","Our common stock (symbol AMD) is listed on the New York Stock Exchange.","AMD"),
+            ("ALLIANCE GAMING CORP","The Common Stock is traded on the Nasdaq Small Cap Index under the symbol \"ALLY\".","ALLY"),
+            ("AIR PRODUCTS & CHEMICALS INC","The Company's Common Stock, ticker symbol \"APD\", is listed on the New York and Pacific Stock Exchanges.","APD"),
+        ]
+        for issuer, sentence, expected in cases:
+            with self.subTest(issuer=issuer):
+                x={**filing(),"form":"10-K405","issuer":issuer}
+                section="PART II ITEM 5. MARKET FOR THE REGISTRANT'S COMMON EQUITY. "
+                r=v.extract(body(x,section+sentence),x)
+                self.assertEqual([a["symbol_candidate"] for a in r["legacy_listing_text_leads"]],[expected])
+                self.assertEqual(r["observations"],[])
+                self.assertIsNone(r["legacy_listing_text_leads"][0]["security_id"])
+                self.assertIsNone(r["legacy_listing_text_leads"][0]["valid_from"])
+
+    def test_item5_changes_separate_and_third_party_rejected(self):
+        x={**filing(),"form":"10-K405","issuer":"EXAMPLE CORP"}
+        section="PART II ITEM 5. MARKET FOR OUR COMMON EQUITY. "
+        text='Our common stock trades on the Nasdaq National Market under the symbol "ARXX". Prior to March 21, 2000, our common stock was traded on the New York Stock Exchange under the symbol "ARX".'
+        r=v.extract(body(x,section+text),x)
+        self.assertEqual([a["symbol_candidate"] for a in r["legacy_listing_text_leads"]],["ARXX"])
+        change=r["legacy_symbol_change_text_leads"][0]
+        self.assertEqual((change["old_symbol_candidate"],change["new_symbol_candidate"],change["reported_change_date"]),("ARX","ARXX","2000-03-21"))
+        self.assertIsNone(change["effective_date"])
+        self.assertIsNone(change["security_id"])
+        relm='The Company\'s stock is traded on the NASDAQ National Market System. Formerly, the symbol was "ADGE". The symbol changed to "RELM" effective on January 30, 1998.'
+        r=v.extract(body(x,section+relm),x)
+        self.assertEqual(r["legacy_symbol_change_text_leads"][0]["new_symbol_candidate"],"RELM")
+        for sentence in (
+            'Planet is publicly traded on the NASDAQ small cap market under the trading symbol "POLY".',
+            'Planet\'s common stock (symbol POLY) is listed on the New York Stock Exchange.',
+            'Our common stock (symbol AMD) is listed on the New York Stock Exchange.',
+        ):
+            # Last sentence is deliberately outside Item 5.
+            prefix=section if "Planet" in sentence else "ITEM 8. FINANCIAL STATEMENTS. "
+            self.assertEqual(v.extract(body(x,prefix+sentence),x)["legacy_listing_text_leads"],[])
+        with self.assertRaisesRegex(ValueError,"PRIMARY_DOCUMENT_UNRESOLVED"):
+            v.extract(body(x,section+text,extra="<DOCUMENT>\n<TYPE>10-K405\n<TEXT>another primary</TEXT></DOCUMENT>"),x)
+
     def test_header_and_exhibits(self):
         x=filing()
         b=body(x,"",extra="<DOCUMENT>\n<TYPE>EX-99\n<TEXT><table>"+row()+"</table></TEXT></DOCUMENT>")
