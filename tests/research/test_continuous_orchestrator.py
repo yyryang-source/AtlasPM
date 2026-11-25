@@ -484,3 +484,65 @@ class ContinuousTests(unittest.TestCase):
             result=local_specialist_tasks([task],as_of="2020-01-02T21:00:00Z")
             loader.assert_not_called()
         self.assertTrue(result["tasks"][0]["status"].startswith("BLOCKED"))
+
+
+class MarketResearchCycleTests(unittest.TestCase):
+    def plan(self, **updates):
+        return {"assets":{"AAA":"stock","BBB":"stock","CCC":"etf"},
+                "available_lines":2,"selection":"reviewed_rotation",
+                "move_threshold":.02,"enqueue_events":False,**updates}
+
+    def test_rotation_uses_existing_probe_and_no_retention(self):
+        from unittest.mock import patch
+        from atlaspm.framework import orchestrator as orch
+        state = {}
+        probe = {"release_confirmed":True,"research_contract_count":2,
+                 "research_event_candidates":[]}
+        with patch("atlaspm.data.provider_policy.local_rights"), \
+             patch.object(orch.event_queue,"_read_state",return_value={}), \
+             patch.object(orch,"market_phase",return_value="market"), \
+             patch("atlaspm.execution.ibkr_market_data.run_symbol_probe",side_effect=lambda *a,**k:dict(probe)) as run, \
+             patch.object(orch.event_queue,"enqueue") as enqueue:
+            first = orch.market_research_cycle(self.plan(),state=state)
+            second = orch.market_research_cycle(self.plan(),state=state)
+        self.assertEqual(first["selected_symbols"],["AAA","BBB"])
+        self.assertEqual(second["selected_symbols"],["CCC","AAA"])
+        self.assertEqual(run.call_count,2)
+        self.assertIs(run.call_args.kwargs["research_seen"],state["seen"])
+        self.assertFalse(first["trade_authorized"])
+        enqueue.assert_not_called()
+
+    def test_market_control_and_failed_rank_prevent_network(self):
+        from unittest.mock import patch
+        from atlaspm.framework import orchestrator as orch
+        with patch("atlaspm.data.provider_policy.local_rights"), \
+             patch.object(orch.event_queue,"_read_state",return_value={orch.event_queue.CONTROL_KEY:{"stopped":True}}) as read, \
+             patch.object(orch,"market_phase",return_value="market"), \
+             patch("atlaspm.execution.ibkr_market_data.run_symbol_probe") as run, \
+             patch("atlaspm.research.intelligence.local_specialist_tasks",return_value={"tasks":[{"status":"BLOCKED_INPUT_RIGHTS_OR_DEPENDENCY"}]}):
+            self.assertEqual(orch.market_research_cycle(self.plan(),state={})["status"],"PAUSED")
+            read.return_value={}
+            self.assertEqual(orch.market_research_cycle(self.plan(selection="local_daily_rank"),state={})["status"],"BLOCKED_LOCAL_RANKING")
+            run.assert_not_called()
+
+    def test_event_queue_opt_in_and_reuse_tick(self):
+        from unittest.mock import patch
+        from datetime import datetime, UTC
+        from atlaspm.framework import orchestrator as orch
+        candidate = {"event":{"provider":"ibkr","kind":"price_move"},
+                     "received_at":datetime.now(UTC).isoformat()}
+        with patch("atlaspm.data.provider_policy.local_rights") as rights, \
+             patch.object(orch.event_queue,"_read_state",return_value={}), \
+             patch.object(orch,"market_phase",return_value="market"), \
+             patch("atlaspm.execution.ibkr_market_data.run_symbol_probe",return_value={
+                 "release_confirmed":True,"research_event_candidates":[candidate]}), \
+             patch("atlaspm.research.financial_events.normalize",return_value={"checked":True}), \
+             patch.object(orch.event_queue,"enqueue",return_value={"added":1}) as enqueue, \
+             patch.object(orch,"tick",return_value={"review":{"status":"REVIEWED"}}):
+            out=orch.market_research_cycle(self.plan(enqueue_events=True),state={})
+        rights.assert_called_once_with("ibkr",retention=True)
+        enqueue.assert_called_once()
+        self.assertEqual(out["events_added"],1)
+        self.assertEqual(out["event_review"]["status"],"REVIEWED")
+        self.assertFalse(out["portfolio_mark_eligible"])
+

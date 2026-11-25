@@ -316,7 +316,8 @@ PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
 
 
 def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
-                     include_history=False, output=None, research_assets=None):
+                     include_history=False, output=None, research_assets=None,
+                     research_seen=None, event_threshold=None):
     """Short, local Paper-only probe. No data retention without separate rights."""
     local_rights("ibkr", retention=output is not None)
     if type(polls) is not int or not 2 <= polls <= 3:
@@ -332,6 +333,13 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                 or set(research_assets) != set(symbols)
                 or any(v not in {"stock", "etf"} for v in research_assets.values())):
             raise ValueError("Research requires history and a reviewed subtype for every symbol")
+    if research_seen is not None and (research_assets is None or not isinstance(research_seen, dict)
+                                      or len(research_seen) > 8 or output is not None):
+        raise ValueError("Invalid bounded in-memory research dedup scope")
+    if event_threshold is not None and (research_assets is None
+            or type(event_threshold) not in {int, float} or not isfinite(event_threshold)
+            or not .005 <= event_threshold <= .25):
+        raise ValueError("Invalid price observation threshold")
     if output is not None:
         # Fixed output avoids overwriting the profile, risk snapshot or journal.
         output = _sync_path(Path("local_data/ibkr_paper_market_probe.json"))
@@ -394,11 +402,38 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
         if research_assets is not None:
             from atlaspm.research.intelligence import broker_market_research
             cutoff = datetime.now(UTC).isoformat()
+            from atlaspm.research.training_registry import digest
+            candidates = []
             for symbol, identity in identities.items():
+                history = histories[symbol]
+                # Pool.history already validates OHLCV/order. Exclude the
+                # partial final bar and receipt timestamp from content identity.
+                fingerprint = digest([identity, research_assets[symbol],
+                                      history["provider_metadata"], history["rows"][:-1]])
+                if research_seen is not None and research_seen.get(symbol) == fingerprint:
+                    research[symbol] = {"status": "UNCHANGED_OBSERVATION_SKIPPED",
+                                        "research_contract": None, "fusion": None}
+                    continue
                 try:
                     research[symbol] = broker_market_research(
-                        identity, histories[symbol], by_id[identity["conid"]],
+                        identity, history, by_id[identity["conid"]],
                         asset_type=research_assets[symbol], as_of=cutoff)
+                    row = research[symbol]
+                    if row["status"] == "DESCRIPTIVE_RESEARCH_COMPLETED":
+                        if research_seen is not None:
+                            if symbol not in research_seen and len(research_seen) >= 8:
+                                raise ValueError("Research observation cache full")
+                            research_seen[symbol] = fingerprint
+                        if event_threshold is not None and abs(row["metrics"]["observed_window_return"]) >= event_threshold:
+                            candidates.append({
+                                "event": {"provider": "ibkr", "source_id": digest([identity["conid"], fingerprint]),
+                                          "kind": "price_move", "subjects": [row["security_id"]],
+                                          "published_at": None, "first_available_at": None,
+                                          "effective_at": None, "evidence_sha256": fingerprint,
+                                          "delivery": "delayed" if row["snapshot_availability"] == "DELAYED" else "unknown",
+                                          "expiry_seconds": 300},
+                                "received_at": history["retrieved_at_utc"],
+                            })
                 except (ValueError, TypeError, KeyError, OverflowError):
                     # No raw provider data or private identifiers in exceptions.
                     research[symbol] = {**_FLAGS, "status": "RESEARCH_EVIDENCE_REJECTED",
@@ -417,6 +452,9 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                     "portfolio_mark_eligible": False,
                 }
             result["research_contract_count"] = sum(row["research_contract"] is not None for row in research.values())
+            result["unchanged_research_count"] = sum(row["status"] == "UNCHANGED_OBSERVATION_SKIPPED" for row in research.values())
+            if event_threshold is not None:
+                result["research_event_candidates"] = candidates
         if output is not None:
             _write_sync_json(Path("local_data/ibkr_paper_market_probe.json"), {
                 **result, "latest_snapshot": last, "history": histories,

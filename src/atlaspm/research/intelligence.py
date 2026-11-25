@@ -421,7 +421,7 @@ _EVENT_TOPICS={
     "credit_rating":("credit","bond"),"credit_outlook":("credit","bond"),"credit_watch":("credit","risk"),
     "credit_withdrawal":("credit","risk"),"default":("credit","risk","bond"),
     "earnings":("fundamental","financial_statement"),"sec_disclosure":("sec","financial_statement"),
-    "options_flow":("options",),"volume_anomaly":("technical",),"macro_release":("macro","regime"),
+    "options_flow":("options",),"volume_anomaly":("technical",),"price_move":("technical",),"macro_release":("macro","regime"),
     "rate_decision":("macro","bond","regime"),"index_change":("industry","factor"),
     "corporate_action":("fundamental","risk"),"position_risk":("risk",),"bond_trade":("bond",),
 }

@@ -17,7 +17,7 @@ from atlaspm.data.provider_policy import ROLES, local_rights, RIGHTS_ENV, requir
 
 KINDS = {"news":2, "analyst_rating":3, "earnings_forecast":3, "credit_rating":4,
          "credit_outlook":3, "credit_watch":4, "credit_withdrawal":4, "default":5,
-         "earnings":4, "sec_disclosure":4, "options_flow":3, "volume_anomaly":3,
+         "earnings":4, "sec_disclosure":4, "options_flow":3, "volume_anomaly":3, "price_move":3,
          "macro_release":4, "rate_decision":5, "index_change":3,
          "corporate_action":4, "position_risk":5, "bond_trade":2}
 _ALLOWED = {
@@ -26,7 +26,7 @@ _ALLOWED = {
     "sec":{"sec_disclosure","earnings","corporate_action"},
     "federal_reserve":{"macro_release","rate_decision"},
     "fred":{"macro_release"}, "treasury":{"macro_release"},
-    "unusual_whales":{"options_flow"}, "ibkr":{"volume_anomaly","position_risk"},
+    "unusual_whales":{"options_flow"}, "ibkr":{"volume_anomaly","position_risk","price_move"},
     "finra":{"bond_trade"}, "msrb":{"bond_trade","sec_disclosure"},
 }
 for _agency in ("xpressapi","sp_ratings","moodys","fitch","dbrs","kbra"):

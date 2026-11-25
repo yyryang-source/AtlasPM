@@ -186,3 +186,39 @@ includes descriptive metrics, contract and fusion receipts. No new database,
 event queue writes, model admission, trading permissions or external AI calls.
 Provider historical response reference:
 https://www.interactivebrokers.com/docs/web-api/api-reference/trading/trading-market-data/get-md-history
+
+
+### Bounded autonomous market research (foreground)
+
+The existing Orchestrator has an explicit network-enabled research action
+`market-research`. The ordinary offline `run` and `tick` remain offline.
+Create a reviewed plan in ignored local_data, for example:
+
+~~~json
+{"assets":{"AAPL":"stock","NVDA":"stock","MSFT":"stock","SPY":"etf","QQQ":"etf"},
+ "available_lines":5,"selection":"reviewed_rotation","move_threshold":0.02,
+ "enqueue_events":false}
+~~~
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.framework.orchestrator market-research --file local_data/ibkr_market_plan.json --cycles 3 --interval 65
+~~~
+
+This is an explicitly bounded foreground worker, max 20 cycles. Only during
+NYSE regular hours, it rotates a reviewed universe (max eight symbols) through
+the existing line budget and Paper probe. For `local_daily_rank`, reuse the
+existing exploratory daily technical screener, cached per local market day;
+missing or insufficient local data blocks selection, without silent fallback.
+The worker does not yet discover the entire US stock universe.
+An in-memory cache skips repeated successful observations with identical closed
+bar content and metadata. No cached quote becomes a current mark; each cycle
+still retrieves bounded history and releases owned market subscriptions.
+Price-move events describe observed window return above a configured absolute
+threshold, not statistical anomalies or forecasts. They are delayed/unknown
+delivery with unknown original availability and no directional signal.
+Queue persistence is off by default; opt in via enqueue_events=true only with
+confirmed separate IBKR retention rights. Uses existing enqueue/tick, dedup,
+capacity and operator controls. Actual instrument admission is still required
+for real event specialist dispatch. No automatic model training, backtest,
+portfolio marks, order execution or external AI. Operator stop/takeover is
+checked before and after each probe; Ctrl+C ends the foreground worker.

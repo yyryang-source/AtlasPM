@@ -102,6 +102,109 @@ def tick(*, as_of, holdings=(),limit=20,path=event_queue.PATH,local_bindings=Non
             "broker_side_effects":False}
 
 
+def validate_market_plan(plan):
+    """Explicit reviewed candidate universe; no inferred ETF/stock subtype."""
+    import re
+    from math import isfinite
+    if not isinstance(plan, dict) or set(plan) != {
+        "assets", "available_lines", "selection", "move_threshold", "enqueue_events"
+    }:
+        raise ValueError("MARKET_PLAN_SCHEMA")
+    assets = plan["assets"]
+    if (not isinstance(assets, dict) or not 1 <= len(assets) <= 8
+            or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s)
+                   or kind not in {"stock", "etf"} for s, kind in assets.items())):
+        raise ValueError("MARKET_PLAN_REVIEWED_UNIVERSE_REQUIRED")
+    lines, threshold = plan["available_lines"], plan["move_threshold"]
+    if (type(lines) is not int or not 1 <= lines <= 5
+            or plan["selection"] not in {"reviewed_rotation", "local_daily_rank"}
+            or type(threshold) not in {int, float} or not isfinite(threshold)
+            or not .005 <= threshold <= .25 or type(plan["enqueue_events"]) is not bool):
+        raise ValueError("MARKET_PLAN_POLICY")
+    return {**plan, "assets": dict(assets)}
+
+
+def market_research_cycle(plan, *, state, path=event_queue.PATH):
+    """One explicit network-enabled Paper research cycle, outside offline tick.
+
+    State is bounded process-local metadata only. The existing probe owns
+    verified TLS, pacing, SSO, reservation locking and release. No orders.
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from atlaspm.data.provider_policy import local_rights
+    from atlaspm.execution.ibkr_market_data import run_symbol_probe
+    from atlaspm.research.intelligence import local_specialist_tasks
+
+    plan = validate_market_plan(plan)
+    local_rights("ibkr", retention=plan["enqueue_events"])
+    control = event_queue._read_state(path).get(event_queue.CONTROL_KEY, {})
+    if control.get("stopped") or control.get("manual_takeover"):
+        return {**FLAGS, "status": "PAUSED", "market_network_calls_started": False}
+    now = datetime.now(UTC)
+    phase = market_phase(now.isoformat())
+    if phase != "market":
+        return {**FLAGS, "status": "MARKET_CLOSED", "phase": phase,
+                "market_network_calls_started": False}
+    assets = plan["assets"]
+    if plan["selection"] == "local_daily_rank":
+        day = now.astimezone(ZoneInfo("America/New_York")).date()
+        rank_key = digest([day.isoformat(), sorted(assets)])
+        if state.get("rank_key") != rank_key:
+            # Use prior-day exploratory daily observations, never today's
+            # partial daily close. Existing reader owns all data checks.
+            end = day - timedelta(days=1)
+            start = end - timedelta(days=365)
+            ranked = local_specialist_tasks([{"route": "technical_local", "params": {
+                "start": start.isoformat(), "end": end.isoformat(),
+                "symbols": sorted(assets)}}], as_of=now.isoformat())["tasks"][0]
+            if ranked["status"] != "LOCAL_REVIEW_COMPLETED":
+                return {**FLAGS, "status": "BLOCKED_LOCAL_RANKING",
+                        "market_network_calls_started": False}
+            names = [row["symbol"] for row in ranked["report"]["technical_screen"]["ranked"]]
+            if not names or len(set(names)) != len(names) or any(s not in assets for s in names):
+                raise ValueError("MARKET_RANK_SCOPE")
+            state.update(rank_key=rank_key, ranked=names, cursor=0)
+        ordered = state["ranked"]
+    else:
+        ordered = sorted(assets)
+    count = min(plan["available_lines"], len(ordered))
+    cursor = state.get("cursor", 0) % len(ordered)
+    chosen = [ordered[(cursor+i) % len(ordered)] for i in range(count)]
+    # Recheck operator control after optional local ranking and before I/O.
+    control = event_queue._read_state(path).get(event_queue.CONTROL_KEY, {})
+    if control.get("stopped") or control.get("manual_takeover"):
+        return {**FLAGS, "status": "PAUSED", "market_network_calls_started": False}
+    seen = state.setdefault("seen", {})
+    probe = run_symbol_probe(chosen, available_lines=plan["available_lines"],
+                             dedicated_session=True, polls=2, include_history=True,
+                             research_assets={s: assets[s] for s in chosen},
+                             research_seen=seen, event_threshold=plan["move_threshold"])
+    # The probe does not persist restricted market data. Event retention is a
+    # separately opted-in path through the existing bounded queue.
+    candidates = probe.pop("research_event_candidates", [])
+    control = event_queue._read_state(path).get(event_queue.CONTROL_KEY, {})
+    if control.get("stopped") or control.get("manual_takeover"):
+        return {**FLAGS, "status": "PAUSED_AFTER_PROBE", "market_network_calls_started": True,
+                "release_confirmed": probe["release_confirmed"]}
+    added = 0
+    review = None
+    if plan["enqueue_events"] and candidates:
+        from atlaspm.research.financial_events import normalize
+        events = [normalize(item["event"], received_at=item["received_at"]) for item in candidates]
+        added = event_queue.enqueue(events, path=path)["added"]
+    if plan["enqueue_events"]:
+        review = tick(as_of=datetime.now(UTC).isoformat(), limit=20, path=path)["review"]
+    state["cursor"] = (cursor+count) % len(ordered)
+    return {**FLAGS, "status": "MARKET_RESEARCH_CYCLE_COMPLETED",
+            "market_network_calls_started": True, "selection": plan["selection"],
+            "universe_count": len(assets), "eligible_universe_count": len(ordered),
+            "selected_symbols": chosen, "probe": probe,
+            "event_candidate_count": len(candidates), "events_added": added,
+            "event_review": review, "event_retention_enabled": plan["enqueue_events"],
+            "trade_authorized": False, "portfolio_mark_eligible": False}
+
+
 def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
     """Local evaluation only: existing chronological ensemble and monitor.
 
@@ -285,7 +388,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review","multiasset-optimize","model-review-request","model-review-decision","model-review-status"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review","multiasset-optimize","model-review-request","model-review-decision","model-review-status","market-research"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
@@ -293,6 +396,35 @@ def main():
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.action=="market-research":
+        from pathlib import Path
+        from atlaspm.data.market_db import private_path
+        from atlaspm.data.provider_policy import local_rights
+        if not args.file or args.interval < 65 or args.cycles > 20:
+            parser.error("market-research requires --file, 1..20 cycles, 65..300 second interval")
+        with private_path(Path(args.file), exists=True).open("rb") as handle:
+            raw = handle.read(16385)
+        if len(raw) > 16384:
+            raise ValueError("MARKET_PLAN_FILE_LIMIT")
+        plan = validate_market_plan(json.loads(raw))
+        local_rights("ibkr", retention=plan["enqueue_events"])
+        state = {}
+        try:
+            for i in range(args.cycles):
+                result = market_research_cycle(plan, state=state)
+                print(json.dumps({"cycle": i+1, **result}, allow_nan=False), flush=True)
+                if result["status"] != "MARKET_RESEARCH_CYCLE_COMPLETED":
+                    return 1 if result["status"].startswith("BLOCKED") else 0
+                if i+1 < args.cycles:
+                    time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print(json.dumps({**FLAGS, "status": "STOPPED_BY_OPERATOR"}), flush=True)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            from atlaspm.execution.ibkr_gateway import GatewayHTTPError
+            reason = f"HTTP_{exc.status} at {exc.endpoint}" if isinstance(exc, GatewayHTTPError) else type(exc).__name__
+            print(json.dumps({**FLAGS, "status": "MARKET_RESEARCH_BLOCKED", "reason": reason}), flush=True)
+            return 1
+        return 0
     if args.action=="multiasset-optimize":
         from pathlib import Path
         from atlaspm.data.market_db import private_path

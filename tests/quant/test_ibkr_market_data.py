@@ -220,3 +220,19 @@ class MarketPoolTests(unittest.TestCase):
         identity, history, quote, cutoff = self.research_fixture()
         with self.assertRaisesRegex(ValueError,"SUBTYPE_REQUIRED"):
             broker_market_research(identity, history, quote, asset_type="STK", as_of=cutoff)
+
+
+    def test_market_event_category_only_ibkr(self):
+        from atlaspm.research.financial_events import normalize, review
+        now = datetime.now(UTC).isoformat()
+        event = {"provider":"ibkr","source_id":"fixture-observation","kind":"price_move",
+                 "subjects":["conid:10"],"published_at":None,"first_available_at":None,
+                 "effective_at":None,"evidence_sha256":"a"*64,"delivery":"delayed",
+                 "expiry_seconds":300}
+        item = normalize(event, received_at=now)
+        result = review([item], as_of=now)["events"][0]
+        self.assertTrue(result["research_requested"])
+        self.assertFalse(result["realtime_verified"])
+        self.assertIsNone(result["directional_signal"])
+        with self.assertRaises(ValueError):
+            normalize({**event,"provider":"sec"}, received_at=now)
