@@ -367,6 +367,16 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(out["independent_preflight"]["decision"],"BLOCK")
         self.assertTrue(out["independent_preflight"]["pro_forma_unexecuted"]["self_financing_identity_verified"])
         self.assertFalse(out["trade_authorized"])
+        self.assertFalse(out["global_optimum_verified"])
+        with patch("scipy.optimize.minimize",side_effect=ValueError("solver failure")):
+            refused=optimize_multiasset(ledger,context,market,limits)
+        self.assertEqual(refused["status"],"BLOCKED_CONTINUOUS_SOLVE")
+        self.assertEqual(refused["legs"],[])
+        self.assertFalse(refused["trade_authorized"])
+        inputs[symbols[2]]["trading_permission"]=False
+        with self.assertRaisesRegex(ValueError,"OPTION_PERMISSION_REQUIRED"):
+            optimize_multiasset(ledger,context,market,limits)
+        inputs[symbols[2]]["trading_permission"]=True
         market["symbols"]=symbols[::-1]
         with self.assertRaisesRegex(ValueError,"IDENTITY_OR_COVARIANCE_ORDER"):
             optimize_multiasset(ledger,context,market,limits)
