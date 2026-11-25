@@ -21,7 +21,11 @@ def poll_once(source, *, path=event_queue.PATH, fetcher=None, documents=False):
                         lambda: recent_events(monetary_only=False))
     report = fetch()
     if documents:
-        register(source, report)
+        # Durable document jobs are the canonical queue in this mode; the
+        # bounded legacy metadata queue must not stop long-running discovery.
+        added = register(source, report)
+        return {"source": source, "status": "DISCOVERED", "observed": len(report["events"]),
+                "added": added, "transport": report["transport"], "coverage_complete": False}
     queued = event_queue.enqueue(report["events"], path=path)
     return {"source": source, "status": "DISCOVERED", "observed": len(report["events"]),
             "added": queued["added"], "retained": queued["retained"],
@@ -55,7 +59,8 @@ def main():
             print(json.dumps(report), flush=True)
             if report["status"] == "PAUSED":
                 return 0
-        print(json.dumps(event_queue.drain(as_of=datetime.now(UTC).isoformat())), flush=True)
+        if not args.documents:
+            print(json.dumps(event_queue.drain(as_of=datetime.now(UTC).isoformat())), flush=True)
         if index + 1 < args.cycles:
             time.sleep(max(0., args.interval - (time.monotonic() - started)))
     return 0
