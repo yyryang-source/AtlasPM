@@ -609,7 +609,8 @@ def local_specialist_tasks(tasks, *, as_of):
     shapes={"yahoo_finance":{"month"},"bloomberg":{"month"},
         "institutional":{"subject","previous_as_of","unit","period","basis"},
         "credit_history":{"identifier_type","identifier"},
-        "factor_admission":{"months"},"local_artifact":{"artifact_db","artifact_id","payload"},
+        "factor_admission":{"months"},"factor_diagnostics":{"start","end","source","factors","industry_csv"},
+        "local_artifact":{"artifact_db","artifact_id","payload"},
         "artifact_decision":{"artifacts","security_id","future_session_dates","weights","cost_fraction"},
         "events":{"events"},
         "technical_local":{"start","end","symbols"},
@@ -703,6 +704,29 @@ def local_specialist_tasks(tasks, *, as_of):
                                                include_opening_date_payment=False)
                 report.update(research_only=True,source_hashes=hashes,numeric_eligible=False,
                               signal_block_reason="TREASURY_VALUATION_NOT_CALIBRATED_RETURN_FORECAST")
+            elif route=="factor_diagnostics":
+                from datetime import date,timedelta
+                from calendar import monthrange
+                from atlaspm.data.factor_v3 import analyze
+                start,end=date.fromisoformat(args["start"]),date.fromisoformat(args["end"])
+                latest=end+timedelta(days=20)
+                # The existing evaluator reads subsequent months for matured labels.
+                # Require every potentially read partition to predate the cutoff.
+                last=date(latest.year,latest.month,monthrange(latest.year,latest.month)[1])
+                if not start<=end or (end-start).days>31 or last>=_timestamp(cutoff).date():
+                    raise ValueError("FACTOR_DIAGNOSTICS_CUTOFF_OR_BUDGET")
+                if not isinstance(args["factors"],list) or not 1<=len(args["factors"])<=8:
+                    raise ValueError("FACTOR_DIAGNOSTICS_FEATURE_BUDGET")
+                mapping=None
+                if args["industry_csv"] is not None:
+                    mapping=private_path(Path(args["industry_csv"]),exists=True)
+                    if mapping.stat().st_size>4*1024*1024:
+                        raise ValueError("INDUSTRY_MAPPING_BUDGET")
+                report=analyze(start=args["start"],end=args["end"],source=args["source"],
+                    factors=args["factors"],horizon=1,neutralize_industry=mapping is not None,
+                    industry_csv=mapping,memory="256MB",threads=1,exploratory=True,
+                    save=False,save_scores=False)
+                report.update(numeric_eligible=False,signal_block_reason="HISTORICAL_FACTOR_DIAGNOSTICS_NOT_ASSET_FORECAST")
             elif route=="factor_admission":
                 from atlaspm.research.training_admission import audit_factor_months
                 if not isinstance(args["months"],list) or len(args["months"])>3:
@@ -746,7 +770,7 @@ def validate_local_bindings(bindings):
         "macro_release":{"macro_local","regime_local"},
         "rate_decision":{"macro_local","regime_local","treasury_local"},
         "options_flow":{"options_local"},
-        "index_change":{"factor_local","artifact_decision"},
+        "index_change":{"factor_local","factor_diagnostics","artifact_decision"},
     }
     if not isinstance(bindings,list) or len(bindings)>16:
         raise ValueError("LOCAL_BINDING_CAPACITY")
