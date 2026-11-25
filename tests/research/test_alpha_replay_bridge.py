@@ -31,10 +31,11 @@ WEIGHTS={"1":1,"5":1,"21":1}
 
 
 class RankReplayTests(unittest.TestCase):
-    @unittest.skipUnless(find_spec("numpy"),"numpy extra required")
+    @unittest.skipUnless(find_spec("numpy") and find_spec("scipy"),"portfolio extras required")
     def test_actual_locked_training_to_replay(self):
         p=panel()
         marks=execution(p)
+        marks["optimizer"]={"method":"equal_weight","lookback_sessions":3,"max_name_weight":1.0}
         before=deepcopy(marks)
         out=alpha.research(p,**settings(),replay_payload=marks,rank_weights=WEIGHTS)
         r=out["synthetic_rank_replay"]
@@ -43,6 +44,8 @@ class RankReplayTests(unittest.TestCase):
         self.assertEqual(r["selection_lock_sha256"],out["selection_lock_sha256"])
         self.assertTrue(any(c["signals"] for c in r["cohorts"]))
         self.assertTrue(sim["trades"])
+        self.assertTrue(sim["allocations"])
+        self.assertTrue(all(x["estimation_last_date"]==x["signal_date"] for x in sim["allocations"]))
         self.assertTrue(all(t["date"]>t["signal_date"] for t in sim["trades"]))
         self.assertTrue(sim["risk_audit"])
         self.assertAlmostEqual(sim["curve"][-1]["equity"]-marks["initial_cash"],

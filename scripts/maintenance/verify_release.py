@@ -43,13 +43,21 @@ def main():
         and not result.expectedFailures and not result.unexpectedSuccesses
         and not structure["duplicate_function_candidates"] and not foundation["errors"])
     integrated=None
+    integrated_metrics=None
     if args.integrated and ok:
         from atlaspm.framework.orchestrator import offline_release
         from atlaspm.data.market_db import private_path
+        from benchmark_unified_data import process_peak_rss_bytes, process_io_counters, io_delta
+        before_io=process_io_counters()
         run_root=private_path(Path("local_data/runs"))
         run_root.mkdir(parents=True,exist_ok=True)
         with TemporaryDirectory(prefix="release-acceptance-",dir=run_root) as folder:
             integrated=offline_release(checkpoint=Path(folder)/"accept.continuous.json")
+        integrated_metrics={"wall_seconds":integrated["wall_seconds"],
+                            "cpu_seconds":integrated["cpu_seconds"],
+                            "process_lifetime_peak_rss_bytes":process_peak_rss_bytes(),
+                            "process_io_delta":io_delta(before_io,process_io_counters()),
+                            "production_performance_verified":False}
         ok=integrated["status"]=="OFFLINE_FIXTURE_PASS" and all(integrated["checks"].values())
     report=dict(status="PASS" if ok else "FAIL",tests_run=result.testsRun,
                 passed=passed,failures=len(result.failures),errors=len(result.errors),
@@ -65,6 +73,7 @@ def main():
                 integrated_status=integrated["status"] if integrated else "NOT_RUN",
                 integrated_checks=integrated["checks"] if integrated else {},
                 integrated_wall_seconds=integrated["wall_seconds"] if integrated else None,
+                integrated_metrics=integrated_metrics,
                 research_only=True,approved_for_model_training=False,live_execution_enabled=False,
                 broker_order_submission_enabled=False)
     print(json.dumps(report,indent=2,allow_nan=False))
