@@ -959,3 +959,50 @@ claim ingestion, backtest or training permission. The review is retrospective
 triage only. Source page and body provenance remain linked; report is saved
 under identity_v56/market_review/latest.json. Repeat with a smaller issuer
 page if the symbol budget is exceeded.
+
+
+### Declared external historical interval review (optional)
+
+The market review can additionally generate an external evidence request
+queue for each SEC listing or change endpoint. No external source is
+downloaded or invented. Example, using the original cached 2000 pilot:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_identity_market_review --year 2000 --start-month 2000-03 --end-month 2000-10 --max-issuers 20 --reference-as-of 2026-11-25
+~~~
+
+To compare against separately reviewed external reference data, add
+--reference-file local_data/historical_reference.jsonl. Every JSONL row
+must contain exactly the following fields (synthetic example, not evidence):
+
+~~~json
+{"reference_id":"ref1","source_family":"vendor","source_url":"https://example.org/archive","evidence_path":"local_data/external/raw.txt","evidence_sha256":"<actual 64 lowercase hex SHA-256>","reviewer":"reviewer1","known_date":"2000-03-20","cik":"0000000001","symbol":"ABC","source_security_key":"vendor123","exchange":"XNYS","valid_from":"2000-03-01","valid_to":"2000-04-01"}
+~~~
+
+An operator must derive the explicit CIK, vendor security key, MIC, known
+date and interval from reviewed external original records; today's ticker
+list is not a substitute. valid_to is exclusive (null is an asserted open
+interval, not a verified end). Reference files and originals stay in
+local_data; SEC URLs, pipeline-derived reports, duplicate IDs and hash
+mismatches are rejected. Limits: 16 MiB normalized JSONL, 20,000 rows and
+100 intervals per symbol. Reference agreement is a diagnostic only:
+CIK+symbol+MIC is not a verified share class; source family, source URL
+and reviewer are declarations, not proof of independence or authenticity.
+An explicit combined exchange name remains unresolved.
+
+Point checks use the filing date or the reported change date (old endpoint:
+previous calendar day), not inferred effective dates. The review cutoff
+is exclusive. Separate observed listing-candidate symbol-day statistics
+require both SEC and reference known dates strictly earlier than the
+session, and exclude change-only endpoints. They are deduplicated across
+filings and do not measure full-universe coverage. Same-symbol CIK and
+source-key conflicts block agreement; lack of agreement is not proof of
+nonmembership. This module never writes the V5.3 reviewed ledger, grants
+backtest/training authorization, or modifies raw bars. Independently
+verified evidence and manual review remain required.
+
+A source-local key with contradictory simultaneously effective and visible
+symbol/CIK/venue assignments also blocks agreement. Later-known conflicts
+are not used in earlier daily statistics. A source key is never promoted
+to an AtlasPM global security ID. At most 100 normalized rows may share a
+source family/key in a batch.
