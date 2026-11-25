@@ -38,15 +38,36 @@ def replay(payload):
         if payload.get("risk_policy") is None:
             raise ValueError("SYNTHETIC_MARGIN_REQUIRES_RISK_POLICY")
     lifecycle=payload.get("position_lifecycle")
+    position_scope=False
+    trailing=None
+    thesis_floor=None
     if lifecycle is not None:
-        if margin or not isinstance(lifecycle,dict) or set(lifecycle)!={"stop_loss","take_profit","max_holding_sessions"} or payload.get("risk_policy") is None:
+        required={"stop_loss","take_profit","max_holding_sessions"}
+        if (margin or not isinstance(lifecycle,dict) or not required<=set(lifecycle)
+                or set(lifecycle)-required-{"exit_scope","trailing_stop","thesis_score_floor"}
+                or payload.get("risk_policy") is None):
             raise ValueError("INVALID_CASH_POSITION_LIFECYCLE")
         stop=finite(lifecycle["stop_loss"],"stop_loss",minimum=.000001)
         profit=finite(lifecycle["take_profit"],"take_profit",minimum=.000001)
         max_hold=lifecycle["max_holding_sessions"]
         if stop>=1 or type(max_hold) is not int or not 1<=max_hold<=252:
             raise ValueError("INVALID_POSITION_EXIT_POLICY")
+        scope=lifecycle.get("exit_scope","account")
+        if scope not in ("account","position"):
+            raise ValueError("INVALID_POSITION_EXIT_SCOPE")
+        position_scope=scope=="position"
+        if not position_scope and ("trailing_stop" in lifecycle or "thesis_score_floor" in lifecycle):
+            raise ValueError("INDEPENDENT_POSITION_EXIT_SCOPE_REQUIRED")
+        if "trailing_stop" in lifecycle:
+            trailing=finite(lifecycle["trailing_stop"],"trailing_stop",minimum=.000001)
+            if trailing>=1:
+                raise ValueError("INVALID_TRAILING_STOP")
+        if "thesis_score_floor" in lifecycle:
+            thesis_floor=finite(lifecycle["thesis_score_floor"],"thesis_score_floor")
     entry_marks={}
+    high_marks={}
+    # A position exit remains latched for the remainder of the replay.
+    position_exits={}
     lifecycle_audit=[]
     risk_policy=payload.get("risk_policy")
     risk_events=[]
@@ -158,12 +179,18 @@ def replay(payload):
                 if target_gross>gross_limit or target_gross*shock>stress_limit:
                     targets=None
                     lifecycle_audit.append({"date":str(day),"kind":"TARGET_RISK_BLOCK"})
+        exit_only=position_scope and not halted and bool(set(position_exits)&set(holdings))
+        if exit_only:
+            targets=(str(prior_day),prior_close,{})
         cost_today = 0.
         if targets is not None:
             signal_day, signal_close, weights = targets
             if not signal_close < opening or not set(weights) <= set(op):
                 raise ValueError("TARGET_NOT_AVAILABLE_OR_MISSING_EXECUTION_MARK")
             desired = {s: floor(opening_equity*w/op[s]) for s,w in weights.items()}
+            if exit_only:
+                # An exit is not a rebalance: preserve other quantities.
+                desired={s:q for s,q in holdings.items() if s not in position_exits}
             for s in sorted(set(holdings) | set(desired)):
                 qty = max(0, holdings.get(s,0)-desired.get(s,0))
                 if qty:
@@ -171,6 +198,10 @@ def replay(payload):
                         order = submit(s, "SELL", qty, op[s], 0, day)
                         qty = order["filled"]
                         if not qty:
+                            if position_scope and s in position_exits:
+                                lifecycle_audit.append({"date":str(day),"symbol":s,
+                                    "kind":"POSITION_EXIT_UNFILLED","remaining_shares":holdings[s],
+                                    "trigger_date":position_exits[s]["date"]})
                             continue
                         cost = order["cost"]
                     else:
@@ -180,6 +211,11 @@ def replay(payload):
                     holdings[s] -= qty
                     if lifecycle is not None and not holdings[s]:
                         entry_marks.pop(s,None)
+                        high_marks.pop(s,None)
+                    if position_scope and s in position_exits:
+                        lifecycle_audit.append({"date":str(day),"symbol":s,
+                            "kind":"POSITION_EXIT_FILLED" if not holdings[s] else "POSITION_EXIT_PARTIAL",
+                            "remaining_shares":holdings[s],"trigger_date":position_exits[s]["date"]})
                     cost_today += cost
                     trades.append(dict(date=str(day), signal_date=signal_day, symbol=s, side="SELL", shares=qty, reference_price=op[s], cost=cost))
             for s in sorted(desired):
@@ -200,8 +236,15 @@ def replay(payload):
                         unit = order["price"]*(1+fee)
                 if qty:
                     cash=margin.pay_purchase(cash,qty*unit) if margin else cash-qty*unit
-                    if lifecycle is not None and not holdings.get(s,0):
-                        entry_marks[s]=(i,op[s])
+                    if lifecycle is not None:
+                        old_qty=holdings.get(s,0)
+                        if not old_qty:
+                            entry_marks[s]=(i,op[s])
+                            if position_scope:
+                                high_marks[s]=op[s]
+                        elif position_scope:
+                            start,mark=entry_marks[s]
+                            entry_marks[s]=(start,(old_qty*mark+qty*op[s])/(old_qty+qty))
                     holdings[s] = holdings.get(s,0)+qty
                     cost = qty*(unit-op[s])
                     cost_today += cost
@@ -232,6 +275,12 @@ def replay(payload):
                 raise ValueError("MISSING_COMPLETED_SESSION_VOLUME")
             prior_volume = {s:finite(v,"volume",minimum=0) for s,v in raw_volume.items()}
         history.append((str(day), cl))
+        observed_candidates=None
+        if position_scope and thesis_floor is not None and not halted:
+            raw=row.get("signals",[])
+            observed_candidates=[] if raw==[] else validate_candidates(raw,as_of=closing,max_age_seconds=86400)
+            if any(c.symbol not in cl for c in observed_candidates):
+                raise ValueError("SIGNAL_MARK_MISSING")
         if risk_policy is not None:
             positions=[{"type":"equity","market_value":q*cl[s],"gross_notional":q*cl[s]}
                        for s,q in sorted(holdings.items())]
@@ -245,17 +294,31 @@ def replay(payload):
             if 1-equity/peak>drawdown_limit:
                 breaches.append("REPLAY_DRAWDOWN_LIMIT")
             if lifecycle is not None:
+                scores={c.symbol:c.score for c in observed_candidates or []}
                 for symbol,(start,mark) in entry_marks.items():
-                    if symbol not in holdings:
+                    if symbol not in holdings or (position_scope and symbol in position_exits):
                         continue
                     change=cl[symbol]/mark-1
                     reason=("POSITION_STOP" if change<=-stop else "POSITION_TAKE_PROFIT" if change>=profit else
                             "POSITION_TIME_LIMIT" if i-start+1>=max_hold else None)
+                    if position_scope:
+                        high_marks[symbol]=max(high_marks[symbol],cl[symbol])
+                        if reason is None and trailing is not None and cl[symbol]/high_marks[symbol]-1<=-trailing:
+                            reason="POSITION_TRAILING_STOP"
+                        if reason is None and thesis_floor is not None and not halted:
+                            if symbol not in scores:
+                                reason="POSITION_THESIS_MISSING"
+                            elif scores[symbol]<=thesis_floor:
+                                reason="POSITION_THESIS_INVALIDATED"
                     if reason:
-                        breaches.append(reason+":"+symbol)
-                        lifecycle_audit.append({"date":str(day),"symbol":symbol,"kind":reason,
-                                                "reference_mark":mark,"mark_return":change})
-                # Conservative account-wide sell-only latch; no new alpha needed.
+                        event={"date":str(day),"symbol":symbol,"kind":reason,
+                               "reference_mark":mark,"mark_return":change}
+                        if position_scope:
+                            position_exits[symbol]=event
+                        else:
+                            breaches.append(reason+":"+symbol)
+                        lifecycle_audit.append(event)
+                # Account-wide breaches still dominate all local exits.
             halted=halted or bool(breaches)
             risk_events.append({"date":str(day),"timestamp":row["close_at"],
                 "kind":"SYNTHETIC_CLOSE_RISK_CHECK","breaches":breaches,
@@ -267,12 +330,23 @@ def replay(payload):
                 # No new buys after a breach. Retry any residual shares next
                 # open under the existing execution/participation constraints.
                 targets=(str(day),closing,{})
-        if not halted and i % cadence == 0 and not (missing_policy=="hold" and row.get("signals")==[]):
-            candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
+        pending_position_exit=position_scope and bool(set(position_exits)&set(holdings))
+        if pending_position_exit and not halted:
+            targets=(str(day),closing,{})
+        if (not halted and not pending_position_exit and i % cadence == 0
+                and not (missing_policy=="hold" and row.get("signals")==[])):
+            candidates = (observed_candidates if observed_candidates is not None else
+                          validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400))
+            if position_scope:
+                candidates=[c for c in candidates if c.symbol not in position_exits
+                            and (thesis_floor is None or c.score>thesis_floor)]
             if not all(c.symbol in cl for c in candidates):
                 raise ValueError("SIGNAL_MARK_MISSING")
             chosen = sorted(candidates,key=lambda c:(-c.score,c.symbol))[:top]
-            if optimizer is None:
+            if not chosen:
+                # No qualifying fresh entry. Do not synthesize zero targets.
+                pass
+            elif optimizer is None:
                 targets = (str(day), closing, {c.symbol:(margin.target_gross if margin else 1-reserve)/len(chosen) for c in chosen})
             else:
                 # Retain held names in the optimization universe; no silent discard.
@@ -294,6 +368,9 @@ def replay(payload):
                 risk_halt_latched=halted,risk_audit=risk_chain,risk_audit_root=risk_root,
                 remaining_positions_after_halt=dict(holdings) if halted else {},
                 **({"position_lifecycle_audit":lifecycle_audit} if lifecycle is not None else {}),
+                **({"position_exit_latches":position_exits,
+                    "remaining_position_exits":{s:q for s,q in holdings.items() if s in position_exits},
+                    "position_reentry_enabled":False} if position_scope else {}),
                 **(margin.totals() if margin else {}))
 
 

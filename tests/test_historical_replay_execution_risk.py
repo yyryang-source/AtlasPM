@@ -45,6 +45,57 @@ class ExecutionTests(unittest.TestCase):
             replay(p)
 
 
+class PositionExitTests(unittest.TestCase):
+    def case(self):
+        p=fixture()
+        p.update(top_k=2,rebalance_sessions=1,risk_policy={},
+                 position_lifecycle={"stop_loss":.3,"take_profit":2.,
+                    "max_holding_sessions":20,"exit_scope":"position","thesis_score_floor":-1.})
+        # BBB must remain open even though AAA loses its thesis at close 2.
+        return p
+
+    def test_position_exit_does_not_flatten_other_holdings(self):
+        p=self.case()
+        out=replay(p)
+        self.assertEqual(out["curve"][1]["holdings"],{"AAA":4,"BBB":5})
+        self.assertEqual(out["curve"][2]["holdings"],{"BBB":5})
+        self.assertFalse(out["risk_halt_latched"])
+        self.assertEqual(out["position_exit_latches"]["AAA"]["kind"],"POSITION_THESIS_INVALIDATED")
+        self.assertEqual(out["remaining_position_exits"],{})
+        self.assertFalse(out["position_reentry_enabled"])
+        self.assertFalse(out["broker_order_submission_enabled"])
+
+    def test_partial_exit_retries_despite_fresh_positive_signal(self):
+        p=self.case()
+        p["execution_policy"]={"max_participation":.1,"impact_bps_at_full_participation":0}
+        for row in p["sessions"]:
+            row["volume"]={"AAA":100,"BBB":100}
+        p["sessions"][1]["volume"]["AAA"]=10
+        p["sessions"][2]["signals"][0]["factor_score"]=5.
+        out=replay(p)
+        self.assertEqual(out["curve"][2]["holdings"],{"AAA":3,"BBB":5})
+        self.assertEqual(out["curve"][3]["holdings"],{"BBB":5})
+        self.assertEqual([e["kind"] for e in out["position_lifecycle_audit"] if e["symbol"]=="AAA"],
+                         ["POSITION_THESIS_INVALIDATED","POSITION_EXIT_PARTIAL","POSITION_EXIT_FILLED"])
+        self.assertFalse(out["risk_halt_latched"])
+
+    def test_trailing_exit_uses_completed_close_and_preserves_prefix(self):
+        p=self.case()
+        p["rebalance_sessions"]=10
+        del p["position_lifecycle"]["thesis_score_floor"]
+        p["position_lifecycle"]["trailing_stop"]=.1
+        p["sessions"][1]["close"]["AAA"]=150
+        p["sessions"][2]["close"]["AAA"]=120
+        out=replay(p)
+        self.assertEqual(out["position_exit_latches"]["AAA"]["kind"],"POSITION_TRAILING_STOP")
+        self.assertEqual(out["curve"][2]["holdings"],{"AAA":4,"BBB":5})
+        self.assertEqual(out["curve"][3]["holdings"],{"BBB":5})
+        p["sessions"]=p["sessions"][:3]
+        short=replay(p)
+        self.assertEqual(out["curve"][:3],short["curve"])
+        self.assertEqual(short["remaining_position_exits"],{"AAA":4})
+
+
 class MarginTests(unittest.TestCase):
     def test_weekend_interest(self):
         rows=[{"date":"2020-01-03","synthetic_index":100,"source":"synthetic"},
