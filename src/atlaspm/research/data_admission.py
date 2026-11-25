@@ -151,11 +151,21 @@ def prepare_real_research(start_month,end_month,*,execute=False,warmup_months=2,
     if any(p.is_symlink() for p in (root,root/"training",lock_dir,lock_dir/".prepare.lock")):
         raise ValueError("DATA_PREPARATION_PRIVATE_PATH_REQUIRED")
     lock=private_path(lock_dir/".prepare.lock")
-    lock.parent.mkdir(parents=True,exist_ok=True)
-    fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
-    os.close(fd)
+    try:
+        lock.parent.mkdir(parents=True,exist_ok=True)
+        fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    except FileExistsError:
+        result.update(status="DATA_PREPARATION_LOCK_BLOCKED",
+                      blockers=["PREPARATION_LOCK_ALREADY_HELD"])
+        return result
+    except OSError as exc:
+        result.update(status="DATA_PREPARATION_LOCK_BLOCKED",
+                      error_type=type(exc).__name__,blockers=["PREPARATION_LOCK_UNAVAILABLE"])
+        return result
+    # Only the process that acquired the lock can enter the cleanup scope.
     stage="DERIVED_DATA_MAINTENANCE"
     try:
+        os.close(fd)
         result["maintenance_started"]=True
         maintained=maintain(warm_start,end_month,execute=True,memory=memory,threads=threads)
         result["maintenance_months"]=[{k:v for k,v in row.items() if k in
