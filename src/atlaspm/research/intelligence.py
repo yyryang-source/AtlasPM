@@ -208,6 +208,87 @@ def predict_local_artifact(artifact_db, artifact_id, payload, *, batch_size=128)
             "provider": "local", "artifact_id": artifact_id, "usage": None, "cost_usd": None}
 
 
+def artifact_decision(artifacts, *, security_id, as_of, future_session_dates, weights, cost_fraction):
+    """Execute persisted numeric models and route their actual outputs into decision.
+
+    The scenario session schedule is explicit because artifact labels use
+    trading sessions but Research Contract uses calendar days. No calibration
+    radius is invented; actual predictions remain ineligible until independent
+    evidence and uncertainty are available. Shared inputs stay shared evidence.
+    """
+    from datetime import date,timedelta
+    from atlaspm.research.training_artifacts import ModelArtifacts,predict_snapshot
+    from atlaspm.research.training_registry import digest
+    from atlaspm.research.research_contract import contract
+    from atlaspm.engine.autonomous_decision import decide
+    if (not isinstance(artifacts,list) or not 1<=len(artifacts)<=8 or
+            not isinstance(security_id,str) or not security_id.startswith("SYN:") or
+            not isinstance(future_session_dates,list) or not 1<=len(future_session_dates)<=64):
+        raise ValueError("ARTIFACT_DECISION_SCOPE")
+    cutoff=_timestamp(as_of)
+    if cutoff>datetime.now(UTC):
+        raise ValueError("ARTIFACT_DECISION_FUTURE")
+    dates=[date.fromisoformat(v) for v in future_session_dates]
+    if dates!=sorted(set(dates)) or dates[0]<=cutoff.date():
+        raise ValueError("ARTIFACT_SCENARIO_CALENDAR")
+    horizon=(dates[-1]-cutoff.date()).days
+    if not 1<=horizon<=730:
+        raise ValueError("ARTIFACT_SCENARIO_HORIZON")
+    rows=[]; forecasts=[]
+    seen=set()
+    for task in artifacts:
+        if not isinstance(task,dict) or set(task)!={"artifact_db","artifact_id","payload"}:
+            raise ValueError("ARTIFACT_DECISION_TASK")
+        key=task["artifact_id"]
+        if key in seen:
+            raise ValueError("ARTIFACT_DECISION_DUPLICATE_MODEL")
+        seen.add(key)
+        payload=task["payload"]
+        sessions=payload["sessions"]
+        if (not isinstance(sessions,list) or not 1<=len(sessions)<=252 or
+                any(_timestamp(s["close_at"])>cutoff for s in sessions) or
+                _timestamp(sessions[-1]["close_at"])!=cutoff):
+            raise ValueError("ARTIFACT_DECISION_WINDOW_CUTOFF")
+        store=ModelArtifacts(private_path(Path(task["artifact_db"]),exists=True))
+        record=store.load(key)
+        if record.get("entry_lag_sessions",0) or len(dates)!=record["horizon"]:
+            raise ValueError("ARTIFACT_DECISION_LABEL_HORIZON")
+        prediction=predict_snapshot(record,payload)
+        match=next((p for p in prediction["predictions"] if p["security_id"]==security_id),None)
+        if match is None:
+            raise ValueError("ARTIFACT_DECISION_SECURITY_NOT_OBSERVED")
+        # Hash actual feature inputs (not predictions or arbitrary event metadata).
+        # No label, future price or unrelated asset can become target evidence.
+        window=[]
+        for session in sessions:
+            asset=next((a for a in session["assets"] if a["security_id"]==security_id),None)
+            if asset is None:
+                raise ValueError("ARTIFACT_DECISION_INCOMPLETE_IDENTITY")
+            window.append({"date":session["date"],"close_at":session["close_at"],"asset":asset})
+        stamp=cutoff.isoformat()
+        evidence=[{"sha256":digest(window),"source":"synthetic","rights_status":"synthetic_test_only",
+                   "available_at":stamp,"received_at":stamp},
+                  {"sha256":key,"source":"synthetic","rights_status":"synthetic_test_only",
+                   "available_at":None,"received_at":stamp}]
+        raw={"security_id":security_id,"asset_type":"stock","category":"factor",
+             "kind":"quantitative_prediction","source":"synthetic","model_version":key,
+             "evidence":evidence,"generated_at":stamp,"expires_at":(cutoff+timedelta(days=1)).isoformat(),
+             "horizon_days":horizon,"expected_return":match["prediction"],"uncertainty_radius":None,
+             "risk_factors":["independent uncertainty and artifact availability not certified"],
+             "invalidation":["new feature window or new model version"],"synthetic_fixture":True}
+        checked=contract(raw,as_of=stamp)
+        rows.append(checked["contract"])
+        forecasts.append({"artifact_id":key,"prediction":match["prediction"],"research_id":checked["research_id"],
+                          "dataset_sha256":record["dataset_sha256"],"numeric_eligible":checked["numeric_eligible"]})
+    if set(weights)!=seen:
+        raise ValueError("ARTIFACT_DECISION_WEIGHT_SCOPE")
+    decision=decide(rows,as_of=cutoff.isoformat(),weights=weights,horizon_days=horizon,cost_fraction=cost_fraction)
+    return {**_FLAGS,"forecasts":forecasts,"decision":decision,"horizon_sessions":len(dates),
+            "horizon_days":horizon,"scenario_calendar_verified":False,
+            "block_reasons":["INDEPENDENT_UNCERTAINTY_AND_DATA_ADMISSION_REQUIRED"],
+            "trade_authorized":False}
+
+
 def model_inventory():
     """No model weights loaded and no network requests."""
     local = {}
@@ -482,6 +563,7 @@ def local_specialist_tasks(tasks, *, as_of):
         "institutional":{"subject","previous_as_of","unit","period","basis"},
         "credit_history":{"identifier_type","identifier"},
         "factor_admission":{"months"},"local_artifact":{"artifact_db","artifact_id","payload"},
+        "artifact_decision":{"artifacts","security_id","future_session_dates","weights","cost_fraction"},
         "events":{"events"},
         "technical_local":{"start","end","symbols"},
         "fundamental_local":{"start","end","symbols","path"},
@@ -522,6 +604,8 @@ def local_specialist_tasks(tasks, *, as_of):
                 if not isinstance(args["months"],list) or len(args["months"])>3:
                     raise ValueError("LOCAL_FACTOR_MONTH_BUDGET")
                 report=audit_factor_months(args["months"],memory="256MB",threads=1)
+            elif route=="artifact_decision":
+                report=artifact_decision(**args,as_of=cutoff)
             elif route=="local_artifact":
                 sessions=args["payload"]["sessions"]
                 if (not isinstance(sessions,list) or not sessions or len(sessions)>252 or
