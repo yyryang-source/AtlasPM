@@ -104,3 +104,53 @@ class PreviewTests(unittest.TestCase):
         client = PreviewTransport()
         with self.assertRaisesRegex(ValueError, "only allows POST"):
             client._request(f"/iserver/account/{self.gateway.account}/orders", preview={"orders": []})
+
+
+class ProfilePreflightTests(unittest.TestCase):
+    def fixture(self):
+        now = datetime.now(timezone.utc)
+        capture = {"account_id":"DUR123","captured_at_utc":now.isoformat(),
+                   "source":"local_authenticated_ibkr_gateway","paper_identity_verified":True,
+                   "gateway_tls_certificate_validated":True,"session_reported_authenticated":True,
+                   "live_execution_enabled":False,"broker_order_submission_enabled":False,
+                   "raw":{"selected_account":{"accountId":"DUR123","type":"DEMO",
+                          "currency":"USD","brokerageAccess":True,"tradingType":"STKNOPT"},
+                          "USD_ledger":{"USD":{"settledcash":1000}}}}
+        session = {"selectedAccount":"DUR123","accounts":["DUR123"]}
+        orders = {"snapshot":True,"orders":[]}
+        margin = {"margin_summary_usd_claim":{"total_nlv":1002,"available_funds":1000,"excess_liquidity":1000},
+                  "monitor_state":"BLOCKED_DATA","data_integrity_block_reasons":["FOREIGN_NLV_UNEXPLAINED"],
+                  "risk_alerts":[]}
+        return now,capture,session,orders,margin
+
+    def test_dur_preflight_preserves_foreign_block_and_unknown_financing(self):
+        from atlaspm.execution.ibkr_whatif import paper_profile_preflight
+        now,capture,session,orders,margin = self.fixture()
+        with patch("atlaspm.risk.ibkr_margin_monitor.normalize_ibkr_margin_summary",return_value=margin):
+            out = paper_profile_preflight(capture,{},session,orders,now=now)
+        self.assertEqual(out["reasons"],["FOREIGN_NLV_UNEXPLAINED"])
+        self.assertEqual(out["cash_bound_usd"],1000)
+        self.assertFalse(out["financing_verified"])
+        self.assertFalse(out["collateral_verified"])
+
+    def test_preflight_rejects_wrong_account_or_incomplete_order_snapshot(self):
+        from atlaspm.execution.ibkr_whatif import paper_profile_preflight
+        now,capture,session,orders,margin = self.fixture()
+        with self.assertRaises(ValueError):
+            paper_profile_preflight(capture,{},dict(session,isPaper=False),orders,now=now)
+        with self.assertRaises(ValueError):
+            paper_profile_preflight(capture,{},session,{"orders":[]},now=now)
+        with self.assertRaises(ValueError):
+            paper_profile_preflight(dict(capture,paper_identity_verified=False),{},session,orders,now=now)
+
+    def test_preview_ticket_bounded_and_explicit(self):
+        from atlaspm.execution.ibkr_whatif import _profile_ticket, profile_preview_check
+        identity={"conid":10,"currency":"USD","asset_class":"STK","broker_identity_checked":True}
+        ticket=_profile_ticket("DUR123",identity,"100.00",1)
+        self.assertEqual(ticket["side"],"BUY")
+        self.assertTrue(ticket["cOID"].startswith("ATL-WHATIF-"))
+        for price, shares in (("100",11),("2501",1),("100.001",1),("NaN",1)):
+            with self.assertRaises(ValueError):
+                _profile_ticket("DUR123",identity,price,shares)
+        with self.assertRaises(ValueError):
+            profile_preview_check(symbol="AAA",limit_price="100",allow_preview=False)

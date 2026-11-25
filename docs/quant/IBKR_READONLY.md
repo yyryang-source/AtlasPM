@@ -249,3 +249,31 @@ Only redacted review status/counts/blocks are returned to stdout.
 CNH, model admission, field-level quote freshness, historical identity,
 financing/collateral and order risk gates remain independent. This is a real
 account decision diagnostics bridge, not real optimization or execution.
+
+
+### Saved Paper profile risk/What-If diagnostics
+
+Use the existing saved Paper profile and read-only risk check:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_whatif --paper-profile-check
+~~~
+
+This revalidates the Paper session (DU or DUR), explicit DEMO USD account,
+TLS, selected account, account margin fields and complete live-order snapshot.
+No automatic borrowing or inference of financing principal from NLV/cash.
+An active order or unresolved margin integrity issue blocks a hypothetical
+order preview. Check-only does not subscribe to quotes or POST What-If.
+
+The optional diagnostic preview requires a manually supplied symbol and
+cent-aligned limit price, explicit --allow-paper-preview, existing usage
+rights, dedicated session ownership (stop other market/sync workers), regular
+hours, current reported real-time bid/ask, and a clean account preflight.
+It is limited to one hypothetical BUY of at most 10 whole shares and $2500.
+It rechecks selected account, working orders and heartbeat before the exact
+What-If POST. Compare returned current margins against the account baseline
+and commission-inclusive cash bound. No order placement/reply/cancel routes
+are used. No automatic preview retry. The old cash-only reviewed workbench
+and DU-only submission guard are unchanged. A successful diagnostic does
+not prove financing/collateral, field-level quote timestamps or independent
+risk approval. No preview receipt is accepted by the order journal.

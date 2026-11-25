@@ -235,7 +235,237 @@ def preview_draft(
     }
 
 
+def paper_profile_preflight(capture, summary, session, orders, *, now):
+    """Real Paper account risk inputs, never a verified financing ledger.
+
+    A complete order snapshot is essential: do not assume no open orders
+    from an empty positions list. The raw account can be STKNOPT or CASH.
+    This check does not infer the account's margin type or borrowing limit.
+    """
+    from atlaspm.execution.ibkr_equity_snapshot import _orders
+    from atlaspm.risk.ibkr_margin_monitor import normalize_ibkr_margin_summary
+    from atlaspm.engine.contracts import finite, timestamp
+
+    account_id = capture.get("account_id")
+    if (not isinstance(account_id, str) or not re.fullmatch(r"DU(?:R)?[0-9]{1,20}", account_id)
+            or capture.get("source") != "local_authenticated_ibkr_gateway"
+            or any(capture.get(k) is not True for k in ("paper_identity_verified",
+                "session_reported_authenticated", "gateway_tls_certificate_validated"))
+            or capture.get("live_execution_enabled") is not False
+            or capture.get("broker_order_submission_enabled") is not False):
+        raise ValueError("PAPER_PREFLIGHT_IDENTITY_REQUIRED")
+    if not isinstance(session, dict) or session.get("selectedAccount") != account_id or (
+            not isinstance(session.get("accounts"), list) or account_id not in session["accounts"]
+            or ("isPaper" in session and session["isPaper"] is not True)):
+        raise ValueError("PAPER_PREFLIGHT_SELECTED_ACCOUNT_MISMATCH")
+    raw = capture["raw"]
+    selected = raw["selected_account"]
+    if (selected.get("type") != "DEMO" or selected.get("currency") != "USD"
+            or selected.get("brokerageAccess") is not True
+            or selected.get("accountId", selected.get("id")) != account_id
+            or any(selected[k] != account_id for k in ("accountId","id") if k in selected)):
+        raise ValueError("PAPER_PREFLIGHT_ACCOUNT_MISMATCH")
+    active, _ = _orders(orders, account_id)
+    margin = normalize_ibkr_margin_summary(summary, capture, now_utc=now)
+    cash = finite(raw["USD_ledger"]["USD"]["settledcash"], "settled cash")
+    nlv = finite(margin["margin_summary_usd_claim"]["total_nlv"], "reported NLV", minimum=.01)
+    available = finite(margin["margin_summary_usd_claim"]["available_funds"], "available funds")
+    excess = finite(margin["margin_summary_usd_claim"]["excess_liquidity"], "excess liquidity")
+    age = (now-timestamp(capture["captured_at_utc"], "captured_at")).total_seconds()
+    reasons = set(margin["data_integrity_block_reasons"]) | set(margin["risk_alerts"])
+    if not 0 <= age <= 120:
+        reasons.add("PAPER_PREFLIGHT_CAPTURE_STALE")
+    if active:
+        reasons.add("ACTIVE_ORDERS_REQUIRE_RECONCILIATION")
+    if cash <= 0 or available <= 0 or excess <= 0:
+        reasons.add("NONPOSITIVE_CASH_OR_MARGIN_BUFFER")
+    # Reserve cash, but never infer debt from settledcash or NLV residual.
+    # No margin borrowing, uncovered sell, or unknown open-order exposure.
+    cash_bound = max(0., min(cash, available, excess))
+    return {"account_id":account_id, "margin":margin, "reasons":sorted(reasons),
+            "active_order_count":len(active), "capture_age_seconds":age,
+            "cash_bound_usd":cash_bound, "reported_nlv_usd":nlv,
+            "account_trading_type_reported":selected.get("tradingType"),
+            "financing_verified":False, "collateral_verified":False}
+
+
+def _profile_ticket(account_id, identity, limit_price, shares):
+    """A single explicitly supplied hypothetical BUY; no order submission."""
+    if type(shares) is not int or not 1 <= shares <= 10:
+        raise ValueError("PREVIEW_SHARE_LIMIT")
+    price = _number(limit_price, "preview price")
+    if price <= 0 or price != price.quantize(Decimal(".01")) or price*shares > 2500:
+        raise ValueError("PREVIEW_NOTIONAL_OR_TICK_LIMIT")
+    if identity.get("currency") != "USD" or identity.get("asset_class") != "STK" or identity.get("broker_identity_checked") is not True:
+        raise ValueError("PREVIEW_EQUITY_IDENTITY_REQUIRED")
+    cid = identity.get("conid")
+    if type(cid) is not int or cid <= 0:
+        raise ValueError("PREVIEW_CONID_REQUIRED")
+    # Distinct preview-only client identifier; never a reviewed workbench run.
+    nonce = hashlib.sha256(f"{account_id}:{cid}:{shares}:{price}:{time.time_ns()}".encode()).hexdigest()[:32]
+    return {"conid":cid,"orderType":"LMT","side":"BUY","tif":"DAY",
+            "quantity":shares,"price":float(price),"cOID":"ATL-WHATIF-"+nonce,"outsideRTH":False}
+
+
+def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_preview=False):
+    """Saved-profile risk diagnostics; optional isolated exact-ticket What-If.
+
+    No market subscriptions in check-only mode. An explicit ticket, current
+    quote candidate and clean margin monitor are required before preview POST.
+    The existing submission guard is intentionally untouched.
+    """
+    from atlaspm.execution.ibkr_gateway import (
+        _paper_sync_lock, load_paper_profile, _paper_sso_cooldown,
+        _write_sync_json, _PAPER_SSO_ATTEMPT, _sync_path,
+        collect_ibkr_readonly_account, GatewayHTTPError,
+    )
+    from atlaspm.execution.ibkr_market_data import MarketPool, resolve_us_equities, PAPER_MARKET_RESERVATION
+    from atlaspm.research.financial_events import FLAGS
+    from atlaspm.framework.orchestrator import market_phase
+    import sys
+
+    if type(allow_preview) is not bool or (symbol is None) != (limit_price is None):
+        raise ValueError("PREVIEW_REQUIRES_EXPLICIT_SYMBOL_AND_LIMIT")
+    if symbol is None and (allow_preview or shares != 1):
+        raise ValueError("CHECK_ONLY_DOES_NOT_ACCEPT_TICKET_FLAGS")
+    if symbol is not None:
+        if not allow_preview:
+            raise ValueError("EXPLICIT_PREVIEW_PERMISSION_REQUIRED")
+        # Validate numeric bounds before touching the broker.
+        _profile_ticket("DU0", {"conid":1,"currency":"USD","asset_class":"STK",
+                               "broker_identity_checked":True}, limit_price, shares)
+        from atlaspm.data.provider_policy import local_rights
+        local_rights("ibkr")
+    def progress(message):
+        print("[IBKR Risk] "+message, file=sys.stderr, flush=True)
+    with _paper_sync_lock():
+        marker = _sync_path(PAPER_MARKET_RESERVATION)
+        if marker.exists():
+            raise ValueError("PREVIOUS_MARKET_RESERVATION_UNCERTAIN")
+        profile = load_paper_profile()
+        account_id = profile["account"]
+        transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
+        _paper_sso_cooldown(progress)
+        _write_sync_json(_PAPER_SSO_ATTEMPT, {"attempted_at_utc":datetime.now(timezone.utc).isoformat()})
+        capture = collect_ibkr_readonly_account(transport, account_id=account_id, paper_only=True)
+        session = transport.get("/iserver/accounts")
+        summary = transport.get(f"/portfolio/{account_id}/summary")
+        orders = transport.get("/iserver/account/orders")
+        risk = paper_profile_preflight(capture, summary, session, orders, now=datetime.now(timezone.utc))
+        transport.keepalive()
+        reasons = list(risk["reasons"])
+        report = {**FLAGS, "status":"PAPER_PREFLIGHT_CHECK_COMPLETED",
+                  "paper_identity_verified":True, "active_order_count":risk["active_order_count"],
+                  "capture_age_seconds":risk["capture_age_seconds"],
+                  "margin_monitor_state":risk["margin"]["monitor_state"],
+                  "nlv_reconciliation_state":risk["margin"]["account_nlv_reconciliation"]["state"],
+                  "account_trading_type_reported":risk["account_trading_type_reported"],
+                  "block_reasons":reasons, "preview_requested":symbol is not None,
+                  "whatif_attempted":False, "whatif_observed":False,
+                  "financing_verified":False,"collateral_verified":False,
+                  "order_specific_risk_approved":False,"submitted":False,
+                  "trade_authorized":False,"ready_for_institutional_risk_gate":False}
+        if symbol is None or reasons:
+            return report
+        if market_phase(datetime.now(timezone.utc).isoformat()) != "market":
+            reasons.append("REGULAR_SESSION_REQUIRED")
+            return report
+        pool = MarketPool(transport, available_lines=1, dedicated_session=True, poll_interval=2)
+        pool.connect()
+        identity = resolve_us_equities(transport, [symbol])[symbol]
+        ticket = _profile_ticket(account_id, identity, limit_price, shares)
+        if Decimal(str(ticket["price"]))*shares > Decimal(str(risk["cash_bound_usd"])):
+            reasons.append("PREVIEW_EXCEEDS_CASH_BOUND")
+            return report
+        pool.set_universe({identity["conid"]:1})
+        _write_sync_json(PAPER_MARKET_RESERVATION, {"conids":[identity["conid"]],
+                         "state":"ALLOCATING_OR_ACTIVE","created_at_utc":datetime.now(timezone.utc).isoformat()})
+        try:
+            pool.poll()
+            snapshot = pool.poll()
+            q = snapshot["quotes"][0]
+            if not q["fresh_realtime_book_candidate"]:
+                reasons.append("CURRENT_REALTIME_BOOK_REQUIRED")
+                return report
+            mark = Decimal(str(q["values"]["ask"]))
+            price = Decimal(str(ticket["price"]))
+            if abs(price/mark-1) > Decimal(".005"):
+                reasons.append("PREVIEW_LIMIT_OUTSIDE_QUOTE_BAND")
+                return report
+            # Recheck selected account and all open orders immediately before
+            # the preview; do not reuse the earlier order snapshot.
+            from atlaspm.execution.ibkr_equity_snapshot import _orders
+            selected = transport.get("/iserver/accounts")
+            if (not isinstance(selected,dict) or selected.get("selectedAccount") != account_id
+                    or account_id not in selected.get("accounts",[])
+                    or ("isPaper" in selected and selected["isPaper"] is not True)):
+                reasons.append("SELECTED_ACCOUNT_CHANGED")
+                return report
+            if _orders(transport.get("/iserver/account/orders"), account_id)[0]:
+                reasons.append("ACTIVE_ORDERS_REQUIRE_RECONCILIATION")
+                return report
+            transport.keepalive()
+            now = datetime.now(timezone.utc)
+            if not 0 <= now.timestamp()-q["provider_update_ms"]/1000 <= 15:
+                reasons.append("QUOTE_EXPIRED_BEFORE_PREVIEW")
+                return report
+            from atlaspm.engine.contracts import timestamp
+            if (now-timestamp(capture["captured_at_utc"],"captured_at")).total_seconds() > 120:
+                reasons.append("PAPER_PREFLIGHT_CAPTURE_STALE")
+                return report
+            # Only this exact whatif route, no placement or reply endpoint.
+            report["whatif_attempted"] = True
+            class ExactPreview:
+                def what_if(self, requested_account, requested_ticket):
+                    if requested_account != account_id or requested_ticket != ticket:
+                        raise ValueError("PREVIEW_TICKET_SCOPE_CHANGED")
+                    return transport._request(f"/iserver/account/{account_id}/orders/whatif",
+                                              preview={"orders":[ticket]})
+            try:
+                estimate = broker_estimate(ExactPreview(), account_id, ticket)
+            except (ValueError, TypeError, KeyError, OSError) as exc:
+                reasons.append(f"WHATIF_HTTP_{exc.status}" if isinstance(exc, GatewayHTTPError)
+                               else "WHATIF_RESPONSE_UNVERIFIED")
+                return report
+            report["whatif_observed"] = True
+            baseline = risk["margin"]["margin_summary_usd_claim"]
+            if (abs(estimate["initial_margin"]["current"]-baseline["initial_margin"]) > 1
+                    or abs(estimate["maintenance_margin"]["current"]-baseline["maintenance_margin"]) > 1):
+                reasons.append("WHATIF_BASELINE_MARGIN_MISMATCH")
+            if price*shares+Decimal(str(estimate["commission"])) > Decimal(str(risk["cash_bound_usd"])):
+                reasons.append("WHATIF_CASH_PLUS_FEE_EXCEEDS_BOUND")
+            # Preserve no-trade authority; a preview is not proof of future margin.
+            report["status"] = "PAPER_WHATIF_DIAGNOSTIC_COMPLETED"
+            return report
+        finally:
+            release = pool.close()
+            if not release["released_all_owned"]:
+                raise ValueError("MARKET_RELEASE_UNCERTAIN")
+            marker.unlink()
+
+
 def main() -> int:
+    # Explicit separate mode: old reviewed cash-equity workflow unchanged.
+    import sys
+    if "--paper-profile-check" in sys.argv[1:]:
+        parser = argparse.ArgumentParser(description="Read-only saved Paper profile risk and optional What-If diagnostic")
+        parser.add_argument("--paper-profile-check",action="store_true",required=True)
+        parser.add_argument("--symbol")
+        parser.add_argument("--limit-price")
+        parser.add_argument("--shares",type=int,default=1)
+        parser.add_argument("--allow-paper-preview",action="store_true")
+        args = parser.parse_args()
+        try:
+            result = profile_preview_check(symbol=args.symbol, limit_price=args.limit_price,
+                                           shares=args.shares, allow_preview=args.allow_paper_preview)
+            print(json.dumps(result,indent=2,allow_nan=False))
+            return 0
+        except (OSError,ValueError,TypeError,KeyError,OverflowError) as exc:
+            from atlaspm.execution.ibkr_gateway import GatewayHTTPError
+            reason = f"HTTP_{exc.status} at {exc.endpoint}" if isinstance(exc,GatewayHTTPError) else type(exc).__name__
+            print(json.dumps({"status":"PAPER_PREFLIGHT_BLOCKED","reason":reason,
+                              "submitted":False,"trade_authorized":False,"live_execution_enabled":False}))
+            return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", required=True)
     parser.add_argument("--account", required=True)
