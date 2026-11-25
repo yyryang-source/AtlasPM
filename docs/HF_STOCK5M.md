@@ -1035,3 +1035,17 @@ identity and visible action record IDs. An explicit Boolean unadjusted-input
 declaration is still required, not proof of vendor price semantics. No raw
 prices are overwritten and no identity, completeness, or training approval
 is inferred from these provisional results.
+
+### Daily reference sample coverage guards
+
+Reconciliation requires at least one comparable day for every explicitly
+requested symbol. A matching symbol cannot mask another requested symbol
+that is missing from both sources. Local duplicate/off-grid buckets and
+nonfinite or invalid close/volume values block the affected day. Both raw
+minute count and distinct minute count must be five for volume comparison
+and open/close boundaries. Zero reference volume agrees only with zero
+local volume; positive local volume is flagged without dividing by zero.
+The report distinguishes price-compared and volume-compared day counts;
+no comparable volume has null maximum percentage difference. This remains
+sample reconciliation, not source authentication, full historical coverage,
+corporate-action completeness or training approval. No source data changes.
