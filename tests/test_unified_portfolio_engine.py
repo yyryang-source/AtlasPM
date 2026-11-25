@@ -205,6 +205,8 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         self.assertGreater(sum(result["weights"].values()),0.)
         self.assertAlmostEqual(result["target_cash_fraction"],1-sum(result["weights"].values()))
         self.assertTrue(result["risk_constraints_in_solver"])
+        with self.assertRaises(ValueError):
+            optimize_target(candidates,account,market,dict(constraints,risk_aversion=-1.))
 
     def test_cash_slack_keeps_independent_risk_and_synthetic_permissions(self) -> None:
         self.payload["market"]["expected_returns"]={"AAA":-.2,"BBB":-.1}

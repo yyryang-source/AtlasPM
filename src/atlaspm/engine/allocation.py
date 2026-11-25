@@ -200,7 +200,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         elif method == "minimum_variance":
             objective = variance
         elif method == "mean_variance":
-            gamma = float(constraints.get("risk_aversion", 4.0))
+            gamma = finite(constraints.get("risk_aversion", 4.0), "risk_aversion", minimum=0.00001)
             # Annualize a one-way notional turnover cost on the same scale as mu.
             bps = finite(constraints.get("turnover_cost_bps", 0.), "turnover_cost_bps", minimum=0)
             interval = finite(constraints.get("rebalance_sessions", 1.), "rebalance_sessions", minimum=1)
