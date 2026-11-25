@@ -145,7 +145,8 @@ def _identity_path_condition(h):
             f" AND id_n{h}={h+1} AND id_min{h}=id_max{h}")
 
 
-def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None,feature_lookback=None):
+def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None,feature_lookback=None,
+                  evidence_priority=None):
     """Recompute observed-price labels and count stricter closing-bar paths.
 
     A last observed intraday bar is not necessarily the session close.
@@ -195,11 +196,31 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None,fe
         if feature_lookback is not None:
             for h in horizons:
                 strict+=f",count(*) FILTER (WHERE {_identity_path_condition(h)} AND act_n{h}=0 AND {_feature_history_condition(feature_lookback)})"
-    counts=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
-        SELECT session_index,count(*) FILTER (WHERE {" OR ".join(checks)}),
-               count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms),{strict}
-        FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
-        GROUP BY session_index ORDER BY session_index""",[month]).fetchall()
+    if evidence_priority is None:
+        counts=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
+            SELECT session_index,count(*) FILTER (WHERE {" OR ".join(checks)}),
+                   count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms),{strict}
+            FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
+            GROUP BY session_index ORDER BY session_index""",[month]).fetchall()
+    else:
+        if not identity_review or feature_lookback is None:
+            raise ValueError("EVIDENCE_PRIORITY_REQUIRES_IDENTITY_HISTORY_REVIEW")
+        # Group the same window results in both dimensions; no duplicate
+        # label computation or raw row materialization in Python.
+        cursor=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
+            SELECT session_index,symbol,grouping(symbol),
+                   count(*) FILTER (WHERE {" OR ".join(checks)}),
+                   count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms),{strict}
+            FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
+            GROUP BY GROUPING SETS ((session_index),(symbol))
+            ORDER BY grouping(symbol),session_index,symbol""",[month])
+        counts=[]
+        while batch:=cursor.fetchmany(2048):
+            for index,symbol,session_group,mismatch,closing,*values in batch:
+                if session_group:
+                    counts.append((index,mismatch,closing,*values))
+                else:
+                    evidence_priority.add(month,symbol,values)
     mismatch=sum(row[1] for row in counts)
     if mismatch:
         raise ValueError(f"Label path reconciliation failed for {month}: {mismatch} rows")
@@ -384,12 +405,14 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
 
 
 def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",threads=2,
-        require_lineage=False,identity_as_of=None,matrix_request=None):
+        require_lineage=False,identity_as_of=None,matrix_request=None,evidence_priority_limit=None):
     for n in (minimum_train_rows,minimum_test_rows):
         if type(n) is not int or n<1:
             raise ValueError("Minimum sample counts must be positive integers")
     if matrix_request is not None and identity_as_of is None:
         raise ValueError("FOLD_MATRIX_REQUIRES_IDENTITY_CUTOFF")
+    if evidence_priority_limit is not None and identity_as_of is None:
+        raise ValueError("EVIDENCE_PRIORITY_REQUIRES_IDENTITY_CUTOFF")
     m=dataset.inspect(dataset_id)
     if require_lineage and not m.get("lineage_id"):
         raise ValueError("Dataset lacks unified factor lineage; rebuild through canonical bridge")
@@ -419,6 +442,10 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
     action_free_counts={h:[0]*len(calendar) for h in c["horizons"]}
     feature_history_counts={h:[0]*len(calendar) for h in c["horizons"]}
     feature_lookback=max(FEATURE_LOOKBACK[name] for name in c["features"]) if identity_as_of is not None else None
+    priority=None
+    if evidence_priority_limit is not None:
+        from atlaspm.research.evidence_priority import EvidencePriority
+        priority=EvidencePriority(c["horizons"],evidence_priority_limit)
     identity=None
     matrix=None
     matrix_report=None
@@ -439,7 +466,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
                 window=[m for m in months if first_month<=m<=window[-1]]
             for i,closing,*counts in _check_labels(cx,[paths[k] for k in window],month,c["horizons"],
                                                      identity_review=identity is not None,matrix=matrix,
-                                                     feature_lookback=feature_lookback):
+                                                     feature_lookback=feature_lookback,
+                                                     evidence_priority=priority):
                 closing_observed[i]=closing
                 size=len(c["horizons"])
                 for j,h in enumerate(c["horizons"]):
@@ -564,11 +592,15 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             if not counts["fold_count"] or counts["folds_meeting_reviewed_feature_history_minimum"]!=counts["fold_count"]:
                 blockers.add("INSUFFICIENT_REVIEWED_FEATURE_HISTORY_SAMPLES:"+h)
         report["blockers"]=sorted(blockers)
+    if priority is not None:
+        report["evidence_priority"]=priority.finish(totals)
     if matrix_report is not None:
         report["fold_array_review"]=matrix_report
         if matrix_report["status"]!="FOLD_ARRAYS_REVIEWED":
             report["blockers"]=sorted(set(report["blockers"])|{"EMPTY_REVIEWED_FOLD_ARRAY_SPLIT"})
-    filename=("fold_array_preflight.json" if matrix_report is not None else
+    filename=("fold_array_evidence_priority.json" if matrix_report is not None and priority is not None else
+              "fold_array_preflight.json" if matrix_report is not None else
+              "identity_evidence_priority.json" if priority is not None else
               "identity_preflight.json" if identity is not None else "preflight.json")
     path=dataset.BASE/dataset_id[:24]/filename
     report["report_path"]=str(private_path(path))
