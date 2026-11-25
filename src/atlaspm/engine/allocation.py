@@ -204,3 +204,193 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         "research_only": True, "live_execution_enabled": False,
         "broker_order_submission_enabled": False,
     }
+
+
+def optimize_multiasset(ledger, context, market, limits):
+    """Joint constrained research solve over supported exact-leg instruments.
+
+    Market inputs are same-horizon marked-instrument returns/covariance,
+    not underlying returns for options. Only the existing institutional
+    planner's supported actions are emitted. No invented broker preview.
+    Existing option holdings are fixed; Treasury sales and new shorts are
+    unsupported. Cash sale proceeds remain unsettled and cannot fund buys.
+    """
+    import numpy as np
+    from scipy.optimize import minimize
+    from datetime import timedelta
+    from copy import deepcopy
+    from math import floor
+    from atlaspm.engine.contracts import timestamp
+    from atlaspm.execution.institutional_ledger import build_institutional_ledger, _position
+    from atlaspm.execution.institutional_batch import propose_multi_asset_batch
+    from atlaspm.research.training_registry import digest
+    if not ledger.get("_synthetic_fixture") or not str(context["account_id"]).startswith("DEMO-"):
+        raise ValueError("MULTIASSET_RESEARCH_INPUT_NOT_CERTIFIED")
+    account_id=context["account_id"]
+    accounts=build_institutional_ledger(ledger)["accounts"]
+    account=next((a for a in accounts if a["account_id"]==account_id),None)
+    if account is None or not account["account_ledger_ready_for_risk_review"]:
+        raise ValueError("MULTIASSET_LEDGER_NOT_READY")
+    policy=context["policy"]
+    stamp=timestamp(ledger["valuation_at"],"valuation_at")
+    if timestamp(market["as_of"],"as_of")!=stamp:
+        raise ValueError("MULTIASSET_MARKET_CUTOFF_MISMATCH")
+    horizon=market["horizon_days"]
+    if type(horizon) is not int or not 1<=horizon<=365:
+        raise ValueError("MULTIASSET_HORIZON")
+    through=(stamp+timedelta(days=horizon)).date().isoformat()
+    nlv=account["net_liquidation_calculated"]
+    cash=account["settled_cash"]
+    debt=account["margin_debt"]
+    payable=account["unsettled_payable"]
+    positions=account["positions"]
+    new_puts=market.get("new_puts",[])
+    if not isinstance(new_puts,list) or not 1<=len(positions)+len(new_puts)<=16:
+        raise ValueError("MULTIASSET_UNIVERSE_LIMIT")
+    instruments=[(p,False) for p in positions]+[(_position(p,account_id),True) for p in new_puts]
+    ids=[p["identifier"] for p,_ in instruments]
+    if len(set(ids))!=len(ids) or market["symbols"]!=ids or set(market["inputs"])!=set(ids):
+        raise ValueError("MULTIASSET_IDENTITY_OR_COVARIANCE_ORDER")
+    cov=np.asarray(_validate_covariance(market["covariance"],len(ids)))
+    cap=finite(policy["max_single_order_fraction"],"single_order",minimum=0)
+    max_gross=finite(policy["max_gross_leverage"],"gross",minimum=0)
+    max_stress=finite(policy["max_stress_loss_fraction"],"stress",minimum=0)
+    reserve=finite(limits["min_cash_fraction"],"cash_reserve",minimum=0)
+    gamma=finite(limits["risk_aversion"],"risk_aversion",minimum=.000001)
+    cash_return=finite(market["cash_return"],"cash_return",minimum=0)
+    funding=finite(market["annual_financing_rate"],"funding",minimum=0)*horizon/365
+    max_turnover=finite(limits["max_turnover"],"turnover",minimum=0)
+    max_vol=finite(limits["max_volatility"],"volatility",minimum=0)
+    if reserve>=1 or cash_return>1 or funding>1 or cap>1 or max_gross>4 or max_stress>1:
+        raise ValueError("MULTIASSET_POLICY_RANGE")
+    rows=[]
+    for p,new in instruments:
+        i=p["identifier"]; kind=p["type"]; data=market["inputs"][i]
+        observed=timestamp(data["observed_at"],"risk_observed_at")
+        if p["mark_source"]!="synthetic" or not 0<=(stamp-observed).total_seconds()<=policy["max_data_age_seconds"] or p["mark_age_seconds"]>policy["max_data_age_seconds"]:
+            raise ValueError("MULTIASSET_STALE_OR_UNVERIFIED_MARK")
+        mu=finite(data["expected_return"],"expected_return")
+        cost=finite(data["cost_bps"],"cost_bps",minimum=0)/10000
+        liquidity=finite(data["max_trade_notional"],"liquidity",minimum=0)
+        if abs(mu)>1 or cost>=1:
+            raise ValueError("MULTIASSET_RETURN_OR_COST_RANGE")
+        risk=[0.,0.,0.,0.,0.]
+        if kind=="equity":
+            if new or p["shares"]!=int(p["shares"]):
+                raise ValueError("MULTIASSET_UNSUPPORTED_EQUITY")
+            lot=1; unit=p["mark_price"]; qty=p["shares"]
+            shock=context["stress_assumptions"]["equity_decline_fraction"]
+        elif kind=="treasury":
+            if new or p["maturity_date"]<=through or p["dv01_usd_per_bp"] is None or data["credit_class"]!="US_TREASURY":
+                raise ValueError("MULTIASSET_BOND_RISK_UNSUPPORTED")
+            lot=data["face_increment"]
+            if type(lot) is not int or lot<=0 or p["face_value"]%lot:
+                raise ValueError("MULTIASSET_BOND_LOT")
+            unit=(p["clean_price_per_100"]+p["accrued_interest_per_100"])/100
+            qty=p["face_value"]
+            risk[0]=p["modified_duration"]*.0001
+            shock=context["stress_assumptions"]["treasury_decline_fraction"]
+        else:
+            if p["contracts"]<=0 or p["expiration_date"]<=through or (new and p["right"]!="put"):
+                raise ValueError("MULTIASSET_OPTION_SCOPE")
+            if p["underlying"] not in ids or p["mark_premium"]<=0:
+                raise ValueError("MULTIASSET_OPTION_UNDERLYING_OR_MARK")
+            underlying=next(q for q,_ in instruments if q["identifier"]==p["underlying"])
+            if underlying["type"]!="equity":
+                raise ValueError("MULTIASSET_OPTION_UNDERLYING")
+            delta=finite(data["delta"],"delta")
+            if abs(delta)>1 or (p["right"]=="put" and delta>0) or (p["right"]=="call" and delta<0):
+                raise ValueError("MULTIASSET_DELTA")
+            spot=underlying["mark_price"]
+            risk[1]=abs(delta)*spot/p["mark_premium"]
+            risk[2]=.5*finite(data["gamma"],"gamma",minimum=0)*(spot*.01)**2/p["mark_premium"]
+            risk[3]=finite(data["vega_per_vol_point"],"vega",minimum=0)/p["mark_premium"]
+            risk[4]=1.
+            lot=1; unit=p["mark_premium"]*p["multiplier"]; qty=0 if new else p["contracts"]
+            shock=1. # never claim option protection offsets independent stress
+        if unit<=0 or not 0<=shock<=1:
+            raise ValueError("MULTIASSET_UNIT_OR_STRESS")
+        bound=min(cap*nlv,liquidity)/nlv
+        if kind=="option":
+            bound=min(bound,policy["max_option_premium_fraction"]/(1+cost)) if new else 0.
+        initial=qty*unit/nlv
+        low=max(0.,initial-bound) if kind=="equity" else initial
+        high=initial+bound
+        rows.append((p,new,lot,unit,qty,mu,cost,shock,risk,low,high))
+    current=np.array([q*u/nlv for _,_,_,u,q,*_ in rows])
+    mu=np.array([r[5] for r in rows]); costs=np.array([r[6] for r in rows])
+    shocks=np.array([r[7] for r in rows])
+    risk_matrix=np.array([r[8] for r in rows]).T
+    risk_caps=np.array([finite(limits[k],"risk_limit",minimum=0) for k in
+                        ("max_dv01_per_nlv","max_abs_delta_per_nlv","max_gamma_per_nlv","max_vega_per_nlv","max_option_weight")])
+    n=len(ids)
+    def fee(x):
+        return float(costs@np.abs(x[:n]-current))
+    def available(x):
+        return cash/nlv-float(np.maximum(x[:n]-current,0)@ (1+costs))-x[-1]
+    def variance(x):
+        return float(x[:n]@cov@x[:n])
+    def objective(x):
+        # Sales earn no cash return until settlement.
+        return .5*gamma*variance(x)-float(mu@x[:n])-cash_return*available(x)+funding*(debt/nlv-x[-1])+fee(x)
+    def constraints(x):
+        q=x[:n]; net=1-fee(x)
+        values=[available(x)-payable/nlv-reserve,
+                max_gross*net-float(q.sum()),max_stress*net-float(shocks@q),
+                max_turnover-float(np.abs(q-current).sum())-x[-1],
+                max_vol**2*net**2-variance(x)]
+        values.extend(risk_caps*net-risk_matrix@q)
+        for i,(p,new,*_) in enumerate(rows):
+            if p["type"]=="option" and new:
+                j=ids.index(p["underlying"])
+                values.append(q[j]/rows[j][3]-q[i]/rows[i][3]*p["multiplier"])
+        return np.asarray(values)
+    bounds=[(r[9],r[10]) for r in rows]+[(0.,min(debt/nlv,cap))]
+    result=minimize(objective,np.r_[current,0.],method="SLSQP",bounds=bounds,
+                    constraints=[{"type":"ineq","fun":constraints}],options={"maxiter":500,"ftol":1e-11})
+    flags={"research_only":True,"trade_authorized":False,"live_execution_enabled":False,
+           "approved_for_model_training":False,"approved_for_backtest":False}
+    if not result.success or not np.all(np.isfinite(result.x)) or min(constraints(result.x)) < -1e-7:
+        return {**flags,"status":"BLOCKED_CONTINUOUS_SOLVE","legs":[]}
+    x=np.r_[current,0.]; legs=[]
+    for i,(p,new,lot,unit,qty,_,cost,_,_,_,_) in enumerate(rows):
+        change=(result.x[i]-current[i])*nlv/unit
+        delta=(1 if change>=0 else -1)*floor(abs(change)/lot+1e-10)*lot
+        if not delta:
+            continue
+        x[i]+=delta*unit/nlv
+        leg={"leg_id":"OPT-"+str(i),"identifier":p["identifier"],"fee":abs(delta)*unit*cost}
+        if p["type"]=="equity":
+            leg.update(action="BUY_EQUITY" if delta>0 else "SELL_EQUITY",shares=abs(delta),limit_price=unit)
+        elif p["type"]=="treasury":
+            leg.update(action="BUY_TREASURY",face_value=delta,dirty_price_per_100=unit*100)
+        else:
+            leg.update(action="BUY_PUT",contracts=delta,multiplier=p["multiplier"],underlying=p["underlying"],
+                       strike=p["strike"],expiration_date=p["expiration_date"],mark_premium=p["mark_premium"],
+                       limit_premium=p["mark_premium"],quote_age_seconds=p["mark_age_seconds"],
+                       mark_source=p["mark_source"],trading_permission=market["inputs"][p["identifier"]]["trading_permission"])
+        legs.append(leg)
+    repayment=floor(result.x[-1]*nlv*100)/100
+    if repayment:
+        x[-1]=repayment/nlv
+        legs.append({"leg_id":"OPT-DEBT","action":"REPAY_MARGIN","amount":repayment,"fee":0})
+    if min(constraints(x)) < -1e-7:
+        return {**flags,"status":"BLOCKED_DISCRETE_CONSTRAINTS","legs":[]}
+    base={**flags,"continuous_weights":dict(zip(ids,map(float,result.x[:n]))),
+          "discrete_weights":dict(zip(ids,map(float,x[:n]))),"remaining_debt":debt-repayment,
+          "settled_cash_after":available(x)*nlv,"expected_horizon_volatility":variance(x)**.5,
+          "risk_exposures":dict(zip(("dv01","abs_delta","gamma","vega","option_weight"),map(float,risk_matrix@x[:n]))),
+          "legs":legs}
+    if not legs:
+        return {**base,"status":"NO_CHANGE"}
+    plan=deepcopy(context)
+    plan.update(legs=legs,batch_id="OPT-"+digest([ledger,context,market,limits,legs])[:32],
+                allow_margin_borrowing=False)
+    plan.pop("basket_preview",None)
+    # Independent planner checks exact units, marked accounting and policy.
+    # Its missing-preview block is intentional; no approval is fabricated.
+    plan["risk_observation"]={**plan["risk_observation"],
+        "pro_forma_gross_leverage":float(x[:n].sum()/(1-fee(x))),
+        "pro_forma_stress_loss_fraction":float(shocks@x[:n]/(1-fee(x)))}
+    gate=propose_multi_asset_batch(ledger,plan)
+    return {**base,"status":"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT","draft_plan":plan,"independent_preflight":gate}
