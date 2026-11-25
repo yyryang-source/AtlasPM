@@ -129,10 +129,13 @@ def view_jobs(*, command: str | None = None) -> None:
         st.error(job.get("error", "任务失败"))
     elif job["status"] == "completed":
         kind = "backtest" if job["command"] == "stock-backtest" else "screen"
-        research_reports.display(
-            research_jobs.job_file(ROOT, job_id, "report.json"),
-            f"{job['command']}-{job_id[:8]}.json", kind, f"job_download_{group}",
-        )
+        try:
+            report_path=research_jobs.verified_report(ROOT,job_id)
+        except (OSError,ValueError,KeyError):
+            st.error("报告尚未封存或完整性校验失败，请重新运行研究。")
+        else:
+            research_reports.display(report_path,
+                f"{job['command']}-{job_id[:8]}.json",kind,f"job_download_{group}")
     with st.expander("参数、输入版本与日志", expanded=job["status"] == "failed"):
         st.json({"参数": job["options"], "输入版本": job["inputs"]}, expanded=1)
         log = research_jobs.job_file(ROOT, job_id, "run.log")
