@@ -34,6 +34,9 @@ def status(*, path=event_queue.PATH):
     counts={}
     topics={}
     blocked=0
+    local_statuses={}
+    local_completed={}
+    events_without_local_receipts=0
     for key,item in items.items():
         if key!=event_queue.CONTROL_KEY:
             state=item["state"]
@@ -43,8 +46,24 @@ def status(*, path=event_queue.PATH):
                 topic=task["topic"]
                 topics[topic]=topics.get(topic,0)+1
             blocked+=len(report.get("blocked_specialist_tasks",[]))
+            receipts=report.get("local_specialist_receipts",[])
+            if state=="completed" and not receipts:
+                events_without_local_receipts+=1
+            for receipt in receipts:
+                outcome=receipt["status"]
+                local_statuses[outcome]=local_statuses.get(outcome,0)+1
+                if outcome=="LOCAL_REVIEW_COMPLETED":
+                    route=receipt["route"]
+                    local_completed[route]=local_completed.get(route,0)+1
+    local_blocked=sum(n for outcome,n in local_statuses.items() if outcome.startswith("BLOCKED"))
     return {**FLAGS,"control":control,"queue_counts":counts,
-            "research_topic_counts":topics,"blocked_research_tasks":blocked,
+            "research_topic_counts":topics,"research_topic_counts_scope":"event_metadata_only",
+            "blocked_research_tasks":blocked+local_blocked,
+            "blocked_metadata_tasks":blocked,"blocked_local_specialist_tasks":local_blocked,
+            "local_specialist_status_counts":local_statuses,
+            "local_specialist_completed_by_route":local_completed,
+            "completed_events_without_local_receipts":events_without_local_receipts,
+            "professional_research_coverage_verified":False,
             "network_tasks_enabled":False,"formal_training_enabled":False,
             "broker_tasks_enabled":False,"max_concurrency":1}
 
@@ -304,8 +323,11 @@ def main():
         data=json.loads(raw)
         out=local_specialist_tasks(data["tasks"],as_of=data["as_of"])
         out["tasks"]=[{k:v for k,v in row.items() if k!="report"} for row in out["tasks"]]
+        blocked=sum(row["status"]!="LOCAL_REVIEW_COMPLETED" for row in out["tasks"])
+        out["status"]="LOCAL_RESEARCH_BLOCKED" if blocked else "LOCAL_RESEARCH_REVIEWED"
+        out["blocked_tasks"]=blocked
         print(json.dumps(out,indent=2,allow_nan=False))
-        return 0
+        return 1 if blocked else 0
     if args.action=="offline":
         out=offline_release(checkpoint=args.checkpoint)
         print(json.dumps(out,indent=2,allow_nan=False))
