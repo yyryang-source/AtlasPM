@@ -9,7 +9,7 @@ import re
 from urllib.request import Request, build_opener, ProxyHandler
 
 from atlaspm.data.api_gateway import _NoRedirect, _strict_json, GatewayError
-from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, local_rights
+from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, RESTRICTED, local_rights, require_enabled
 from atlaspm.research.financial_events import FLAGS, _time, _digest
 
 URL = "http://127.0.0.1:11434/api/generate"
@@ -31,6 +31,9 @@ def context(rows, *, as_of, universe):
         provider = row["provider"]
         if provider not in ROLES:
             raise ValueError("Unknown source")
+        require_enabled(provider)
+        if provider in RESTRICTED and provider not in RIGHTS_ENV:
+            raise ValueError("Source has no approved local AI rights policy")
         if provider in RIGHTS_ENV:
             local_rights(provider, retention=True)
             # Local model processing rights are independent from data retention.
@@ -48,16 +51,23 @@ def context(rows, *, as_of, universe):
             raise ValueError("Evidence digest mismatch")
         if expires > cutoff:
             unique[row["evidence_id"]] = row
-    # Bounded recency window; explicitly report omitted context, not full coverage.
-    selected = []
-    size = 0
+    # Round-robin providers so high-frequency flow does not monopolize context.
+    from collections import defaultdict, deque
+    groups = defaultdict(deque)
     for row in sorted(unique.values(), key=lambda x: (x["received_at"], x["evidence_id"]), reverse=True):
-        n = len(json.dumps(row, ensure_ascii=False).encode())
-        if len(selected) < 24 and size + n <= 24000:
-            selected.append(row)
-            size += n
+        groups[row["provider"]].append(row)
+    selected, size = [], 0
+    while groups and len(selected) < 24:
+        for provider in list(groups):
+            row = groups[provider].popleft()
+            if not groups[provider]:
+                del groups[provider]
+            n = len(json.dumps(row, ensure_ascii=False).encode())
+            if len(selected) < 24 and size + n <= 24000:
+                selected.append(row)
+                size += n
     return {"as_of": cutoff.isoformat(), "universe": universe, "evidence": selected,
-            "omitted": len(unique)-len(selected), "coverage_complete": False}
+            "omitted": len(unique)-len(selected), "providers": sorted({r["provider"] for r in selected}), "coverage_complete": False}
 
 
 def validate_output(output, snapshot):
@@ -74,6 +84,8 @@ def validate_output(output, snapshot):
             raise ValueError("Invalid or conflicting opportunity")
         if not isinstance(ids, list) or not 1 <= len(ids) <= 8 or len(set(ids)) != len(ids) or any(i not in rows for i in ids):
             raise ValueError("Unknown opportunity evidence")
+        if any(rows[i]["symbols"] and symbol not in rows[i]["symbols"] for i in ids):
+            raise ValueError("Unrelated symbol evidence")
         if not any(symbol in rows[i]["symbols"] for i in ids):
             raise ValueError("No symbol-associated evidence")
         if not isinstance(item["reason"], str) or not 1 <= len(item["reason"]) <= 1500:
