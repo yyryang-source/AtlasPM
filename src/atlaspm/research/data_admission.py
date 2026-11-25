@@ -241,6 +241,8 @@ def main():
     parser.add_argument("--matrix-horizon",type=int)
     parser.add_argument("--matrix-fold",type=int,help="Zero-based canonical fold index")
     parser.add_argument("--array-budget-mib",type=int,default=16)
+    parser.add_argument("--evidence-priority-limit",type=int,
+                        help="Rank at most 1..1000 symbols by reviewed sample-path gaps")
     parser.add_argument("--start-month")
     parser.add_argument("--end-month")
     parser.add_argument("--execute",action="store_true")
@@ -256,12 +258,15 @@ def main():
     matrix_requested=args.matrix_horizon is not None or args.matrix_fold is not None
     if matrix_requested and (args.action!="identity-review" or args.matrix_horizon is None or args.matrix_fold is None):
         parser.error("matrix review requires identity-review and both --matrix-horizon and --matrix-fold")
+    if args.evidence_priority_limit is not None and args.action!="identity-review":
+        parser.error("--evidence-priority-limit requires identity-review")
     if args.action=="identity-review":
         if args.execute or not args.dataset_id or not args.as_of or args.start_month or args.end_month:
             parser.error("identity-review requires --dataset-id and --as-of; no --execute or month flags")
         out=inspect_research_dataset(args.dataset_id,memory=args.memory,threads=args.threads,
               minimum_train_rows=args.minimum_train_rows,minimum_test_rows=args.minimum_test_rows,
               identity_as_of=args.as_of,
+              evidence_priority_limit=args.evidence_priority_limit,
               matrix_request={"horizon":args.matrix_horizon,"fold_index":args.matrix_fold,
                               "array_budget_mib":args.array_budget_mib,
                               "require_feature_history":True} if matrix_requested else None)

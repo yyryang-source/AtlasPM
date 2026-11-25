@@ -447,3 +447,21 @@ source and derived counts are reconciled. Stale calendar evidence invalidates
 factor lineage. An existing projected daily partition is never silently
 replaced by an unprojected one. This is an exploratory NYSE projection,
 not primary venue verification or permission to fit or trade.
+
+### Evidence-priority queue for the actual research dataset
+
+The existing canonical identity-review action supports an optional
+--evidence-priority-limit 100. It ranks observed symbols by the number
+of strict closing-path horizon rows excluded by reviewed identity gaps,
+then feature-history gaps and visible actions. It reuses the same label
+window expressions and exact session reconciliation, with GROUPING SETS
+for per-session and per-symbol counts. Counts must reconcile exactly to
+all horizon totals before a queue is published. At most 50,000 observed
+symbols are accumulated and at most 1,000 reported; use a bounded dataset.
+The report is separate from the original identity or fold-array report.
+No inferred issuer or stable identity, no ledger mutations and no training.
+Counts across horizons are not unique rows or promised recoverable samples.
+Affected signal months are not a security's effective interval. Missing
+feature history may require longer warmup or data repair, and visible
+actions may require continued exclusion. Prioritize authentic independent
+source acquisition; do not generate claim files from this queue.

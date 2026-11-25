@@ -174,7 +174,7 @@ class RealDatasetTests(unittest.TestCase):
              patch("atlaspm.data.quality_review._ledger_digest",return_value="a"*64), \
              patch("atlaspm.data.unified.review_security",side_effect=snapshot):
             report=pre.run(r["dataset_id"],minimum_train_rows=1,minimum_test_rows=1,
-                           identity_as_of="2020-02-07")
+                           identity_as_of="2020-02-07",evidence_priority_limit=10)
         one=report["horizons"]["1"]
         self.assertEqual(one["rows_excluded_by_identity_path"],1)
         self.assertEqual(one["rows_excluded_by_visible_actions"],2)
@@ -185,7 +185,44 @@ class RealDatasetTests(unittest.TestCase):
         self.assertEqual(one["reviewed_feature_history_rows"],0)
         self.assertEqual(one["rows_excluded_by_feature_history"],one["reviewed_identity_action_free_rows"])
         self.assertIn("INSUFFICIENT_REVIEWED_FEATURE_HISTORY_SAMPLES:1",report["blockers"])
+        queue=report["evidence_priority"]
+        self.assertTrue(queue["all_counts_reconciled"])
+        self.assertEqual(queue["symbols_scanned"],2)
+        self.assertEqual(queue["priority_rows"][0]["symbol"],"ABC")
+        self.assertEqual(queue["priority_rows"][0]["horizons"]["1"]["identity_gap"],1)
+        self.assertEqual(queue["priority_rows"][0]["horizons"]["1"]["visible_action_exclusions"],2)
+        self.assertFalse(queue["approved_for_model_training"])
+        self.assertEqual(queue["claims_ingested"],0)
         self.assertFalse(report["approved_for_model_training"])
+
+    def test_evidence_priority_requires_cutoff_and_limit(self):
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        from atlaspm.research.evidence_priority import EvidencePriority
+        with self.assertRaisesRegex(ValueError,"EVIDENCE_PRIORITY_REQUIRES_IDENTITY_CUTOFF"):
+            pre.run("invalid",evidence_priority_limit=1)
+        for limit in (0,1001,True):
+            with self.assertRaises(ValueError):
+                EvidencePriority([1],limit)
+
+    def test_evidence_priority_reconciles_and_truncates(self):
+        from atlaspm.research.evidence_priority import EvidencePriority
+        queue=EvidencePriority([1],1)
+        queue.add("2020-01","AAA",[3,1,1,0])
+        queue.add("2020-02","AAA",[2,0,0,0])
+        queue.add("2020-01","BBB",[2,1,0,0])
+        totals={"1":{"closing_path_labeled_feature_complete_rows":7,
+                     "reviewed_identity_path_rows":2,"reviewed_identity_action_free_rows":1,
+                     "reviewed_feature_history_rows":0}}
+        out=queue.finish(totals)
+        self.assertTrue(out["truncated"])
+        self.assertEqual(out["symbols_with_gaps"],2)
+        self.assertEqual(out["priority_rows"][0]["identity_gap_horizon_rows"],4)
+        self.assertEqual(out["priority_rows"][0]["affected_signal_months"],["2020-01","2020-02"])
+        totals["1"]["reviewed_identity_path_rows"]=3
+        with self.assertRaisesRegex(ValueError,"RECONCILIATION"):
+            queue.finish(totals)
+        with self.assertRaisesRegex(ValueError,"COUNT_ORDER"):
+            queue.add("2020-03","CCC",[1,2,1,1])
 
     def test_reviewed_fold_arrays_use_purged_boundaries_and_separate_targets(self):
         from importlib.util import find_spec
