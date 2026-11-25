@@ -822,3 +822,194 @@ actual provider inference, licensed data/identity/PIT, real broker
 recovery/kill switch, independent operational approval, current exact
 SHA CI and Windows local acceptance. Existing provider configuration
 and staged actual API/AI/Paper smoke instructions remain canonical.
+
+
+## Offline V1.0 — final audit handoff (scope frozen, NOT approved)
+
+### Evidence locked to the tested SHA
+
+Independently fetched all seven successful workflow runs for
+5f85f4fdd6bbf7d040390c828f2451db63b7cefb (48 commits, 46 changed files).
+Full release evidence, not projected counts:
+
+| Measurement | Windows Python 3.14 | Linux Python 3.12 full optional |
+| --- | ---: | ---: |
+| Tests passed / executed | 1116 / 1116 | 1116 / 1116 |
+| Failures / errors / skips | 0 / 0 / 0 | 0 / 0 / 0 |
+| Test runner seconds | 95.743 | 54.934 |
+| Offline status | OFFLINE_FIXTURE_PASS | OFFLINE_FIXTURE_PASS |
+| Offline wall seconds | 3.1707543 | 2.250121967 |
+| Offline CPU seconds | 3.125 | 2.225579273 |
+| Process lifetime peak RSS bytes | 152850432 | 220434432 |
+| OS process read / write bytes | 22654421 / 295062 | 0 / 389120 |
+| Duplicate function body candidates | 0 | 0 |
+
+Windows: https://github.com/yyryang-source/AtlasPM/actions/runs/45514320100/job/138869730104
+Linux: https://github.com/yyryang-source/AtlasPM/actions/runs/45514320029/job/138869729022
+
+The Windows I/O counters include non-disk transfers; Linux actual I/O bytes
+may exclude cached reads. This workload is bounded synthetic software
+acceptance, not a sustained-market performance or physical disk test. The
+wall time is higher than e46d83c on both CI hosts; one sample per host does
+not establish a regression or improvement. No claim of peak RSS for training.
+
+Final audit corrections after that SHA: orchestrator status distinguishes
+metadata topics from actual local specialist dispatch receipts; blocked local
+receipts contribute to the blocked count; completed events without local
+receipts are explicit. These are cumulative receipt counts, not unique
+topics or proof of complete professional coverage. A blocked direct
+research CLI request now exits 1, with machine-readable status; exit 0
+means only the requested local review returned, not certified research.
+Existing metadata queue completion and retry semantics are unchanged.
+Added a regression test using real dispatch (no provider calls).
+Both full dependency CI jobs now invoke verify_release with minimum 1117;
+the gate rejects any skipped/failed/errored tests, source audit errors and
+duplicate function body candidates. Latest head results must be read
+independently; 1117 is expected, not measured by this document.
+
+### Capability inventory and release boundary
+
+| Capability | Canonical implementation / observed scope | Remaining gate |
+| --- | --- | --- |
+| Technical | intelligence._local_data_review -> unified equity_daily -> existing stock screener; actual bound event test | Verified identity, data rights, freshness, PIT and numerical forecast validation |
+| Fundamental | unified iter_fundamentals / SEC filings; evidence hashes, not general automatic fundamental analyst | Independent filing availability, actual dataset and analyst model |
+| News / sentiment | news_intelligence licensed local metadata review; explicit dispatcher | Actual authorized Yahoo/Bloomberg feed, rights, publication time and verified identity; no invented vendor endpoint |
+| Options anomaly | options_intelligence bounded UW flow and context adapter | Authorized actual API schema, flow/Greek units and licensed data; no automatic event binding to flow retrieval |
+| Investment bank | institutional_research factors, revisions, local licensed import | Actual report access and independent estimate basis/identity checks |
+| Credit ratings | credit_intelligence history and XpressAPI adapter | Actual entitlement, issuer/issue matching, effective versus published times |
+| Bonds | local bond_quotes receipt, existing Treasury replay and independent DV01/risk | Reliable tradable marks, actual settlement, credit/default and common OMS lifecycle |
+| Macro / regime | FRED vintage and Fed disclosures adapters, normalized event metadata | Actual vintage and publication audit; not complete automatic macro/regime research |
+| Industry / factors | normalized index events, factor reader and admission structural audit | Licensed classifications/membership and independently certified factor data; no automatic industry model |
+| Model inference / fusion | explicit local artifact route, public-evidence external adapter, contract and signal fusion | Real model calls and verified evidence; automatic local receipt-to-numeric fusion not complete |
+| Autonomous decision | autonomous_decision, unified portfolio, continuous synthetic entry/exit | Real approved forecasts, identity and independent validation; no trading authorization |
+| Cross-asset allocation | exact-leg institutional batch, independent risk, rank_synthetic_baskets, asset-specific risk diagnostics | General joint asset allocation/covariance optimizer (not just candidate comparison), robust Greeks/duration/credit and executable pricing |
+| OMS / recovery | existing paper_oms, persisted event prefix, partial fill, cancellation, UNKNOWN halts, after-fill reconciliation | Actual broker recovery, disconnect/restart/reconciliation and kill switch; no blind resubmission |
+| Expiry / settlement | real existing option and Treasury replay algorithms exercised in separate fixture accounts | Unified OMS expiry, early exercise, short assignment, corporate default and settlement integration |
+| Governance | alpha registry lifecycle, comparison, drift review and suspend/retire; synthetic validation only | Independent operational approval, rollback/revalidation and new untouched validation evidence; no self-approval |
+| Security / resources | fixed gateway scope, local secrets, explicit Paper gates, bounded workload, source and duplicate audit | Actual production load and security review; no new permissions or claims of exhaustive security certification |
+
+Unverified capabilities must remain blocked rather than be substituted with
+fabricated returns or provider responses. The queue's synthetic metadata
+contracts do not certify all specialist algorithms; fundamental/SEC/bond/factor
+local data paths currently return descriptive evidence receipts, not verified
+numeric forecasts. The bounded offline fixture is an integration gate, not
+a generic research scheduler, full cross-asset optimizer or live trading system.
+
+### Consolidated Windows acceptance (after exact-head CI)
+
+Reuse the existing review checkout and interpreter with all required optional
+dependencies. Do not modify the main data-download checkout or #94. Choose
+the exact reviewed Git SHA from the PR head; never silently switch to a newer
+unreviewed head. No financial data downloads, external AI or broker orders.
+
+```powershell
+$ErrorActionPreference = "Stop"
+$root = "C:\Users\Kevin\Desktop\AtlasPM"
+$review = "C:\Users\Kevin\Desktop\AtlasPM-data-review"
+$py = Join-Path $root ".venv\Scripts\python.exe"
+Set-Location $review
+git fetch origin
+if ($LASTEXITCODE -ne 0) { throw "Fetch failed" }
+$sha = (git rev-parse origin/feature/unified-api-gateway).Trim()
+if ($LASTEXITCODE -ne 0) { throw "Head resolution failed" }
+Write-Host "Verify this SHA against the completed GitHub CI: $sha"
+# Replace only with the exact independently reviewed SHA, if different.
+git switch --detach $sha
+if ($LASTEXITCODE -ne 0) { throw "Checkout failed" }
+$env:PYTHONPATH = Join-Path $review "src"
+Remove-Item Env:ATLASPM_ALLOW_PAPER_ORDERS -ErrorAction SilentlyContinue
+Remove-Item Env:ATLASPM_ALLOW_EXTERNAL_AI -ErrorAction SilentlyContinue
+& $py -m pip check
+if ($LASTEXITCODE -ne 0) { throw "Dependencies failed" }
+& $py scripts/maintenance/verify_release.py --minimum-passed 1117
+if ($LASTEXITCODE -ne 0) { throw "Release gate failed" }
+& $py scripts/maintenance/benchmark_unified_data.py --offline
+if ($LASTEXITCODE -ne 0) { throw "Offline benchmark failed" }
+& $py -m atlaspm.data.api_gateway
+if ($LASTEXITCODE -ne 0) { throw "Provider inventory failed" }
+& $py -m atlaspm.research.intelligence --list
+if ($LASTEXITCODE -ne 0) { throw "Model inventory failed" }
+& $py -m atlaspm.framework.orchestrator status
+if ($LASTEXITCODE -ne 0) { throw "Status failed" }
+```
+
+For Linux full optional dependencies, from the checkout root run the same
+verify_release and benchmark commands. Full gate requires zero skips.
+Unified offline startup:
+python -m atlaspm.framework.orchestrator offline --checkpoint local_data/runs/offline_v1_review.continuous.json
+Use a new checkpoint for changed fixture inputs; never erase real journals.
+Bounded local event worker:
+python -m atlaspm.framework.orchestrator run --file local_data/research_bindings.json --cycles 10 --interval 60
+Use status, stop, takeover, resume for explicit local control; no broker
+or external model calls from this worker. A blocked local research CLI returns
+nonzero. The worker is not a production daemon and does not interrupt an
+already in-flight broker request.
+
+### Actual connection acceptance (separate stage; no simulated substitutes)
+
+1. **Credentials and rights:** use the consolidated provider table above.
+   Official sources: SEC contact, FRED_API_KEY, public Treasury; optional
+   MASSIVE_API_KEY. Licensed sources: UW_TOKEN, XPRESSAPI_TOKEN or approved
+   XPRESSAPI_USERNAME/PASSWORD, FINRA_CLIENT_ID/SECRET, respective rights,
+   retention and bounded quota variables. Yahoo/Bloomberg/investment bank
+   and index feed contracts require actual schemas; no assumed API access.
+   IBKR uses a local authenticated Paper session, trusted TLS and entitlements.
+   External AI uses OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, explicit
+   model ID and reviewed public evidence. Never commit keys or private data.
+   Check inventory presence only; rights attestations are not independent
+   legal certification. Keep ATLASPM_ALLOW_EXTERNAL_AI and
+   ATLASPM_ALLOW_PAPER_ORDERS unset until separate authorized tests.
+2. **Real data admission:** document provider, rights/retention/AI permissions,
+   immutable file hashes, timezone, observation/publication/receipt and
+   effective times, vintage, currency, security identity and adjustments;
+   reconcile duplicates, missing sessions, survivorship, corporate actions
+   and independent price samples. Reuse the existing local admission and
+   unified reader, not a second archive. For factor structural audit only:
+   python -m atlaspm.research.training_admission --months YYYY-MM --source hf
+   An independent reviewer must sign the dataset/identity/PIT/evaluation
+   manifest before formal training or backtesting can be considered; this
+   CLI does not grant those permissions.
+3. **Real AI inference:** start with inventory; one authorized public
+   excerpt and bounded provider call via
+   python -m atlaspm.research.intelligence --provider openai --model MODEL_ID --input local_data/reviewed_public_evidence.json --allow-external
+   with ATLASPM_ALLOW_EXTERNAL_AI=1 only for the reviewed invocation;
+   repeat separately for anthropic/gemini if entitled. Verify exact provider
+   and reported model, evidence quotes, publication/receipt cutoff, actual
+   usage and error/limit behavior. Revoke environment opt-in afterwards.
+   Local artifact inference uses orchestrator research with local_artifact
+   route and existing content-addressed artifact ID/registry; verify hash,
+   input shape, timestamps, real output and holdout independence. Neither
+   a valid quote nor a fixture result proves forecast validity.
+4. **IBKR Paper (manual, separate approval):** follow
+   [IBKR_READONLY](quant/IBKR_READONLY.md) and
+   [MARKET_CLOSE_REBALANCE](quant/MARKET_CLOSE_REBALANCE.md).
+   Authenticate dedicated Paper DU account locally; verify trusted TLS,
+   actual positions/cash/open orders, conid/units, live entitlement and
+   timestamps. Review a tiny fixed equity-only Paper plan with current
+   market audit; existing ibkr_equity_snapshot, ibkr_whatif and
+   ibkr_next_day steps must produce approved exact-leg artifacts. Confirm
+   run ID and account manually; submit only through ibkr_paper_orders
+   with explicit run confirmation and temporary ATLASPM_ALLOW_PAPER_ORDERS=1.
+   Existing quantity/notional/DU limits are mandatory. Reconcile with
+   ibkr_paper_orders reconcile and use scoped cancel if necessary.
+   Test complete fill, partial fill/cancel, timeout after send, unknown
+   response, process death, disconnect/reconnect, duplicate execution ID,
+   open order and position/cash mismatch. For unknown outcome halt,
+   reconcile customer order ID and executions against broker; never blindly
+   retry. Stop/takeover and kill switch require actual independent broker
+   verification. Store redacted results and reviewed hashes locally.
+   No account login, provider call, order, or real recovery test performed
+   by this offline audit.
+
+### Release decision
+
+PR #95 remains a draft candidate; no merge, release tag, production
+authorization or formal model approval. PR #94 remains frozen at
+5b331ea05c9199c2be3ad8c8f7e877d1bde80174. Before approval, verify exact
+new SHA on all CI workflows, local Windows acceptance, source/permission
+audit and the unresolved capability criteria above. Formal training,
+formal backtesting and automatic live trading remain disabled. Synthetic
+training/replay tests do not grant those permissions. No new framework,
+no risk relaxation, no extra synthetic provider substitute. Freeze
+feature expansion; only defects and explicit missing release requirements
+remain in scope.
