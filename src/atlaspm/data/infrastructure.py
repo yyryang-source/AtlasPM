@@ -14,6 +14,9 @@ import sqlite3
 from atlaspm.data import unified
 from atlaspm.data.market_db import DB_PATH, private_path
 from atlaspm.monitoring.api_management import inventory
+from atlaspm.data.provider_policy import local_rights, request_budget, RIGHTS_ENV
+from atlaspm.data.api_gateway import MODEL_ENDPOINTS
+import os
 
 # Existing designated adapters are the source of truth for data processing.
 # This inventory only exposes their route and known limitations.
@@ -71,6 +74,8 @@ def inspect(*, database=DB_PATH, gateway=None):
                      "status":_table_status(state,tables,table,set(fields)),
                      "coverage_verified":False,"point_in_time_verified":False})
     provider_rows=inventory() if gateway is None else inventory(gateway)
+    for row in provider_rows:
+        row['manual_attempt_preconditions']=_preconditions(row)
     return {"schema":"atlaspm_data_infrastructure_v1","local_only":True,
             "database_status":state,"datasets":rows,
             "specialized_routes":[{"dataset":n,"module":m,"access":a,
@@ -80,6 +85,40 @@ def inspect(*, database=DB_PATH, gateway=None):
             "approved_for_backtest":False,"live_execution_enabled":False,
             "broker_order_submission_enabled":False,"network_requests":0,
             "warning":"Table schema presence is not row coverage. Configuration and process health are not independent entitlement or connection verification."}
+
+
+def _preconditions(row):
+    """Nonsecret configuration diagnostic, not entitlement or authorization."""
+    provider=row["provider"]
+    blockers=[]
+    if not row["enabled_by_configuration"]:
+        blockers.append("PROVIDER_DISABLED")
+    if row["mode"]=="BLOCKED_WIRE_SPEC_OR_ENTITLEMENT":
+        blockers.append("WIRE_SPEC_OR_ENTITLEMENT_PENDING")
+    if row["mode"]=="LOCAL_SESSION_OR_ARCHIVE":
+        blockers.append("EXPLICIT_LOCAL_SESSION_OR_ARCHIVE_REQUIRED")
+    if row["credential_configured"] is False:
+        blockers.append("CREDENTIAL_NOT_CONFIGURED")
+    if provider in RIGHTS_ENV and row["enabled_by_configuration"]:
+        try:
+            local_rights(provider)
+        except ValueError:
+            blockers.append("RIGHTS_ATTESTATION_INVALID_OR_MISSING")
+    if provider in {"xpressapi","unusual_whales","finra"}:
+        try:
+            request_budget(provider)
+        except ValueError:
+            blockers.append("REQUEST_BUDGET_INVALID_OR_MISSING")
+    if provider=="xpressapi" and not os.environ.get("XPRESSAPI_TOKEN","").strip():
+        blockers.append("BEARER_TOKEN_REQUIRED_FOR_DATA_GET")
+    if row["token_expiry_operator_valid"] is False:
+        blockers.append("TOKEN_EXPIRY_INVALID_OR_EXPIRED")
+    if provider in MODEL_ENDPOINTS and os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI")!="1":
+        blockers.append("EXPLICIT_EXTERNAL_AI_OPT_IN_REQUIRED")
+    if row["circuit_open"]:
+        blockers.append("PROVIDER_CIRCUIT_OPEN")
+    return {"blockers":blockers,"no_known_configuration_blockers":not blockers,
+            "request_authorized":False,"connection_verified":False}
 
 
 def _table_status(state,tables,relation,fields):

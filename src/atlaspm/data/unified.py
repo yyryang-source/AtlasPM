@@ -82,7 +82,8 @@ CATALOG = MappingProxyType({
                                   source=source) for source in factor_db.SOURCES},
 })
 
-# Explicitly unavailable through this API, not fabricated empty tables.
+# Explicitly unavailable through date-range iter_batches, not fabricated empty tables.
+# Current option and bond terms use the separate exact reference lookup below.
 UNCONNECTED = frozenset({
     "equity_realtime",
     "macro", "option_contracts", "bond_terms",
@@ -617,8 +618,8 @@ def read_reference(dataset, *, identifiers, purpose="exploratory", as_of=None,
         con.execute("BEGIN")
         try:
             rows=con.execute(f"SELECT {','.join(fields)} FROM {table} WHERE {fields[0]} IN ("
-                             +",".join("?" for _ in identifiers)+f") ORDER BY {fields[0]}",
-                             identifiers).fetchall()
+                             +",".join("?" for _ in identifiers)+f") ORDER BY {fields[0]} LIMIT ?",
+                             (*identifiers,len(identifiers)+1)).fetchall()
         except sqlite3.OperationalError:
             raise DataUnavailable("Reference table or schema unavailable") from None
         version=_version(path)
@@ -626,6 +627,8 @@ def read_reference(dataset, *, identifiers, purpose="exploratory", as_of=None,
     for row in result:
         _validate_reference(dataset,row)
     found={row[fields[0]] for row in result}
+    if len(found)!=len(result) or not found<=set(identifiers):
+        raise DataQualityError("Ambiguous reference identifier")
     return {"schema":"atlaspm_current_reference_lookup_v1","dataset":dataset,
             "origin":str(path.relative_to(Path.cwd().resolve())),
             "source_version_hint":version,"records":result,

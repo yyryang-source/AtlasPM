@@ -78,6 +78,35 @@ class InfrastructureTests(unittest.TestCase):
         self.assertEqual(missing["database_status"],"DATABASE_MISSING")
         self.assertFalse(Path("local_data/no.sqlite3").exists())
 
+    def test_cli_integration_and_configuration_diagnostics(self):
+        from atlaspm.cli import build_parser
+        parser=build_parser()
+        args=parser.parse_args(["market-db","reference-lookup","--dataset","bond_terms",
+                                "--identifier","123456789"])
+        self.assertTrue(market_db.run(args)["all_requested_identifiers_present"])
+        with patch.dict(os.environ,{"XPRESSAPI_USERNAME":"user","XPRESSAPI_PASSWORD":"secret",
+                                    "XPRESSAPI_TOKEN":"","ATLASPM_XPRESSAPI_MAX_REQUESTS":"",
+                                    "ATLASPM_XPRESSAPI_RIGHTS":"fixture",
+                                    "ATLASPM_ENABLE_XPRESSAPI":"1",
+                                    "ATLASPM_ALLOW_EXTERNAL_AI":"0"}):
+            out=market_db.run(parser.parse_args(["market-db","infrastructure-status"]))
+        rows={r["provider"]:r for r in out["providers"]}
+        x=rows["xpressapi"]["manual_attempt_preconditions"]
+        self.assertIn("BEARER_TOKEN_REQUIRED_FOR_DATA_GET",x["blockers"])
+        self.assertIn("REQUEST_BUDGET_INVALID_OR_MISSING",x["blockers"])
+        self.assertFalse(x["request_authorized"])
+        self.assertIn("EXPLICIT_EXTERNAL_AI_OPT_IN_REQUIRED",
+                      rows["openai"]["manual_attempt_preconditions"]["blockers"])
+
+    def test_duplicate_reference_identifier_is_rejected(self):
+        p=Path("local_data/duplicate.sqlite3")
+        with closing(sqlite3.connect(p)) as con:
+            con.execute("CREATE TABLE bonds AS SELECT * FROM (SELECT '123456789' AS cusip, 'treasury' AS bond_kind, 'US Treasury' AS issuer, 'Note' AS security_type, 2.0 AS coupon_rate_pct, '2020-01-01' AS issue_date, '2025-01-01' AS maturity_date, 'fixture' AS source)")
+            con.execute("INSERT INTO bonds SELECT * FROM bonds")
+            con.commit()
+        with self.assertRaisesRegex(unified.DataQualityError,"Ambiguous"):
+            unified.read_reference("bond_terms",identifiers=["123456789"],database=p)
+
     def test_inventory_partial_schema(self):
         p=Path("local_data/partial.sqlite3")
         with closing(sqlite3.connect(p)) as con:

@@ -487,3 +487,10 @@ IBKR L1, FRED date-vintage, licensed news/report intake and specialized feeds
 retain their existing consent/rights boundaries and entry points. Inventory
 does not invoke them. JSON transport also rejects duplicate object keys,
 overflowed float values and sanitizes truncated HTTP responses.
+
+The same functions are available through the stable main CLI:
+`atlaspm market-db infrastructure-status` and
+`atlaspm market-db reference-lookup --dataset bond_terms --identifier CUSIP`.
+The status report additionally distinguishes configured credentials from
+rights syntax, paid-feed request budgets, required bearer token, external AI
+opt-in and open-circuit blockers. No reported readiness is authorization.
