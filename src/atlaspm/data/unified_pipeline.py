@@ -55,15 +55,27 @@ def maintain(start_month, end_month, *, execute=False, memory="256MB", threads=1
             signature = unified._version(bars)
             audit = qc.run(month, month, session="rth", resume=True, dry_run=False)
             record["audit"] = audit["status_counts"]
+            projection = False
             if not audit["all_months_structurally_audited"]:
-                raise unified.DataQualityError("Existing 5m audit did not pass structural checks")
+                if (audit.get("months_structural_failed") != [month]
+                        or audit["status_counts"].get(qc.STRUCTURAL) != 1):
+                    raise unified.DataQualityError("Existing 5m audit did not pass structural checks")
+                # The builder independently reruns V3/V4 and refuses every
+                # structural failure except a reconciled pure early close.
+                projection = True
             if unified._version(bars) != signature:
                 raise unified.DataQualityError("Bars changed during audit")
-            built = factor_db.build(month, source="hf", memory=memory, threads=threads,strict_calendar=True)
+            built = factor_db.build(month, source="hf", memory=memory, threads=threads,strict_calendar=True,
+                                    **({"nyse_projection": True} if projection else {}))
             record["factors"] = built["state"]
+            if "session_projection" in built:
+                record["session_projection"] = built["session_projection"]
+            elif projection:
+                raise unified.DataQualityError("Missing early-close projection evidence")
             if unified._version(bars) != signature:
                 raise unified.DataQualityError("Bars changed during factor build; review derivatives")
-            record["status"] = "EXPLORATORY_REVIEW_REQUIRED"
+            record["status"] = ("EXPLORATORY_NYSE_PROJECTION_REVIEW_REQUIRED"
+                                if "session_projection" in record else "EXPLORATORY_REVIEW_REQUIRED")
         except Exception as exc:
             record.update(status="BLOCKED", error=f"{type(exc).__name__}: {exc}")
             break
@@ -155,7 +167,8 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
                     hmeta_path = historic.with_suffix(".json")
                     hmeta = factor_db._read_meta(hmeta_path)
                     if (not source.is_file() or not hmeta or
-                            hmeta.get("input_fingerprint") != factor_db._fingerprint([source])):
+                            hmeta.get("input_fingerprint") != factor_db._fingerprint([source])
+                            or not factor_db._projection_current(hmeta,hmonth)):
                         record["blockers"].append("STALE_OR_MISSING_LOOKBACK:" + hmonth)
                         continue
                     record["lookback_content"][hmonth] = {

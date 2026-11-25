@@ -130,3 +130,70 @@ class UnifiedPipelineTests(unittest.TestCase):
         self.assertFalse(changed["structural_preflight_passed"])
         self.assertIn("STALE_DAILY_INPUT", changed["months"][0]["blockers"])
         self.assertNotEqual(result["evidence_id"], changed["evidence_id"])
+
+
+    def test_early_close_projection_actual_daily_and_raw_preservation(self):
+        from importlib.util import find_spec
+        if not find_spec("duckdb"):
+            self.skipTest("lake dependency")
+        import duckdb
+        from contextlib import closing
+        from datetime import date, datetime
+        from zoneinfo import ZoneInfo
+        from atlaspm.data import hf_stock5m_session_v4 as v4
+        month = "2000-07"
+        day = date(2000,7,3)
+        def stamp(hour,minute):
+            return int(datetime(2000,7,3,hour,minute,tzinfo=ZoneInfo("America/New_York")).timestamp()*1000)
+        bars=hf.output_path(month)
+        bars.parent.mkdir(parents=True)
+        with closing(duckdb.connect()) as con:
+            con.execute("""CREATE TABLE bars(symbol VARCHAR,trade_date_et DATE,timestamp_ms BIGINT,
+                         open DOUBLE,high DOUBLE,low DOUBLE,close DOUBLE,volume_shares DOUBLE,
+                         source_minute_bars BIGINT,unique_source_minutes BIGINT)""")
+            con.executemany("INSERT INTO bars VALUES (?,?,?,?,?,?,?,?,?,?)",[
+                ("A",day,stamp(12,55),10,10,10,10,100,1,1),
+                ("A",day,stamp(13,0),99,99,99,99,900,1,1)])
+            con.execute(f"COPY bars TO '{hf._quote(bars)}' (FORMAT PARQUET)")
+        before=bars.read_bytes()
+        calendar=[(day,stamp(9,30),stamp(13,0))]
+        prior={"schema":v4.qc.SCHEMA,"five_minute_bars":2,"out_of_nyse_session_bars":1,
+               "quality_status":"STRUCTURAL_QC_FAILED","structural_issues":["OUTSIDE_NYSE_SESSIONS:1"],
+               "missing_whole_trading_dates":[]}
+        audit={"all_months_structurally_audited":False,
+               "status_counts":{"STRUCTURAL_QC_FAILED":1},"months_structural_failed":[month]}
+        with (patch.object(v4.qc,"_calendar",return_value=calendar),
+              patch.object(v4.qc,"audit",return_value=prior),
+              patch.object(pipeline.qc,"run",return_value=audit)):
+            # Unrelated failures must remain blocked before writing daily data.
+            with patch.object(v4.qc,"audit",return_value={**prior,
+                       "structural_issues":["OUTSIDE_NYSE_SESSIONS:1","INVALID_5M_BARS:1"]}):
+                rejected=pipeline.maintain(month,month,execute=True)
+            self.assertFalse(rejected["all_requested_months_processed"])
+            daily=pipeline.factor_db._path(month,"hf","rth","daily")
+            self.assertFalse(daily.exists())
+            result=pipeline.maintain(month,month,execute=True)
+            self.assertTrue(result["all_requested_months_processed"],result)
+            self.assertEqual(result["months"][0]["session_projection"]["excluded_bars"],1)
+            self.assertEqual(result["months"][0]["status"],"EXPLORATORY_NYSE_PROJECTION_REVIEW_REQUIRED")
+            with closing(duckdb.connect()) as con:
+                values=con.execute(f"SELECT close,volume_shares,observed_5m_bars FROM read_parquet('{hf._quote(daily)}')").fetchone()
+            self.assertEqual(values,(10,100,1))
+            self.assertEqual(bars.read_bytes(),before)
+            self.assertFalse(result["approved_for_model_training"])
+            self.assertTrue(pipeline.factor_preflight(month,month)["structural_preflight_passed"])
+            repeat=pipeline.maintain(month,month,execute=True)
+            self.assertEqual(repeat["months"][0]["factors"],"existing")
+            self.assertFalse(repeat["approved_for_model_training"])
+            # A cached projected daily partition cannot authorize a newly
+            # failed original audit; leave the prior derived file intact.
+            saved=daily.read_bytes()
+            with patch.object(v4.qc,"audit",return_value={**prior,
+                       "structural_issues":["OUTSIDE_NYSE_SESSIONS:1","NO_CONVERSION_QC_METADATA"]}):
+                rejected=pipeline.maintain(month,month,execute=True)
+            self.assertFalse(rejected["all_requested_months_processed"])
+            self.assertEqual(daily.read_bytes(),saved)
+            self.assertEqual(bars.read_bytes(),before)
+            with patch.object(v4.qc,"_calendar",return_value=[(day,stamp(9,30),stamp(13,5))]):
+                changed=pipeline.factor_preflight(month,month)
+            self.assertFalse(changed["structural_preflight_passed"])

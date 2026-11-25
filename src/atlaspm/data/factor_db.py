@@ -124,8 +124,8 @@ def _month_source(month: str, source: str, session: str, sqlite_db: Path) -> Pat
     return private_path(sqlite_db)
 
 
-def _daily_sql_hf(path: Path) -> str:
-    s = f"read_parquet({_quoted(path)}, hive_partitioning=false)"
+def _daily_sql_hf(path: Path, *, projection=False) -> str:
+    s = "v4_research_bars" if projection else f"read_parquet({_quoted(path)}, hive_partitioning=false)"
     return f"""
       SELECT upper(trim(symbol)) AS symbol, cast(trade_date_et AS DATE) AS trade_date,
         arg_min(open, timestamp_ms)::DOUBLE AS open,
@@ -204,15 +204,42 @@ def _sqlite_month_fingerprint(database: Path, month: str) -> str:
     return checksum.hexdigest()
 
 
+def _projection_current(meta, month):
+    if "session_projection" not in meta:
+        return True
+    evidence = meta["session_projection"]
+    from atlaspm.data.hf_stock5m_session_v4 import calendar_digest
+    if not isinstance(evidence, dict):
+        return False
+    total, kept, excluded = (evidence.get(k) for k in
+                             ("canonical_bars", "retained_bars", "excluded_bars"))
+    return (evidence.get("policy") == "nyse_full_slots_early_close_v1"
+            and evidence.get("canonical_quality_status") == "STRUCTURAL_QC_FAILED"
+            and all(type(n) is int and n > 0 for n in (total, kept, excluded))
+            and total == kept + excluded
+            and evidence.get("calendar_sha256") == calendar_digest(month))
+
+
 def _materialize_daily(con, month: str, source: str, session: str,
-                       sqlite_db: Path, refresh: bool) -> tuple[Path, dict[str, Any]]:
+                       sqlite_db: Path, refresh: bool, *, nyse_projection=False) -> tuple[Path, dict[str, Any]]:
     dest = _path(month, source, session, "daily")
     source_path = _month_source(month, source, session, sqlite_db)
     input_fp = (_sqlite_month_fingerprint(source_path, month) if source == "sqlite"
                 else _fingerprint([source_path]))
     meta_path = dest.with_suffix(".json")
     meta = _read_meta(meta_path)
-    if not refresh and dest.is_file() and meta and meta.get("input_fingerprint") == input_fp:
+    # Never silently revert an existing projected daily partition.
+    projection = source == "hf" and (nyse_projection or
+                 (meta is not None and "session_projection" in meta))
+    evidence = None
+    if projection:
+        from atlaspm.data.hf_stock5m_session_v4 import install_early_close_projection
+        _, evidence = install_early_close_projection(con, month)
+        if _fingerprint([source_path]) != input_fp:
+            raise ValueError("EARLY_CLOSE_SOURCE_CHANGED")
+    if (not refresh and dest.is_file() and meta and meta.get("input_fingerprint") == input_fp
+            and (not projection or (meta.get("session_projection") == evidence
+                                    and _projection_current(meta, month)))):
         return dest, meta
     dest.parent.mkdir(parents=True, exist_ok=True)
     stage = private_path(dest.with_suffix(".parquet.part"))
@@ -220,7 +247,7 @@ def _materialize_daily(con, month: str, source: str, session: str,
     try:
         if source == "hf":
             _check_hf(con, source_path)
-            sql = _daily_sql_hf(source_path)
+            sql = _daily_sql_hf(source_path, projection=projection)
         else:
             n = _sqlite_temp_csv(month, source_path, csv_stage)
             if not n:
@@ -243,6 +270,13 @@ def _materialize_daily(con, month: str, source: str, session: str,
                                      else "SQLITE_ADJUSTED_CLOSE_VENDOR_UNVERIFIED"),
                 "coverage_verified": False, "point_in_time_validated": False,
                 "approved_for_model_training": False, "live_execution_enabled": False}
+        if evidence is not None:
+            observed = con.execute(f"SELECT sum(observed_5m_bars) FROM read_parquet({_quoted(stage)})").fetchone()[0]
+            if (observed != evidence["retained_bars"]
+                    or _fingerprint([source_path]) != input_fp
+                    or not _projection_current({"session_projection": evidence}, month)):
+                raise ValueError("EARLY_CLOSE_DAILY_RECONCILIATION_FAILED")
+            meta["session_projection"] = evidence
         os.replace(stage, dest)
         _write_meta(meta_path, meta)
         return dest, meta
@@ -384,7 +418,8 @@ def reconcile_values(month: str, *, memory="256MB", threads=1) -> dict:
         bars=hf_output_path(p.stem[-7:])
         dm=p.with_suffix(".json")
         dmeta=_read_meta(dm)
-        if not bars.is_file() or not dmeta or dmeta.get("input_fingerprint")!=_fingerprint([bars]):
+        if (not bars.is_file() or not dmeta or dmeta.get("input_fingerprint")!=_fingerprint([bars])
+                or not _projection_current(dmeta,p.stem[-7:])):
             raise ValueError("FACTOR_RECOMPUTE_STALE_DAILY_PROJECTION")
         inputs.extend((p,dm,bars))
     before=_fingerprint(inputs)
@@ -439,7 +474,9 @@ def catalog() -> dict:
 def build(month: str, *, source: str = "hf", session: str = "rth",
           sqlite_db: Path = DB_PATH, memory: str = "4GB", threads: int = 4,
           dry_run: bool = False, refresh: bool = False,
-          strict_calendar: bool | None = None) -> dict:
+          strict_calendar: bool | None = None, nyse_projection: bool = False) -> dict:
+    if type(nyse_projection) is not bool or (nyse_projection and (source != "hf" or strict_calendar is not True)):
+        raise ValueError("NYSE projection requires HF and explicit strict calendar")
     if strict_calendar is not None and type(strict_calendar) is not bool:
         raise ValueError("strict_calendar must be boolean or None")
     if strict_calendar and source!="hf":
@@ -456,7 +493,8 @@ def build(month: str, *, source: str = "hf", session: str = "rth",
         raise ValueError(f"Missing source month {month}: {source_path}")
     con = _db(memory, threads)
     try:
-        daily, _ = _materialize_daily(con, month, source, session, sqlite_db, refresh)
+        daily, daily_meta = _materialize_daily(con, month, source, session, sqlite_db, refresh,
+                                              nyse_projection=nyse_projection)
         directory = _path(month, source, session, "daily").parent.parent.parent
         candidates = sorted(directory.glob("year=*/month=*/*.parquet"))
         history = [p for p in candidates if 0 <= _month_diff(first, _month_first(p.stem[-7:])) <= LOOKBACK_MONTHS]
@@ -477,7 +515,9 @@ def build(month: str, *, source: str = "hf", session: str = "rth",
         if (not refresh and dest.is_file() and old and old.get("history_fingerprint")==fingerprint
                 and old.get("version")==VERSION and old_policy==policy
                 and old.get("window_calendar_sha256")==calendar_sha):
-            return {**old, "state": "existing", "factor_file": str(dest)}
+            return {**old, "state": "existing", "factor_file": str(dest),
+                    **({"session_projection": daily_meta["session_projection"]}
+                       if "session_projection" in daily_meta else {})}
         if strict:
             _install_strict_calendar(con,calendar_rows)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -503,7 +543,9 @@ def build(month: str, *, source: str = "hf", session: str = "rth",
                 raise ValueError("Daily inputs changed during factor construction")
             os.replace(temp, dest)
             _write_meta(meta_path, meta)
-            return {**meta, "state": "built", "factor_file": str(dest)}
+            return {**meta, "state": "built", "factor_file": str(dest),
+                    **({"session_projection": daily_meta["session_projection"]}
+                       if "session_projection" in daily_meta else {})}
         finally:
             temp.unlink(missing_ok=True)
     finally:
