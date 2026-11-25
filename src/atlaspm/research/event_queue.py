@@ -90,7 +90,8 @@ def enqueue(events, *, path=PATH):
             key=digest([event["event_id"],event["revision"]])
             if key in items:
                 continue
-            items[key]={"event":event,"state":"pending","attempts":0,"report":None}
+            items[key]={"event":event,"state":"pending","attempts":0,"report":None,
+                        "stored_at":datetime.now(UTC).isoformat()}
             count+=1
         return {**FLAGS,"added":count,"retained":len(items)}
     return _transaction(path,add)
@@ -168,7 +169,8 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None, local_bindin
                                 "specialist_tasks":research["research_tasks"],
                                 "blocked_specialist_tasks":research["blocked_tasks"],
                                 "local_specialist_receipts":local_receipts,
-                                "joint_specialist_dossiers":dossiers}
+                                "joint_specialist_dossiers":dossiers,
+                                "review_completed_at":datetime.now(UTC).isoformat()}
                 task["state"]="completed"
                 complete+=1
             except (ValueError,TypeError,KeyError):

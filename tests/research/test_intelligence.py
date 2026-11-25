@@ -129,3 +129,48 @@ class IntelligenceTests(unittest.TestCase):
                          ["completed","completed","completed","completed","blocked"])
         self.assertFalse(result["broker_order_submission_enabled"])
         self.assertIsNone(result["actual_cost_usd"])
+
+
+    def test_explicit_public_fallback_budget_and_stop_on_valid_reply(self):
+        responses=[{"status":"incomplete"},self.response("anthropic")]
+        def respond(request,timeout):
+            self.requests.append(request)
+            return BytesIO(json.dumps(responses.pop(0)).encode())
+        gateway=Gateway(opener=respond,sleep=lambda _:None)
+        candidates=[{"provider":p,"model":"configured-model","max_tokens":128}
+                    for p in ("openai","anthropic","gemini")]
+        with patch.dict(os.environ,self.env):
+            out=ai.route_public(topic="sec",as_of="2020-01-02T00:00:00Z",evidence=self.evidence,
+                candidates=candidates,output_token_budget=384,allow_external=True,gateway=gateway)
+        self.assertEqual(len(self.requests),2)
+        self.assertEqual(out["status"],"COMPLETED")
+        self.assertEqual(out["attempted_output_tokens"],256)
+        self.assertEqual(out["reserved_output_tokens"],384)
+        self.assertIsNone(out["actual_cost_usd"])
+        self.assertFalse(out["trade_authorized"])
+
+    def test_public_route_preflights_all_candidates_before_egress(self):
+        candidates=[{"provider":"openai","model":"configured-model","max_tokens":128},
+                    {"provider":"anthropic","model":"configured-model","max_tokens":128}]
+        base={"topic":"sec","as_of":"2020-01-02T00:00:00Z","evidence":self.evidence,
+              "candidates":candidates,"output_token_budget":256,
+              "allow_external":True,"gateway":self.gateway(self.response("openai"))}
+        with patch.dict(os.environ,self.env):
+            for override in ({"output_token_budget":128},{"allow_external":False},
+                             {"candidates":[candidates[0],candidates[0]]}):
+                with self.assertRaises(ValueError):
+                    ai.route_public(**{**base,**override})
+            with patch.dict(os.environ,{"ANTHROPIC_API_KEY":""}):
+                with self.assertRaises(GatewayError):
+                    ai.route_public(**base)
+        self.assertEqual(self.requests,[])
+
+    def test_valid_empty_findings_does_not_fan_out(self):
+        self.findings={"findings":[]}
+        with patch.dict(os.environ,self.env):
+            out=ai.route_public(topic="sec",as_of="2020-01-02T00:00:00Z",evidence=self.evidence,
+                candidates=[{"provider":p,"model":"configured-model","max_tokens":128}
+                            for p in ("openai","anthropic")],
+                output_token_budget=256,allow_external=True,gateway=self.gateway(self.response("openai")))
+        self.assertEqual(len(self.requests),1)
+        self.assertEqual(out["report"]["findings"],[])

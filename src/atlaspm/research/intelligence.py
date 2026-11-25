@@ -367,6 +367,62 @@ def dispatch_tasks(tasks, *, external_output_budget=0, allow_external=False, gat
             "automatic_fallback":False,"actual_cost_usd":None}
 
 
+def route_public(*, topic, as_of, evidence, candidates, output_token_budget,
+                 allow_external=False, gateway=DEFAULT_GATEWAY):
+    """Explicit ordered cross-provider fallback for reviewed public excerpts.
+
+    Preflight the complete allowlist before any call. Budget reserves the
+    worst-case requested output tokens (not total tokens or dollars). Each
+    approved provider can be attempted at most once. A failed/ambiguous call
+    might have incurred charges; fallback requires the caller's explicit plan.
+    A valid empty findings list is success, never a reason to solicit another
+    opinion. No local data, account state, orders or promotion.
+    """
+    from atlaspm.research.training_registry import digest
+    stamp,_,_=_prepare(topic,evidence,as_of)
+    if (not isinstance(candidates,list) or not 1<=len(candidates)<=len(MODEL_ENDPOINTS)
+            or type(output_token_budget) is not int or not 128<=output_token_budget<=6144):
+        raise ValueError("PUBLIC_ROUTE_BUDGET")
+    if allow_external is not True or os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI")!="1":
+        raise GatewayError("External AI requires explicit local egress approval")
+    approved=[]
+    seen=set()
+    total=0
+    for c in candidates:
+        if not isinstance(c,dict) or set(c)!={"provider","model","max_tokens"}:
+            raise ValueError("PUBLIC_ROUTE_CANDIDATE")
+        p,m,t=c["provider"],c["model"],c["max_tokens"]
+        if (not isinstance(p,str) or p not in MODEL_ENDPOINTS or p in seen
+                or not isinstance(m,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",m)
+                or type(t) is not int or not 128<=t<=2048):
+            raise ValueError("PUBLIC_ROUTE_CANDIDATE")
+        if not os.environ.get(MODEL_ENDPOINTS[p][1]):
+            raise GatewayError("Selected external provider credential not configured")
+        seen.add(p)
+        total+=t
+        approved.append(dict(c))
+    if total>output_token_budget:
+        raise ValueError("PUBLIC_ROUTE_OUTPUT_BUDGET_EXCEEDED")
+    attempts=[]
+    report=None
+    for c in approved:
+        try:
+            report=research_public(**c,topic=topic,as_of=stamp,evidence=evidence,
+                                   allow_external=True,gateway=gateway)
+        except (ValueError,OSError,TypeError,KeyError):
+            attempts.append({**c,"status":"BLOCKED","charge_unknown":True})
+            continue
+        attempts.append({**c,"status":"COMPLETED","charge_unknown":True})
+        break
+    return {**_FLAGS,"schema":"atlaspm_explicit_public_model_route_v1",
+            "policy_sha256":digest([topic,stamp,approved,output_token_budget]),
+            "status":"COMPLETED" if report is not None else "ALL_APPROVED_ROUTES_BLOCKED",
+            "attempts":attempts,"report":report,"reserved_output_tokens":total,
+            "attempted_output_tokens":sum(c["max_tokens"] for c in attempts),
+            "output_token_budget":output_token_budget,"actual_cost_usd":None,
+            "automatic_unapproved_fallback":False,"trade_authorized":False}
+
+
 def joint_local_review(*, security_id, asset_type, as_of, events, research_rows, weights):
     """One local research request for existing normalized specialist evidence.
 
@@ -1226,8 +1282,21 @@ def main():
     parser.add_argument("--provider", choices=tuple(MODEL_ENDPOINTS))
     parser.add_argument("--model")
     parser.add_argument("--input", type=Path)
+    parser.add_argument("--route-plan",type=Path,help="Explicit public excerpt routing plan (possible multiple billable calls)")
     parser.add_argument("--allow-external", action="store_true")
     args = parser.parse_args()
+    if args.route_plan:
+        if args.list or args.provider or args.model or args.input or not args.allow_external:
+            parser.error("Route plan requires --allow-external and no single-provider flags")
+        with private_path(args.route_plan,exists=True).open("rb") as handle:
+            raw=handle.read(65537)
+        if len(raw)>65536:
+            raise ValueError("PUBLIC_ROUTE_PLAN_BYTE_BUDGET")
+        plan=_strict_json(raw)
+        if set(plan)!={"topic","as_of","evidence","candidates","output_token_budget"}:
+            raise ValueError("PUBLIC_ROUTE_PLAN_SCHEMA")
+        print(json.dumps(route_public(**plan,allow_external=True),indent=2,ensure_ascii=False,allow_nan=False))
+        return
     if args.list:
         print(json.dumps(model_inventory(), indent=2))
         return
