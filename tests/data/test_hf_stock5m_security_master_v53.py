@@ -204,6 +204,43 @@ class SecurityMasterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
 
+    def test_adjustment_requires_continuous_identity_through_cutoff(self):
+        self.ingest(self.pair("old",self.identity(end="2020-03-01"))+
+                    self.pair("new",self.identity(start="2020-03-05")))
+        with self.assertRaisesRegex(ValueError,"IDENTITY_INTERVAL_GAP"):
+            m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+
+    def test_adjustment_requires_endpoint_identity(self):
+        self.ingest(self.pair("old",self.identity(end="2020-03-01")))
+        with self.assertRaisesRegex(ValueError,"MISSING_END_IDENTITY"):
+            m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+
+    def test_adjustment_requires_ticker_transition_and_reports_evidence(self):
+        self.ingest(self.pair("old",self.identity(end="2020-03-01"))+
+                    self.pair("new",self.identity(symbol="XYZ",start="2020-03-01")))
+        with self.assertRaisesRegex(ValueError,"TICKER_TRANSITION_NOT_RECONCILED"):
+            m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+        change={"security_id":"ID1","kind":"TICKER_CHANGE","effective_date":"2020-03-01",
+                "value":None,"currency":None,"successor_id":None,"new_symbol":"XYZ"}
+        self.ingest(self.pair("change",change,kind="ACTION")+
+                    self.pair("split",self.action(),kind="ACTION"))
+        r=m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+        self.assertEqual(r["price_multiplier"],"0.5")
+        self.assertEqual(r["identity_record_ids"],["old","new"])
+        self.assertEqual(set(r["action_record_ids"]),{"change","split"})
+        self.assertFalse(r["raw_price_semantics_verified"])
+        self.assertFalse(r["approved_for_model_training"])
+
+    def test_adjustment_blocks_exchange_transition_and_nonboolean_declaration(self):
+        new=self.identity(start="2020-03-01")
+        new["exchange"]="XNYS"
+        self.ingest(self.pair("old",self.identity(end="2020-03-01"))+
+                    self.pair("new",new))
+        with self.assertRaisesRegex(ValueError,"EXCHANGE_TRANSITION_REVIEW_REQUIRED"):
+            m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+        with self.assertRaisesRegex(ValueError,"explicit unadjusted input"):
+            m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted="yes")
+
     def test_visible_returns_uses_actual_ledger(self):
         from atlaspm.data import hf_stock5m_visible_returns_v59 as returns
         self.ingest(self.pair("listing",self.identity())+

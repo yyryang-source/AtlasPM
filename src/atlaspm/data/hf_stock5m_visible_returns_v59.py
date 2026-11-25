@@ -32,29 +32,9 @@ def _interval(row,identities,actions,as_of):
         if not isinstance(row[field],str) or not ledger.SYMBOL.fullmatch(row[field]):
             raise ValueError("INVALID_RETURN_SYMBOL")
     p0,p1=(Decimal(ledger._decimal(row[k])) for k in ("start_close","end_close"))
-    intervals=sorted((i for i in identities if i["valid_from"]<=end and
-                      (i["valid_to"] is None or i["valid_to"]>start)),key=lambda i:i["valid_from"])
-    if not intervals or intervals[0]["valid_from"]>start:
-        raise ValueError("MISSING_START_IDENTITY")
-    if intervals[0]["symbol"]!=row["start_symbol"] or intervals[-1]["symbol"]!=row["end_symbol"]:
-        raise ValueError("ENDPOINT_SYMBOL_MISMATCH")
-    if intervals[-1]["valid_to"] is not None and intervals[-1]["valid_to"]<=end:
-        raise ValueError("MISSING_END_IDENTITY")
-    relevant=[a for a in actions if start<a["effective_date"]<=end]
-    if any(a["kind"] in ("CASH_EXIT","DELISTING","MERGER") for a in relevant):
-        raise ValueError("UNSUPPORTED_EXIT_ECONOMICS")
-    transitions=set()
-    for left,right in zip(intervals,intervals[1:]):
-        boundary=right["valid_from"]
-        if left["valid_to"]!=boundary:
-            raise ValueError("IDENTITY_INTERVAL_GAP")
-        if left["exchange"]!=right["exchange"]:
-            raise ValueError("EXCHANGE_TRANSITION_REVIEW_REQUIRED")
-        if left["symbol"]!=right["symbol"]:
-            transitions.add((boundary,right["symbol"]))
-    recorded={(a["effective_date"],a["new_symbol"]) for a in relevant if a["kind"]=="TICKER_CHANGE"}
-    if transitions!=recorded:
-        raise ValueError("TICKER_TRANSITION_NOT_RECONCILED")
+    intervals,relevant=ledger.continuous_action_path(
+        identities,actions,start,end,start_symbol=row["start_symbol"],
+        end_symbol=row["end_symbol"])
     economic=defaultdict(list)
     for a in relevant:
         if a["kind"] in ("SPLIT","CASH_DIVIDEND"):

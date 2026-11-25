@@ -1022,3 +1022,16 @@ commit; changed evidence or input rolls back the claim transaction. This is
 not a filesystem snapshot or defense against an adversarial concurrent
 writer; keep evidence stable throughout import. Duplicate JSON members are
 rejected, as are self-referencing claim inputs. No permission is granted.
+
+### Shared identity continuity for provisional split adjustments
+
+The V5.3 split multiplier and V5.9 visible-action return reconciliation now
+reuse the same resolved identity/action path check. The multiplier requires
+identity coverage through its inclusive cutoff, no gaps, an unchanged
+exchange, and explicit matching ticker-change assertions at every symbol
+transition; exits remain unsupported. This is stricter than the previous
+start-only identity check. The split multiplier includes the contributing
+identity and visible action record IDs. An explicit Boolean unadjusted-input
+declaration is still required, not proof of vendor price semantics. No raw
+prices are overwritten and no identity, completeness, or training approval
+is inferred from these provisional results.
