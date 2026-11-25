@@ -43,6 +43,8 @@ class Provider:
 PROVIDERS = MappingProxyType({
     "federal_reserve": Provider("www.federalreserve.gov", 5.0, None, "public_source_review_required"),
     "treasury": Provider("api.fiscaldata.treasury.gov", 0.5, None, "public_government_data", True),
+    "sec_document": Provider("www.sec.gov", 1.0, None, "public_filing_data_review_required"),
+    "fed_document": Provider("www.federalreserve.gov", 15.0, None, "public_source_review_required"),
     "sec_feed": Provider("www.sec.gov", 1.0, None, "public_filing_data_review_required"),
     "sec": Provider("data.sec.gov", 0.5, None, "public_filing_data_review_required", True),
     "massive": Provider("api.massive.com", 12.0, "MASSIVE_API_KEY", "subscription_review_required"),
@@ -158,6 +160,14 @@ class Gateway:
                    {"apikey", "key", "token", "accesstoken", "authorization", "password", "secret"}
                    for k, _ in query)):
             raise GatewayError("Blocked external provider URL or URL credential")
+        if provider in {"sec_document", "sec_feed"}:
+            require_enabled("sec")
+        if provider == "fed_document":
+            require_enabled("federal_reserve")
+        if provider == "sec_document" and (p.query or not re.fullmatch(r"/Archives/edgar/data/[0-9]{1,10}/[0-9]{18}/[0-9]{10}-[0-9]{2}-[0-9]{6}\.txt", p.path)):
+            raise GatewayError("Only SEC complete submission text is enabled")
+        if provider == "fed_document" and (p.query or not re.fullmatch(r"/newsevents/pressreleases/[A-Za-z0-9_-]+\.htm", p.path)):
+            raise GatewayError("Only Fed official press releases are enabled")
         if provider == "sec_feed" and (p.path != "/cgi-bin/browse-edgar" or dict(query) != {"action":"getcurrent","type":"","company":"","dateb":"","owner":"include","start":"0","count":"100","output":"atom"} or len(query) != 8):
             raise GatewayError("Only fixed SEC latest filings Atom route enabled")
         if provider == "massive" and not (p.path == "/v3/reference/options/contracts" or
@@ -177,6 +187,8 @@ class Gateway:
             raise GatewayError("Only official Federal Reserve press RSS routes are enabled")
         headers = {"User-Agent": "AtlasPM research gateway", "Accept": "application/xml" if provider in {"federal_reserve", "sec_feed"} else "application/json",
                    "Accept-Encoding": "identity"}
+        if provider in {"sec_document", "fed_document"}:
+            headers["Accept"] = "text/plain, text/html"
         if spec.key_env:
             token = key if key is not None else os.environ.get(spec.key_env, "").strip()
             if not isinstance(token, str) or not token or any(not 33 <= ord(c) <= 126 for c in token):
@@ -192,7 +204,7 @@ class Gateway:
                 headers["Authorization"] = "Bearer " + token
         elif key is not None:
             raise GatewayError("Unexpected credential for public provider")
-        if provider in {"sec", "sec_feed"}:
+        if provider in {"sec", "sec_feed", "sec_document"}:
             agent = os.environ.get("ATLASPM_SEC_USER_AGENT", "").strip()
             if not agent or "@" not in agent or any(not 32 <= ord(c) <= 126 for c in agent):
                 raise GatewayError("Set ATLASPM_SEC_USER_AGENT to organization and contact email")
@@ -283,6 +295,9 @@ class Gateway:
                             raise GatewayError("Invalid RSS XML") from None
                         if (provider == "federal_reserve" and (root.tag != "rss" or root.find("channel") is None)) or (provider == "sec_feed" and root.tag != "{http://www.w3.org/2005/Atom}feed"):
                             raise GatewayError("Invalid RSS structure")
+                    elif provider in {"sec_document", "fed_document"}:
+                        if not raw or b"\x00" in raw:
+                            raise GatewayError("Invalid disclosure document")
                     else:
                         _strict_json(raw)
                     result = Response(provider, request_id, datetime.now(UTC).isoformat(), raw)
@@ -533,7 +548,7 @@ class Gateway:
                     "last_status": state.last_status,
                     "circuit_open": self._clock() < state.blocked_until,
                     "credential_configured": bool(os.environ.get(key_env)) if key_env else
-                        (bool(os.environ.get("ATLASPM_SEC_USER_AGENT")) if name in {"sec", "sec_feed"} else True),
+                        (bool(os.environ.get("ATLASPM_SEC_USER_AGENT")) if name in {"sec", "sec_feed", "sec_document"} else True),
                     "rights_status": spec.rights if spec else ("operator_attested_not_independently_verified" if name=="finra" else "external_processing_review_required"),
                     "cost_usd": None,  # do not infer subscription/overage costs
                 }
