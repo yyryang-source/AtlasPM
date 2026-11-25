@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 import unittest
 from time import perf_counter
+from tempfile import TemporaryDirectory
 
 from audit_source import audit
 
@@ -21,6 +22,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--minimum-passed",type=int,default=732)
     parser.add_argument("--allow-skips",action="store_true")
+    parser.add_argument("--integrated",action="store_true",help="Also execute the isolated offline system fixture")
     args=parser.parse_args()
     if args.minimum_passed<1:
         parser.error("minimum-passed must be positive")
@@ -40,6 +42,15 @@ def main():
         and (args.allow_skips or not result.skipped)
         and not result.expectedFailures and not result.unexpectedSuccesses
         and not structure["duplicate_function_candidates"] and not foundation["errors"])
+    integrated=None
+    if args.integrated and ok:
+        from atlaspm.framework.orchestrator import offline_release
+        from atlaspm.data.market_db import private_path
+        run_root=private_path(Path("local_data/runs"))
+        run_root.mkdir(parents=True,exist_ok=True)
+        with TemporaryDirectory(prefix="release-acceptance-",dir=run_root) as folder:
+            integrated=offline_release(checkpoint=Path(folder)/"accept.continuous.json")
+        ok=integrated["status"]=="OFFLINE_FIXTURE_PASS" and all(integrated["checks"].values())
     report=dict(status="PASS" if ok else "FAIL",tests_run=result.testsRun,
                 passed=passed,failures=len(result.failures),errors=len(result.errors),
                 skipped=len(result.skipped),
@@ -51,6 +62,9 @@ def main():
                 foundation_status=foundation["status"],foundation_errors=foundation["errors"],
                 duplicate_function_candidates=structure["duplicate_function_candidates"],
                 source_modules=structure["source_modules"],test_files=structure["test_files"],
+                integrated_status=integrated["status"] if integrated else "NOT_RUN",
+                integrated_checks=integrated["checks"] if integrated else {},
+                integrated_wall_seconds=integrated["wall_seconds"] if integrated else None,
                 research_only=True,approved_for_model_training=False,live_execution_enabled=False,
                 broker_order_submission_enabled=False)
     print(json.dumps(report,indent=2,allow_nan=False))

@@ -121,12 +121,18 @@ def _holdout_diagnostics(rows, dates, expected, horizon, start):
 
 
 def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
-             candidates=None, selection_metric="mae"):
+             candidates=None, selection_metric="mae", replay_payload=None, rank_weights=None):
     config = {} if config is None else config
     candidates = [{"model":"historical_mean"},{"model":"ridge"}] if candidates is None else candidates
     names, configs, planned_fits = _plan(payload,horizons,config,candidates,
                                          holdout_start,selection_metric)
     sessions = payload["sessions"]
+    if (replay_payload is None)!=(rank_weights is None):
+        raise ValueError("ALPHA_REPLAY_REQUIRES_PAYLOAD_AND_WEIGHTS")
+    bridge=None
+    if replay_payload is not None:
+        from atlaspm.research.alpha_replay_bridge import RankReplay
+        bridge=RankReplay(payload,holdout_start,tuple(configs),rank_weights,replay_payload)
     prefix = {**payload,"sessions":sessions[:holdout_start]}
     locks = {}
     # Selection-only uses the prefix, but the tournament's boundary checks
@@ -162,6 +168,8 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
         if not rows:
             raise ValueError("NO_HOLDOUT_PREDICTIONS")
         diagnostics = _holdout_diagnostics(rows,dates,expected,h,holdout_start)
+        if bridge is not None:
+            bridge.add(h,rows)
         reports[str(h)] = {
             "selection":locked,
             "holdout":_metrics(rows),
@@ -183,6 +191,7 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
         "all_nonoverlapping_cohorts_complete":all(
             r["nonoverlapping_diagnostic"]["coverage_complete"] for r in reports.values()),
         "decision":"NO_TRADE", "signals":[], "approved_for_backtest":False,
+        **({"synthetic_rank_replay":bridge.finish(lock_sha)} if bridge is not None else {}),
         "status":"SYNTHETIC_MULTI_HORIZON_RESEARCH_COMPLETE",
         "warning":("Selection periods differ by horizon; model errors are not "
                    "comparable across horizons. Nonoverlapping diagnostics "

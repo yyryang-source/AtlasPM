@@ -92,3 +92,29 @@ rows, 64 features, 8 candidates and 2,000 planned fold fits. These are
 workload bounds, not a total RAM or runtime guarantee. No model promotion,
 signals, portfolio handoff, real-data training or broker authorization.
 The existing one-horizon Alpha entry point is unchanged.
+
+## Consolidated synthetic rank-to-portfolio release acceptance
+
+The multi-horizon research entry accepts optional replay_payload and
+rank_weights together. The latter maps every selected horizon (string keys)
+to a positive weight, locked before fits. The former is the existing cash
+replay input with explicitly supplied holdout open/close/volume/sector data,
+matching the training panel dates and close marks; each session has sectors
+instead of caller signals. Fixed universe of 2–20 synthetic IDs, at most 250
+holdout sessions, mandatory risk, execution and position lifecycle policies.
+The bridge retains only percentile ranks from each locked winner. It does
+not compare forecast magnitudes across horizons, use actual labels for
+ranking, or choose weights after viewing the holdout. Incomplete cohorts
+and ties at the selection boundary produce no new signal. The common window
+ends before the longest label tail; later sessions remain in the replay for
+risk management and settlement. No forced final exit or claimed profitability.
+The existing replay optimizer, risk and execution code are reused. All real
+training, model promotion, production and broker permissions remain false.
+
+Run one consolidated Windows/Linux offline release gate from the root:
+`python scripts/maintenance/verify_release.py --minimum-passed 1246 --integrated`.
+It includes full optional-dependency tests, source/architecture checks and the
+existing isolated event/research/OMS/multiasset/settlement offline fixture.
+A paused orchestrator does not count as a passing integrated release. CI
+uses the same gate. This is not certification of provider rights, independent
+historical evidence, real-model efficacy or authenticated Paper execution.
