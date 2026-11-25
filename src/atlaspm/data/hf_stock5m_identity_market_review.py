@@ -82,7 +82,11 @@ def _day_summary(days, cutoff):
 
 
 def run(year, start_month, end_month, *, max_issuers=20, after_cik=None,
-        reference_as_of=None, reference_file=None):
+        reference_as_of=None, reference_file=None, ciks=None):
+    if ciks is not None and after_cik is not None:
+        raise ValueError("Explicit CIK selection cannot be combined with pagination")
+    if ciks is not None and (not isinstance(ciks,list) or not 1<=len(ciks)<=max_issuers):
+        raise ValueError("Explicit CIK selection must fit the issuer budget")
     if reference_file is not None and reference_as_of is None:
         raise ValueError("Reference file requires an explicit --reference-as-of cutoff")
     months = hf.months(start_month, end_month, 0)
@@ -92,7 +96,7 @@ def run(year, start_month, end_month, *, max_issuers=20, after_cik=None,
     # Reuse the existing collector's hash/header checks and bounded cache-only
     # path. Never accept a user's edited candidate JSON as source evidence.
     page = identity.run(year, max_issuers=max_issuers, after_cik=after_cik,
-                        periodic_first=True, fetch=False)
+                        periodic_first=True, fetch=False, ciks=ciks)
     candidates = _candidates(page)
     symbols = sorted({r["symbol"] for r in candidates})
     if len(symbols) > MAX_SYMBOLS:
@@ -145,7 +149,9 @@ def run(year, start_month, end_month, *, max_issuers=20, after_cik=None,
         "page_complete": page["page_complete"],
         "page_advance_allowed": page["page_advance_allowed"],
         "resume_after_cik": page["resume_after_cik"],
+        "requested_ciks": page.get("requested_ciks"),
         "selected_issuers": page["selected_issuers"],
+        "requested_ciks_not_selected": sorted(set(page.get("requested_ciks") or [])-set(page["selected_issuers"])),
         "filings_with_bodies": page["filings_with_bodies"],
         "scan_complete": complete,
         "unique_candidate_symbols": len(symbols),
@@ -175,12 +181,13 @@ def main():
     p.add_argument("--end-month", required=True)
     p.add_argument("--max-issuers", type=int, default=20)
     p.add_argument("--after-cik")
+    p.add_argument("--cik",action="append",help="Explicit issuer CIK; repeat within max-issuers budget")
     p.add_argument("--reference-as-of", help="Exclusive evidence cutoff; also builds review queue without reference file")
     p.add_argument("--reference-file", help="Reviewed external interval JSONL under local_data")
     a = p.parse_args()
     print(json.dumps(run(a.year, a.start_month, a.end_month,
                          max_issuers=a.max_issuers, after_cik=a.after_cik,
-                         reference_as_of=a.reference_as_of, reference_file=a.reference_file),
+                         reference_as_of=a.reference_as_of, reference_file=a.reference_file,ciks=a.cik),
                      indent=2, allow_nan=False))
 
 
