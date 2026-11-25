@@ -126,7 +126,9 @@ def optimize_mean_variance(
         raise ValueError("annual_financing_rate must be nonnegative")
 
     weights = [1.0 / n] * n
-    lip = gamma * gross * gross * max(
+    risk_scale = gamma * gross * gross
+    gross_returns = [gross * value for value in mu]
+    lip = risk_scale * max(
         sum(abs(item) for item in row) for row in cov
     )
     step = 1.0 / lip
@@ -134,7 +136,7 @@ def optimize_mean_variance(
     converged = False
     for iteration in range(1, max_iterations + 1):
         gradient = [
-            gross * mu[i] - gamma * gross * gross *
+            gross_returns[i] - risk_scale *
             sum(cov[i][j] * weights[j] for j in range(n))
             for i in range(n)
         ]
