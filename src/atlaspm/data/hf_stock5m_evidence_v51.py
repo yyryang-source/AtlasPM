@@ -22,7 +22,10 @@ BASE = ROOT / "collector"
 SEC_TICKERS = "https://www.sec.gov/files/company_tickers_exchange.json"
 HOSTS = {"www.sec.gov", "www.nasdaqtrader.com", "www.alphavantage.co"}
 MAX_BYTES = 100 * 1024 * 1024
-FORMS = {"8-K", "8-K/A", "6-K", "6-K/A", "25", "25-NSE", "25/A",
+PERIODIC_ANNUAL_FORMS = ("10-K", "10-K405", "10-KSB", "20-F", "40-F")
+PERIODIC_QUARTER_FORMS = ("10-Q", "10-QSB")
+PERIODIC_FORMS = PERIODIC_ANNUAL_FORMS + PERIODIC_QUARTER_FORMS
+FORMS = set(PERIODIC_FORMS) | {"8-K", "8-K/A", "6-K", "6-K/A", "25", "25-NSE", "25/A",
          "15-12B", "15-12G", "15-15D", "S-1", "S-1/A", "F-1", "F-1/A",
          "8-A12B", "8-A12G", "S-4", "F-4"}
 

@@ -33,7 +33,8 @@ class EvidenceCollectorTests(unittest.TestCase):
 
     def test_filing_candidates_not_actions(self):
         stats, rows = ev.parse_sec_index(INDEX,"2000-Q1")
-        self.assertEqual(stats,{"filings":2,"candidate_filings":1})
+        self.assertEqual(stats,{"filings":2,"candidate_filings":2})
+        self.assertEqual([x["form"] for x in rows],["8-K","10-K"])
         self.assertEqual(rows[0]["cik"],"0000000123")
         self.assertEqual(rows[0]["filed_date"],"2000-01-03")
         self.assertNotIn("security_id",rows[0])

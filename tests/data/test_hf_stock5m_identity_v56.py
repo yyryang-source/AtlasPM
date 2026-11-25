@@ -25,7 +25,7 @@ def body(item,html,extra=""):
     accession=item["source_url"].rsplit("/",1)[-1][:-4]
     return (f'<SEC-DOCUMENT>\n<SEC-HEADER>\nACCESSION NUMBER: {accession}\n'
             f'CENTRAL INDEX KEY: {item["cik"]}\nFILED AS OF DATE: {item["filed_date"].replace("-","")}\n'
-            f'</SEC-HEADER>\n<DOCUMENT>\n<TYPE>8-K\n<TEXT><table>{html}</table></TEXT></DOCUMENT>'
+            f'</SEC-HEADER>\n<DOCUMENT>\n<TYPE>{item["form"]}\n<TEXT><table>{html}</table></TEXT></DOCUMENT>'
             +extra+"</SEC-DOCUMENT>").encode()
 
 
@@ -61,6 +61,26 @@ class ExtractTests(unittest.TestCase):
                      header+legacy.replace("<td>ABC","<td colspan='2'>ABC"),
                      header+legacy+row(exchange_context="other")):
             self.assertEqual(v.extract(body(x,html),x)["observations"],[])
+
+
+    def test_periodic_legacy_listing_is_text_lead_not_cover_identity(self):
+        x={**filing(),"form":"10-K405"}
+        exact='<p>Our common stock is traded on the Nasdaq National Market under the symbol "ABC".</p>'
+        result=v.extract(body(x,exact),x)
+        self.assertEqual(result["observations"],[])
+        self.assertEqual(result["status"],"NO_SUPPORTED_COVER_FACTS")
+        lead=result["legacy_listing_text_leads"][0]
+        self.assertEqual(lead["symbol_candidate"],"ABC")
+        self.assertEqual(lead["status"],"UNVERIFIED_LEGACY_LISTING_TEXT")
+        self.assertIsNone(lead["security_id"])
+        self.assertIsNone(lead["valid_from"])
+        for text in (exact.replace('"ABC"',"ABC"),
+                     exact.replace("Our common stock","Their common stock"),
+                     exact.replace('"ABC"','"abc"'),
+                     exact+row(exchange_context="other")):
+            self.assertEqual(v.extract(body(x,text),x)["legacy_listing_text_leads"],[])
+        exhibit="<DOCUMENT>\n<TYPE>EX-99\n<TEXT>"+exact+"</TEXT></DOCUMENT>"
+        self.assertEqual(v.extract(body(x,"",extra=exhibit),x)["legacy_listing_text_leads"],[])
 
     def test_header_and_exhibits(self):
         x=filing()
@@ -143,3 +163,39 @@ class BatchTests(unittest.TestCase):
         self.assertTrue(r["network_stopped"])
         self.assertFalse(r["page_complete"])
         self.assertEqual(fetch.call_count,1)
+
+
+    def test_periodic_annual_priority_one_body_per_issuer_and_rebuild(self):
+        annual={**filing(day="2020-03-20",number="000010"),"form":"10-K405"}
+        quarterly={**filing(day="2020-01-15",number="000011"),"form":"10-Q"}
+        other={**filing(cik="0000000124",day="2020-02-20",number="000012"),"form":"10-QSB"}
+        cx=f._db()
+        try:
+            cx.executemany("INSERT INTO filings VALUES (?,?,?,?,?,?)",
+                [[x[k] for k in ("quarter","cik","issuer","form","filed_date","source_url")]
+                 for x in (annual,quarterly,other)])
+        finally:
+            cx.close()
+        with patch.object(v.ev,"download") as download:
+            with self.assertRaisesRegex(ValueError,"PERIODIC_INDEX_REBUILD_REQUIRED"):
+                v.run(2020,periodic_first=True)
+            download.assert_not_called()
+        cx=f._db()
+        try:
+            cx.execute("UPDATE partitions SET parser_version=?,candidate_rows=6",[f.VERSION])
+            for q in ("2020-Q2","2020-Q3","2020-Q4"):
+                cx.execute("INSERT INTO partitions VALUES (?,?,?,?,0)",[q,"a"*64,f.VERSION,0])
+        finally:
+            cx.close()
+        plan=v.plan(2020,periodic_first=True)
+        self.assertEqual(plan["filings"],[annual,other])
+        self.assertEqual(plan["stale_periodic_index_quarters"],[])
+        self.assertEqual(v.plan(2020,max_issuers=1)["filings"],[self.items[1]])
+        with patch.object(v.ev,"download") as download:
+            result=v.run(2020,periodic_first=True)
+        download.assert_not_called()
+        self.assertEqual(result["filings_selected"],2)
+        self.assertFalse(result["page_complete"])
+        self.assertEqual(result["certified_identities"],0)
+        self.assertEqual(result["claims_ingested"],0)
+        self.assertFalse(result["approved_for_model_training"])

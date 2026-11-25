@@ -84,6 +84,45 @@ class CoverRows(HTMLParser):
                 self.capture=None
 
 
+# Narrow primary-form text leads, kept separate from supported cover rows.
+# A quotation is mandatory; no issuer-name ticker inference or two-column join.
+_LEGACY_LISTING = re.compile(
+    r"\b(?:our|the company['’]s|the registrant['’]s) common stock "
+    r"is (?:listed|traded) (?:on|in) (?:the )?"
+    r"(?P<exchange>New York Stock Exchange|American Stock Exchange|Nasdaq National Market|"
+    r"Nasdaq SmallCap Market|Nasdaq Stock Market|NYSE|Nasdaq) "
+    r"under (?:the )?(?:trading |ticker )?symbol\s*[: ]*\s*"
+    r"""(?P<quote>["'“])(?P<symbol>(?-i:[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*))["'”]""",
+    re.I,
+)
+
+
+def _legacy_listing_leads(primary, filing):
+    """Reviewable text snippets; never security identity or effective intervals."""
+    parser=filings.TextParser()
+    parser.feed(primary)
+    parser.close()
+    clean=" ".join("".join(parser.parts).split())
+    leads=[]
+    seen=set()
+    for match in _LEGACY_LISTING.finditer(clean):
+        symbol=match["symbol"]
+        if not SYMBOL.fullmatch(symbol):
+            continue
+        key=(symbol,match["exchange"].upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        leads.append({"symbol_candidate":symbol,"exchange_reported":match["exchange"],
+                      "matched_text":match.group(0),"text_offset":match.start(),
+                      "excerpt":clean[max(0,match.start()-120):match.end()+120],
+                      "known_date_lower_bound":filing["filed_date"],"security_id":None,
+                      "valid_from":None,"valid_to":None,"status":"UNVERIFIED_LEGACY_LISTING_TEXT"})
+        if len(leads)>=20:
+            break
+    return leads
+
+
 def extract(data,filing):
     """Point observations only; no effective interval or stable ID inferred."""
     if not matching._header(data,filing):
@@ -143,7 +182,10 @@ def extract(data,filing):
                 "security_id":None,"valid_from":None,"valid_to":None,
                 "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
     conflicts={s for s,n in Counter(o["symbol"] for o in observations).items() if n>1}
+    leads = (_legacy_listing_leads(primary[0],filing) if filing["form"] in ev.PERIODIC_FORMS
+             and not re.search(r"<\s*ix:",primary[0],re.I) else [])
     return {"observations":[o for o in observations if o["symbol"] not in conflicts],
+            "legacy_listing_text_leads":leads,
             "conflicting_symbols":sorted(conflicts),"rejected_tagged_rows":rejected,
             "status":"COVER_OBSERVATIONS_REVIEW_REQUIRED" if observations and not conflicts
                      else "AMBIGUOUS_COVER_OBSERVATIONS" if conflicts else "NO_SUPPORTED_COVER_FACTS"}
@@ -155,7 +197,9 @@ def _cik(value):
     return value.zfill(10)
 
 
-def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
+def plan(year,*,ciks=None,after_cik=None,max_issuers=20,periodic_first=False):
+    if type(periodic_first) is not bool:
+        raise ValueError("periodic_first must be boolean")
     if type(year) is not int or not 2000<=year<=2026 or type(max_issuers) is not int or not 1<=max_issuers<=100:
         raise ValueError("Year 2000..2026 and issuer limit 1..100 required")
     if ciks is not None and (not isinstance(ciks,list) or not 1<=len(ciks)<=100):
@@ -170,6 +214,9 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
         expected=list(ev.quarters(f"{year}-Q1",f"{year}-Q{1 if year==2026 else 4}"))
         where="filed_date BETWEEN ? AND ? AND cik>?"
         eligible=" AND form IN ('8-K','6-K','25','25-NSE','25/A','15-12B','15-12G','15-15D','8-A12B','8-A12G','S-1','S-1/A','F-1','F-1/A','S-4','F-4')"
+        if periodic_first:
+            eligible = " AND form IN (" + ",".join("'" + f + "'" for f in ev.PERIODIC_FORMS) + ")"
+        stale_quarters = sorted(p[0] for p in partitions if p[2] != filings.VERSION)
         params=[f"{year}-01-01",f"{year}-03-31" if year==2026 else f"{year}-12-31",cursor]
         if ids is not None:
             where+=" AND cik IN (SELECT unnest(?))"
@@ -180,13 +227,24 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
             WHERE cik IN (SELECT unnest(?)) AND filed_date BETWEEN ? AND ?
               AND form IN ('25','25-NSE','25/A','15-12B','15-12G','15-15D','8-A12B','8-A12G','S-1','S-1/A','F-1','F-1/A','S-4','F-4')
             ORDER BY cik,filed_date,form,source_url LIMIT 10001""",[selected,*params[:2]]).fetchall() if selected else []
-        rows=cx.execute(f"""SELECT quarter,cik,issuer,form,filed_date,source_url FROM filings
-             WHERE {where} AND form IN ('8-K','6-K') AND cik IN (SELECT unnest(?))
-             QUALIFY row_number() OVER (PARTITION BY cik,quarter ORDER BY filed_date DESC,source_url)=1
-             ORDER BY cik,quarter""",[*params,selected]).fetchall() if selected else []
+        if periodic_first and selected:
+            annual = ",".join("'" + f + "'" for f in ev.PERIODIC_ANNUAL_FORMS)
+            rows=cx.execute(f"""SELECT quarter,cik,issuer,form,filed_date,source_url FROM filings
+                 WHERE {where}{eligible} AND cik IN (SELECT unnest(?))
+                 QUALIFY row_number() OVER (PARTITION BY cik ORDER BY
+                    CASE WHEN form IN ({annual}) THEN 0 ELSE 1 END,
+                    filed_date,source_url,form)=1
+                 ORDER BY cik""",[*params,selected]).fetchall()
+        else:
+            rows=cx.execute(f"""SELECT quarter,cik,issuer,form,filed_date,source_url FROM filings
+                 WHERE {where} AND form IN ('8-K','6-K') AND cik IN (SELECT unnest(?))
+                 QUALIFY row_number() OVER (PARTITION BY cik,quarter ORDER BY filed_date DESC,source_url)=1
+                 ORDER BY cik,quarter""",[*params,selected]).fetchall() if selected else []
     finally:
         cx.close()
     return {"year":year,"after_cik":cursor or None,"requested_ciks":ids,
+            "selection_policy":"periodic_annual_first_v1" if periodic_first else "quarterly_current_report_v1",
+            "stale_periodic_index_quarters":stale_quarters if periodic_first else [],
             "selected_issuers":selected,"more_issuers":len(issuers)>max_issuers,
             "next_after_cik":selected[-1] if len(issuers)>max_issuers else None,
             "missing_index_quarters":sorted(set(expected)-{p[0] for p in partitions}),
@@ -201,12 +259,14 @@ def plan(year,*,ciks=None,after_cik=None,max_issuers=20):
                        for q,c,i,f,d,u in rows]}
 
 
-def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=20):
+def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=20,periodic_first=False):
     if type(max_requests) is not int or not 1<=max_requests<=100:
         raise ValueError("Request budget 1..100 required")
-    report={"schema":SCHEMA,**v4.GUARDS,**plan(year,ciks=ciks,after_cik=after_cik,max_issuers=max_issuers),
+    report={"schema":SCHEMA,**v4.GUARDS,**plan(year,ciks=ciks,after_cik=after_cik,max_issuers=max_issuers,periodic_first=periodic_first),
             "local_only":not fetch,"requests_attempted":0,"network_stopped":False,
             "status":"EVIDENCE_REVIEW_REQUIRED"}
+    if periodic_first and (report["missing_index_quarters"] or report["stale_periodic_index_quarters"]):
+        raise ValueError("PERIODIC_INDEX_REBUILD_REQUIRED: rebuild all requested year quarters from cached raw indexes")
     agent=os.environ.get("ATLASPM_SEC_USER_AGENT","")
     if fetch and (not re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+",agent) or "\n" in agent or "\r" in agent):
         raise ValueError("Set ATLASPM_SEC_USER_AGENT to name and real contact email")
@@ -248,6 +308,7 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
     counts=Counter(x["status"] for x in results)
     report.update(results=results,status_counts=dict(counts),
                   cover_observations=sum(len(x.get("observations",[])) for x in results),
+                  legacy_listing_text_lead_count=sum(len(x.get("legacy_listing_text_leads",[])) for x in results),
                   filings_selected=len(results),filings_with_bodies=sum("sha256" in x for x in results),
                   certified_identities=0,claims_ingested=0,
                   page_complete=not any(counts[k] for k in ("NOT_CACHED","COLLECTION_OR_CACHE_ERROR")),
@@ -255,7 +316,10 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
     # Cursor only advances automatically after all selected bodies were processed.
     report["page_advance_allowed"]=report["page_complete"] and not report["missing_index_quarters"] and not report["event_index_truncated"]
     report["resume_after_cik"]=report["next_after_cik"] if report["page_advance_allowed"] else report["after_cik"]
-    key=ev._sha(json.dumps([year,report["after_cik"],report["selected_issuers"],report["index_partition_sha256"]]).encode())[:24]
+    page_key=[year,report["after_cik"],report["selected_issuers"],report["index_partition_sha256"]]
+    if periodic_first:
+        page_key.append(report["selection_policy"])
+    key=ev._sha(json.dumps(page_key).encode())[:24]
     path=BASE/"pages"/(key+".json")
     report["report_path"]=str(private_path(path))
     ev._json(path,report)
@@ -271,9 +335,11 @@ def main():
     p.add_argument("--max-issuers",type=int,default=20)
     p.add_argument("--max-requests",type=int,default=20)
     p.add_argument("--fetch",action="store_true")
+    p.add_argument("--periodic-first",action="store_true",
+                   help="Sample one annual report per historical issuer, quarterly fallback; rebuild index first")
     a=p.parse_args()
     print(json.dumps(run(a.year,ciks=a.ciks,after_cik=a.after_cik,max_issuers=a.max_issuers,
-                         fetch=a.fetch,max_requests=a.max_requests),indent=2,allow_nan=False))
+                         fetch=a.fetch,max_requests=a.max_requests,periodic_first=a.periodic_first),indent=2,allow_nan=False))
 
 
 if __name__=="__main__":
