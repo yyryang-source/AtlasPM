@@ -42,3 +42,34 @@ only, not an account ledger, market lake, full database backup or disaster
 recovery deployment. Keep copied records private under applicable retention
 terms. Actual restoration of an active system needs a separate operator
 review and a tested deployment-specific procedure.
+
+## Market SQLite backup and isolated recovery
+
+The sqlite_recovery module uses SQLite's online backup API for the canonical
+local_data/atlaspm_market.sqlite3 file, including committed WAL contents.
+Explicit operator retention review is required, with byte/time limits (up to
+8 GiB and 30 minutes), disk check, standalone journal state, integrity_check
+and SHA-256 manifest. Verification rechecks hashes around database inspection.
+
+Only after checking applicable storage and backup rights, run:
+
+    python -m atlaspm.data.sqlite_recovery backup market-1 --retention-reviewed
+    python -m atlaspm.data.sqlite_recovery verify market-1 --retention-reviewed
+    python -m atlaspm.data.sqlite_recovery restore-isolated market-1 rehearsal-1 --retention-reviewed
+
+Copies stay under local_data/runs/sqlite_recovery. Use unique lowercase IDs.
+Incomplete copies lack a valid seal; inspect and remove manually only after
+confirming no process is using them. The active database is never replaced.
+Time bounds are cooperative, not OS hard deadlines; disk space can change.
+Checksums are not signatures or protection from a malicious local writer.
+This covers the canonical market SQLite database only, not Parquet, other
+registries, account ledgers or provider credentials. It is not full disaster
+recovery or proof of provider rights.
+
+## Installable package acceptance
+
+CI builds a wheel and installs it into a fresh venv outside the checkout,
+checks base dependencies and installed package origin, runs the architecture
+contract and exercises recovery/current-research CLI help on Windows/Linux.
+Build/base dependencies may be downloaded; this is not a pinned air-gapped
+bundle. The integrated full-dependency gate uses 1300 passing tests.
