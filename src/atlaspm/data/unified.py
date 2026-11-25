@@ -547,3 +547,92 @@ def iter_batches(dataset: str, *, start: str, end: str, columns=(), symbols=(),
                                     version=version)
                 if _version(path) != version:
                     raise DataQualityError("Partition changed during scan; discard query results")
+
+
+# Current stored terms are not a dated membership history. Use a separate
+# lookup rather than treating expiration/maturity as observation dates.
+REFERENCE_CATALOG = MappingProxyType({
+    "option_contracts": ("option_contracts", ("symbol","underlying","expiration",
+        "option_type","strike","reference_asof","source")),
+    "bond_terms": ("bonds", ("cusip","bond_kind","issuer","security_type",
+        "coupon_rate_pct","issue_date","maturity_date","source")),
+})
+
+
+def _reference_date(value, *, optional=False):
+    if value is None and optional:
+        return None
+    try:
+        return _day(value)
+    except (ValueError,TypeError):
+        raise DataQualityError("Invalid stored reference date") from None
+
+
+def _validate_reference(name, row):
+    for key in ("source", "symbol" if name=="option_contracts" else "cusip"):
+        if not isinstance(row[key],str) or not row[key].strip():
+            raise DataQualityError("Missing reference identifier or source")
+    if name=="option_contracts":
+        if (not isinstance(row["underlying"],str) or not row["underlying"].strip()
+                or row["option_type"] not in ("call","put")
+                or not _finite_numeric(row["strike"]) or row["strike"]<=0):
+            raise DataQualityError("Invalid option terms")
+        _reference_date(row["expiration"])
+        _reference_date(row["reference_asof"],optional=True)
+    else:
+        for key in ("bond_kind","issuer"):
+            if not isinstance(row[key],str) or not row[key].strip():
+                raise DataQualityError("Missing bond terms")
+        issue=_reference_date(row["issue_date"],optional=True)
+        maturity=_reference_date(row["maturity_date"],optional=True)
+        if issue and maturity and issue>=maturity:
+            raise DataQualityError("Invalid bond term interval")
+        coupon=row["coupon_rate_pct"]
+        if coupon is not None and (not _finite_numeric(coupon) or coupon<0):
+            raise DataQualityError("Invalid bond coupon")
+
+
+def read_reference(dataset, *, identifiers, purpose="exploratory", as_of=None,
+                   database=DB_PATH):
+    """Exact-ID current stored terms from the canonical SQLite warehouse.
+
+    Explicit missing identifiers and null fields remain visible. An as-of
+    request is refused: the upserted reference tables do not preserve all
+    historical versions. No new database, no implied security identity.
+    """
+    if purpose!="exploratory" or as_of is not None:
+        raise AdmissionDenied("Current reference terms are not certified historical data")
+    if dataset not in REFERENCE_CATALOG:
+        raise DataUnavailable("No connected reference lookup")
+    if (not isinstance(identifiers,(list,tuple)) or not 1<=len(identifiers)<=128
+            or any(not isinstance(x,str) or not x or len(x)>128 for x in identifiers)
+            or len(set(identifiers))!=len(identifiers)):
+        raise ValueError("Require 1..128 unique explicit provider identifiers")
+    table,fields=REFERENCE_CATALOG[dataset]
+    path=private_path(database)
+    if not path.is_file():
+        raise DataUnavailable("Market database is missing")
+    with closing(sqlite3.connect(path.as_uri()+"?mode=ro",uri=True)) as con:
+        con.execute("PRAGMA query_only=ON")
+        con.execute("BEGIN")
+        try:
+            rows=con.execute(f"SELECT {','.join(fields)} FROM {table} WHERE {fields[0]} IN ("
+                             +",".join("?" for _ in identifiers)+f") ORDER BY {fields[0]}",
+                             identifiers).fetchall()
+        except sqlite3.OperationalError:
+            raise DataUnavailable("Reference table or schema unavailable") from None
+        version=_version(path)
+    result=[dict(zip(fields,row)) for row in rows]
+    for row in result:
+        _validate_reference(dataset,row)
+    found={row[fields[0]] for row in result}
+    return {"schema":"atlaspm_current_reference_lookup_v1","dataset":dataset,
+            "origin":str(path.relative_to(Path.cwd().resolve())),
+            "source_version_hint":version,"records":result,
+            "missing_identifiers":sorted(set(identifiers)-found),
+            "all_requested_identifiers_present":len(found)==len(identifiers),
+            "historical_versions_verified":False,"coverage_verified":False,
+            "security_identity_verified":False,"point_in_time_verified":False,
+            "research_only":True,"approved_for_model_training":False,
+            "approved_for_backtest":False,"live_execution_enabled":False,
+            "broker_order_submission_enabled":False}

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from hashlib import sha256
+from http.client import HTTPException
+from math import isfinite
 import json
 import os
 import re
@@ -65,7 +67,20 @@ class _NoRedirect(HTTPRedirectHandler):
 def _strict_json(body):
     def reject(value):
         raise ValueError("Nonfinite JSON constant")
-    obj = json.loads(body, parse_constant=reject)
+    def number(value):
+        parsed = float(value)
+        if not isfinite(parsed):
+            raise ValueError("Nonfinite JSON number")
+        return parsed
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate JSON member")
+            result[key] = value
+        return result
+    obj = json.loads(body, parse_constant=reject, parse_float=number,
+                     object_pairs_hook=unique)
     if not isinstance(obj, dict):
         raise ValueError("Expected JSON object")
     return obj
@@ -279,7 +294,7 @@ class Gateway:
                         if status in (401, 403):
                             state.blocked_until = self._clock() + 60
                         raise GatewayError(f"{provider}: HTTP {status}") from None
-                except (URLError, TimeoutError, OSError):
+                except (URLError, TimeoutError, OSError, HTTPException):
                     state.failures += 1
                     state.last_status = "NETWORK_ERROR"
                 except (ValueError, UnicodeError, RecursionError):
@@ -375,7 +390,7 @@ class Gateway:
                 state.last_status = f"HTTP_{code}"
                 state.blocked_until = self._clock() + max(60, delay)
                 raise GatewayError(f"{provider}: HTTP {code}; no automatic retry") from None
-            except (OSError, ValueError, RecursionError):
+            except (OSError, ValueError, RecursionError, HTTPException):
                 state.failures += 1
                 state.last_status = "MODEL_RESPONSE_ERROR"
                 state.blocked_until = self._clock() + 60
@@ -457,7 +472,7 @@ class Gateway:
                 state.last_status=f"AUTH_HTTP_{code}"
                 state.blocked_until=self._clock()+max(60,delay)
                 raise GatewayError(f"{provider} authentication HTTP {code}; no automatic retry") from None
-            except (OSError,ValueError,RecursionError):
+            except (OSError,ValueError,RecursionError,HTTPException):
                 state.failures+=1
                 state.last_status="AUTH_ERROR"
                 state.blocked_until=self._clock()+60
