@@ -74,6 +74,9 @@ def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[st
     if not isinstance(plan.get("valuation_times"), list) or not plan["valuation_times"]:
         raise ValueError("Option replay plan needs valuation_times")
     initial_cash = _amount(plan.get("initial_cash_usd"), "initial_cash_usd")
+    reserve = _amount(plan.get("minimum_cash_usd", 0), "minimum_cash_usd")
+    if reserve > initial_cash:
+        raise ValueError("Initial cash below minimum cash reserve")
     cash = initial_cash
     raw_shares = plan.get("initial_shares", {})
     if not isinstance(raw_shares, dict):
@@ -154,7 +157,7 @@ def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[st
             contract = history.contracts[key]
             settlement = history.settlements[key]
             intrinsic_usd,exercised,cash_debit,shares_debit,delivery=expiry_delivery(
-                key,contract,settlement,count,cash=cash,underlying_shares=shares[contract.underlying])
+                key,contract,settlement,count,cash=cash-reserve,underlying_shares=shares[contract.underlying])
             cash-=cash_debit
             if shares_debit:
                 shares[contract.underlying]-=shares_debit
@@ -180,13 +183,13 @@ def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[st
             fee = fee_per_contract * order.contracts
             spread_charge = (quote.ask - quote.bid) * .5 * contract.multiplier * order.contracts
             if buy:
-                if premium + fee > cash:
+                if premium + fee > cash - reserve:
                     raise ValueError(f"Insufficient cash for option purchase: {key}")
                 cash -= premium + fee
                 positions[key] += order.contracts
                 premium_paid += premium
             else:
-                if fee > cash:
+                if fee > cash - reserve:
                     raise ValueError(f"Insufficient cash for option sale fee: {key}")
                 cash -= fee
                 positions[key] -= order.contracts
@@ -224,6 +227,7 @@ def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[st
     return {
         "method": "historical_long_option_replay",
         "initial_cash_usd": initial_cash,
+        "minimum_cash_usd": reserve,
         "premium_paid_usd": premium_paid, "premium_sold_usd": premium_received,
         "execution_fees_usd": transaction_fees, "spread_cost_vs_mid_usd": spread_cost,
         "fills": fills, "expirations": exercises, "deliveries": cash_movements, "valuations": snapshots,
