@@ -203,11 +203,12 @@ class RealDatasetTests(unittest.TestCase):
         review=report["fold_array_review"]
         self.assertEqual(review["status"],"FOLD_ARRAYS_REVIEWED")
         self.assertEqual(review["feature_names"],["mom_5d"])
-        self.assertEqual(review["splits"]["train"]["x_shape"],[1,1])
-        self.assertEqual(review["splits"]["train"]["y_shape"],[1])
+        # ABC at index 1 and GAP at index 0 both have matured labels.
+        self.assertEqual(review["splits"]["train"]["x_shape"],[2,1])
+        self.assertEqual(review["splits"]["train"]["y_shape"],[2])
         self.assertEqual(review["splits"]["test"]["x_shape"],[2,1])
         self.assertEqual(review["splits"]["test"]["y_shape"],[2])
-        self.assertEqual(review["array_bytes_allocated"],48)
+        self.assertEqual(review["array_bytes_allocated"],64)
         self.assertFalse(review["arrays_retained"])
         self.assertFalse(review["prediction_universe_defined"])
         self.assertFalse(report["approved_for_model_training"])
