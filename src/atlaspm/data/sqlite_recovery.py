@@ -24,7 +24,18 @@ MINIMUM=1024**2
 
 
 def _path(path):
-    p=Path(path).absolute()
+    # Windows temporary/profile directories can have a DOS short-name
+    # spelling. Normalize the trusted checkout root, not its children.
+    cwd=Path.cwd()
+    root=cwd.resolve()
+    p=Path(path)
+    if p.is_absolute():
+        if p.is_relative_to(cwd):
+            p=root/p.relative_to(cwd)
+    else:
+        p=root/p
+    if ".." in p.parts or not p.is_relative_to(root/"local_data"):
+        raise ValueError("SQLITE_RECOVERY_REDIRECTED_PATH")
     if p!=private_path(p) or p.is_symlink():
         raise ValueError("SQLITE_RECOVERY_REDIRECTED_PATH")
     return p
