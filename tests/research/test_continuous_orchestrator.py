@@ -98,6 +98,45 @@ class ContinuousTests(unittest.TestCase):
             self.assertTrue(orchestrator.status()["control"]["manual_takeover"])
         self.assertFalse(orchestrator.status()["broker_tasks_enabled"])
 
+    def test_specialist_status_separates_metadata_and_blocked_local_calls(self):
+        import io,json
+        from contextlib import redirect_stdout
+        now="2020-01-10T21:00:00Z"
+        def event(kind):
+            return normalize({"provider":"synthetic","source_id":"SYN:"+kind,"kind":kind,
+                "subjects":["SYN:AAA"],"published_at":now,"first_available_at":now,
+                "effective_at":None,"evidence_sha256":"a"*64,"delivery":"file","expiry_seconds":3600},
+                received_at=now)
+        # Technical request has no data at this cutoff; metadata still completes.
+        task={"route":"technical_local","params":{"start":"2019-01-10","end":"2020-01-10","symbols":["AAA"]}}
+        event_queue.enqueue([event("volume_anomaly"),event("news")])
+        result=event_queue.drain(as_of=now,local_bindings=[
+            {"kind":"volume_anomaly","subject":"SYN:AAA","task":task}])
+        self.assertEqual(result["completed"],2)
+        status=orchestrator.status()
+        self.assertEqual(status["research_topic_counts_scope"],"event_metadata_only")
+        self.assertEqual(status["research_topic_counts"]["technical"],1)
+        self.assertEqual(status["blocked_local_specialist_tasks"],1)
+        self.assertEqual(status["blocked_research_tasks"],1)
+        self.assertEqual(status["completed_events_without_local_receipts"],1)
+        self.assertEqual(status["local_specialist_completed_by_route"],{})
+        self.assertFalse(status["professional_research_coverage_verified"])
+        self.assertFalse(status["broker_tasks_enabled"])
+        path=Path("local_data/task.json")
+        path.write_text(json.dumps({"as_of":now,"tasks":[task]}),encoding="utf-8")
+        with patch("sys.argv",["orchestrator","research","--file",str(path)]), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(orchestrator.main(),1)
+        report=json.loads(output.getvalue())
+        self.assertEqual(report["status"],"LOCAL_RESEARCH_BLOCKED")
+        self.assertEqual(report["blocked_tasks"],1)
+        self.assertFalse(report["trade_authorized"])
+        # A completed descriptive event review must not claim verified coverage.
+        path.write_text(json.dumps({"as_of":now,"tasks":[{"route":"events","params":{"events":[event("news")]}}]}),
+                        encoding="utf-8")
+        with patch("sys.argv",["orchestrator","research","--file",str(path)]), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(orchestrator.main(),0)
+        self.assertEqual(json.loads(output.getvalue())["status"],"LOCAL_RESEARCH_REVIEWED")
+
     def test_writer_conflict_does_not_modify_state(self):
         orchestrator.set_control("stop")
         before=event_queue.PATH.read_bytes()
