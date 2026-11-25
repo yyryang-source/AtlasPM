@@ -113,15 +113,19 @@ manual Gateway authentication remains required.
 
 ### USD-only margin monitoring with auxiliary currency rows
 
-The margin monitor now reports rather than rejects a ledger merely because an
-additional currency row exists. Only explicit USD amounts enter its formulas;
-BASE and foreign NLV are never added. A complete, identity-matched foreign
-row with all known exposure fields and NLV zero is compatible. Nonzero foreign
-cash, positions, P&L, unknown/missing fields, malformed values, and unexplained
-foreign NLV produce BLOCKED_DATA. If a foreign NLV matches USD NLV translated
-using the documented base-to-foreign rate, this is a diagnostic hint only, not
-proof of a duplicate value. BASE totals, if supplied with foreign rows, must
-also reconcile with USD. No FX conversion or multi-currency order support.
+The margin monitor reports rather than rejects a ledger merely because an
+additional currency row exists. USD cash remains USD cash; with foreign rows,
+the account NLV comparison uses BASE only after reconciling the sum of the
+currency NLVs translated into USD (amount times reported currency-relative-to-base
+rate). BASE is an aggregate and is never added to the currency sum. The margin
+summary must independently agree with this BASE value. BASE cash must still
+agree with USD cash under the USD-only policy. A complete, identity-matched
+foreign row with zero exposure and zero NLV is compatible when totals reconcile.
+Nonzero foreign cash, positions, P&L, unknown/missing fields, malformed values,
+and foreign NLV without an economic explanation produce BLOCKED_DATA even when
+the arithmetic reconciles. No new buying power, FX order support or trading
+authorization is inferred. The account NLV reconciliation state is reported
+separately from foreign exposure risk. No reciprocal rate fitting.
 The sync console exposes redacted margin block reasons and currency diagnostics.
 Independent financing reconciliation and the institutional gate remain required.
 Provider reference: https://www.interactivebrokers.com/docs/web-api/v1/endpoints/portfolio/portfolio-ledger

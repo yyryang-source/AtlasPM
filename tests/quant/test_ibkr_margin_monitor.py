@@ -158,9 +158,11 @@ class IBKRMarginMonitorTests(unittest.TestCase):
         ).split()
         row = dict.fromkeys(fields, 0.0)
         row.update(currency="CNH", acctcode=ACCOUNT, secondkey="CNH", severity=0,
-                   exchangerate=7.0, interest=0.02, netliquidationvalue=0.0)
+                   exchangerate=0.15, interest=0.02, netliquidationvalue=0.0)
         row.update(overrides)
-        self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]["CNH"] = row
+        ledger = self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]
+        ledger["CNH"] = row
+        ledger["BASE"] = dict(ledger["USD"], currency="BASE", exchangerate=1)
         return row
 
     def test_zero_foreign_ledger_does_not_duplicate_usd_nlv(self):
@@ -171,15 +173,36 @@ class IBKRMarginMonitorTests(unittest.TestCase):
         self.assertTrue(report["foreign_ledger_risk_clear"])
         self.assertFalse(report["ready_for_institutional_risk_gate"])
 
-    def test_nonzero_foreign_nlv_not_silently_excluded_even_if_fx_matches(self):
-        self.foreign_ledger(netliquidationvalue=123950 * 7)
+    def test_foreign_nlv_reconciles_account_total_but_not_exposure(self):
+        # Synthetic values matching the shape, not a private broker snapshot.
+        self.foreign_ledger(netliquidationvalue=2000, exchangerate=0.15)
+        ledger = self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]
+        ledger["BASE"]["netliquidationvalue"] = 124250.06
+        for key in ("netliquidation", "netliquidation-s"):
+            self.fixture["responses"][ENDPOINT][key]["amount"] = 124250.0625
         report, _ = self.run_monitor()
         self.assertEqual(report["monitor_state"], "BLOCKED_DATA")
-        self.assertIn("FOREIGN_NLV_UNEXPLAINED", report["data_integrity_block_reasons"])
-        self.assertTrue(report["foreign_ledger_diagnostics"][0]["possible_base_to_foreign_nlv_translation"])
-        self.assertEqual(report["margin_summary_usd_claim"]["total_nlv"], 123950)
+        self.assertEqual(report["data_integrity_block_reasons"], ["FOREIGN_NLV_UNEXPLAINED"])
+        self.assertEqual(report["account_nlv_reconciliation"]["state"], "BASE_CURRENCY_SUM_AND_MARGIN_MATCH")
+        self.assertEqual(report["account_nlv_reconciliation"]["currency_nlv_sum_usd"], 124250)
+        self.assertEqual(report["margin_summary_usd_claim"]["total_nlv"], 124250.0625)
+        self.assertEqual(report["margin_summary_usd_claim"]["available_funds"], 60000)
         self.assertFalse(report["foreign_ledger_risk_clear"])
         self.assertFalse(report["ready_for_institutional_risk_gate"])
+
+    def test_inverse_rate_or_summary_mismatch_not_accepted(self):
+        self.foreign_ledger(netliquidationvalue=2000, exchangerate=1/0.15)
+        ledger = self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]
+        ledger["BASE"]["netliquidationvalue"] = 124250
+        report, _ = self.run_monitor()
+        self.assertIn("BASE_VS_USD_LEDGER_MISMATCH", report["data_integrity_block_reasons"])
+        ledger["CNH"]["exchangerate"] = 0.15
+        report, _ = self.run_monitor()
+        self.assertIn("PORTFOLIO_NLV_VS_LEDGER_MISMATCH", report["data_integrity_block_reasons"])
+        self.assertEqual(report["account_nlv_reconciliation"]["state"], "BASE_MATCHES_CURRENCY_NLV_SUM")
+        del ledger["BASE"]
+        report, _ = self.run_monitor()
+        self.assertIn("BASE_LEDGER_REQUIRED_FOR_FOREIGN_NLV", report["data_integrity_block_reasons"])
 
     def test_foreign_exposure_blocks_even_if_net_zero(self):
         self.foreign_ledger(settledcash=-5, stockmarketvalue=5)
@@ -206,7 +229,7 @@ class IBKRMarginMonitorTests(unittest.TestCase):
     def test_foreign_ledger_base_disagreement_blocks(self):
         self.foreign_ledger()
         ledger = self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]
-        ledger["BASE"] = dict(ledger["USD"], currency="BASE", netliquidationvalue=123960)
+        ledger["BASE"] = dict(ledger["USD"], currency="BASE", exchangerate=1, netliquidationvalue=123960)
         report, _ = self.run_monitor()
         self.assertIn("BASE_VS_USD_LEDGER_MISMATCH", report["data_integrity_block_reasons"])
         ledger["BASE"]["netliquidationvalue"] = 123950

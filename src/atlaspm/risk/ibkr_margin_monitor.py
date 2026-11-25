@@ -9,7 +9,7 @@ from __future__ import annotations
 from atlaspm.engine.contracts import finite_number
 
 from datetime import datetime, timezone
-from math import isfinite
+from math import fsum, isfinite
 import re
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -57,12 +57,15 @@ def _number(value: Any, name: str) -> float:
 def _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv):
     """USD-only diagnostics; nonzero foreign NLV is never silently discarded.
 
-    A matching FX translation is only a possible explanation, not proof of
-    zero foreign exposure. Keep this distinct from verified financing.
+    The observed Gateway rate multiplies a currency amount into USD.
+    Require independent BASE and summary agreement before reporting an
+    aggregate NLV reconciliation; never infer cash or trade authority.
     """
     diagnostics = []
     blocks = set()
-    for currency in sorted(set(ledger) - {"USD", "BASE"}):
+    contributions = []
+    foreign_keys = set(ledger) - {"USD", "BASE"}
+    for currency in sorted(foreign_keys):
         row = ledger[currency]
         if (not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)
                 or not isinstance(row, dict)
@@ -79,9 +82,13 @@ def _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv):
             exposure = [_number(row[key], "foreign exposure") for key in _FOREIGN_EXPOSURE_FIELDS]
             nlv = _number(row.get("netliquidationvalue"), "foreign NLV")
             rate = _number(row.get("exchangerate"), "foreign exchange rate")
-            # Documented rate is base to foreign currency. Do not guess inverse.
+            # The provider's currency-relative-to-base rate is applied once.
+            # Never try the reciprocal just to make a reconciliation pass.
             if rate <= 0:
                 raise ValueError("Nonpositive FX rate")
+            contribution = nlv * rate
+            if not isfinite(contribution):
+                raise ValueError("Nonfinite foreign NLV contribution")
             if "interest" in row:
                 _number(row["interest"], "foreign interest field")
         except (ValueError, OverflowError):
@@ -95,24 +102,48 @@ def _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv):
             state = "ZERO_EXPOSURE_FIELDS_NONZERO_NLV"
         else:
             state = "ZERO_REPORTED_EXPOSURE_AND_NLV"
-        diagnostics.append({
-            "currency": currency, "state": state,
-            "possible_base_to_foreign_nlv_translation": (
-                nlv != 0 and abs(nlv / rate - gateway_nlv) <= USD_TOLERANCE
-            ),
-        })
-    if "BASE" in ledger and set(ledger) - {"USD", "BASE"}:
-        base = ledger["BASE"]
-        try:
-            if not isinstance(base, dict) or base.get("currency") not in {"BASE", "USD"} or base.get("acctcode") != account_id:
-                raise ValueError("BASE identity")
-            for field in ("netliquidationvalue", "settledcash", "cashbalance"):
-                if abs(_number(base.get(field), "BASE field") -
-                       _number(ledger["USD"].get(field), "USD field")) > USD_TOLERANCE:
-                    blocks.add("BASE_VS_USD_LEDGER_MISMATCH")
-        except (ValueError, OverflowError):
-            blocks.add("BASE_LEDGER_UNVERIFIED")
-    return diagnostics, sorted(blocks)
+        diagnostics.append({"currency": currency, "state": state})
+        contributions.append(contribution)
+    reference = gateway_nlv
+    reconciliation = "USD_ONLY"
+    base_nlv = None
+    aggregate = None
+    if foreign_keys:
+        reconciliation = "FOREIGN_LEDGER_NOT_RECONCILED"
+        if "BASE" not in ledger:
+            blocks.add("BASE_LEDGER_REQUIRED_FOR_FOREIGN_NLV")
+        else:
+            base = ledger["BASE"]
+            try:
+                if (not isinstance(base, dict) or base.get("currency") not in {"BASE", "USD"}
+                        or base.get("acctcode") != account_id
+                        or base.get("secondkey", base["currency"]) != base["currency"]
+                        or _number(base.get("exchangerate"), "BASE rate") != 1
+                        or base.get("severity", 0) != 0):
+                    raise ValueError("BASE identity")
+                base_nlv = _number(base.get("netliquidationvalue"), "BASE NLV")
+                if base_nlv <= 0:
+                    raise ValueError("Nonpositive BASE NLV")
+                for field in ("settledcash", "cashbalance"):
+                    if abs(_number(base.get(field), "BASE field") -
+                           _number(ledger["USD"].get(field), "USD field")) > USD_TOLERANCE:
+                        blocks.add("BASE_VS_USD_CASH_MISMATCH")
+                if len(contributions) == len(foreign_keys):
+                    aggregate = fsum([gateway_nlv, *contributions])
+                    if abs(base_nlv - aggregate) <= USD_TOLERANCE:
+                        reference = base_nlv
+                        reconciliation = "BASE_MATCHES_CURRENCY_NLV_SUM"
+                    else:
+                        blocks.add("BASE_VS_USD_LEDGER_MISMATCH")
+                else:
+                    blocks.add("BASE_CURRENCY_SUM_UNVERIFIED")
+            except (ValueError, OverflowError):
+                blocks.add("BASE_LEDGER_UNVERIFIED")
+    return diagnostics, sorted(blocks), {
+        "state": reconciliation, "reference_nlv_usd": reference,
+        "usd_currency_row_nlv": gateway_nlv, "base_row_nlv_usd": base_nlv,
+        "currency_nlv_sum_usd": aggregate,
+    }
 
 
 def _metric(
@@ -188,7 +219,7 @@ def normalize_ibkr_margin_summary(
     if not isinstance(usd, dict):
         raise ValueError("USD ledger missing")
     gateway_nlv = _number(usd.get("netliquidationvalue"), "gateway USD NLV")
-    foreign_diagnostics, foreign_blocks = _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv)
+    foreign_diagnostics, foreign_blocks, nlv_reconciliation = _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv)
 
     metrics: dict[str, float] = {}
     stamps: list[datetime] = []
@@ -231,8 +262,10 @@ def normalize_ibkr_margin_summary(
         integrity.append("IBKR_TLS_VERIFICATION_MISSING")
     if "commodities_nlv" in extra and abs(extra["commodities_nlv"]) > USD_TOLERANCE:
         integrity.append("NONZERO_COMMODITIES_SEGMENT_NOT_SUPPORTED")
-    if abs(metrics["total_nlv"] - gateway_nlv) > USD_TOLERANCE:
+    if abs(metrics["total_nlv"] - nlv_reconciliation["reference_nlv_usd"]) > USD_TOLERANCE:
         integrity.append("PORTFOLIO_NLV_VS_LEDGER_MISMATCH")
+    elif nlv_reconciliation["state"] == "BASE_MATCHES_CURRENCY_NLV_SUM":
+        nlv_reconciliation["state"] = "BASE_CURRENCY_SUM_AND_MARGIN_MATCH"
     if abs(metrics["total_nlv"] - metrics["net_liquidation"]) > USD_TOLERANCE:
         integrity.append("SECURITIES_NLV_VS_TOTAL_MISMATCH")
     if metrics["net_liquidation"] <= 0:
@@ -283,11 +316,13 @@ def normalize_ibkr_margin_summary(
         "foreign_ledger_diagnostics": foreign_diagnostics,
         "foreign_ledger_risk_clear": not foreign_blocks,
         "account_base_currency": "USD",
+        "account_nlv_reconciliation": nlv_reconciliation,
         "optional_margin_summary_usd_claim": extra,
         "formula_differences_usd": {
             "available_funds": available_gap,
             "excess_liquidity": excess_gap,
             "total_nlv_vs_gateway_usd_nlv": metrics["total_nlv"] - gateway_nlv,
+            "total_nlv_vs_account_reference_nlv": metrics["total_nlv"] - nlv_reconciliation["reference_nlv_usd"],
         },
         "margin_field_max_age_seconds": age,
         "margin_field_timestamp_span_seconds": span,
@@ -344,6 +379,7 @@ def redacted_margin_console(report: Mapping[str, Any], output: str) -> dict[str,
         "risk_alerts": report["risk_alerts"],
         "foreign_ledger_diagnostics": report["foreign_ledger_diagnostics"],
         "foreign_ledger_risk_clear": report["foreign_ledger_risk_clear"],
+        "account_nlv_reconciliation_state": report["account_nlv_reconciliation"]["state"],
         "broker_observed_summary_fields": report["broker_observed_summary_fields"],
         "IBKR_financing_debt_separately_verified": False,
         "ready_for_institutional_risk_gate": False,

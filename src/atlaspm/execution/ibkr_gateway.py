@@ -574,6 +574,7 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
                 **({"margin_block_reasons": margin["data_integrity_block_reasons"],
                     "margin_risk_alerts": margin["risk_alerts"],
                     "foreign_ledger_diagnostics": margin["foreign_ledger_diagnostics"],
-                    "foreign_ledger_risk_clear": margin["foreign_ledger_risk_clear"]}
+                    "foreign_ledger_risk_clear": margin["foreign_ledger_risk_clear"],
+                    "account_nlv_reconciliation_state": margin["account_nlv_reconciliation"]["state"]}
                    if include_margin else {}),
                 "broker_order_submission_enabled": False}
