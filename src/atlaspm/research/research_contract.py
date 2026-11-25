@@ -41,7 +41,7 @@ def contract(raw, *, as_of, max_age_seconds=86400):
     cutoff=_utc(as_of)
     age=finite(max_age_seconds,"max_age_seconds",minimum=0)
     synthetic=raw["synthetic_fixture"]
-    sid=validate_identity(raw["security_id"],synthetic)
+    validate_identity(raw["security_id"],synthetic)
     if raw["asset_type"] not in ASSETS or raw["category"] not in CATEGORIES or raw["kind"] not in KINDS:
         raise ValueError("INVALID_RESEARCH_CLASS")
     source,version=_name(raw["source"]),_name(raw["model_version"])
