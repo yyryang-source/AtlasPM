@@ -494,3 +494,22 @@ The same functions are available through the stable main CLI:
 The status report additionally distinguishes configured credentials from
 rights syntax, paid-feed request budgets, required bearer token, external AI
 opt-in and open-circuit blockers. No reported readiness is authorization.
+
+### Targeted historical evidence planning
+
+Use the identity evidence-priority report from the existing dataset preflight
+with `python -m atlaspm.research.evidence_acquisition --priority-file local_data/training/v6/DATASET_PREFIX/identity_evidence_priority.json --year 2000 --as-of 2026-11-25`.
+Optional --reference-file is the existing validated external JSONL reference
+format. Without it, the report requests explicit CIK evidence rather than
+inferring issuer from symbol. It ranks the existing diagnostic gap counts,
+filters affected months and visible declared reference intervals, and selects
+whole CIK groups under the issuer budget (no partial conflicting group).
+Counts are across the source dataset, not year-specific recovered rows.
+The planner does not contact SEC, certify claims, or write the ledger.
+Pass reviewed selected CIKs explicitly using repeated --cik to
+atlaspm.data.hf_stock5m_identity_market_review (within --max-issuers).
+That existing cache-only collector reports requested but unselected CIKs;
+explicit CIK mode cannot be combined with --after-cik. An unselected CIK
+is not evidence of absence or delisting. Retain independent review and
+rights requirements. The priority report is a planning input, not proof
+of provenance or authorization.
