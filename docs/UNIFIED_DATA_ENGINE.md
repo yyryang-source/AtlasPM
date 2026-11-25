@@ -353,3 +353,28 @@ Canonical maintenance requires the existing calendar extra. This does not
 certify historical identity continuity, adjustments, intra-session coverage,
 rights or feature availability. A changed policy rebuilds derived factor
 partitions; no source bars are replaced.
+
+
+### Evidence-bound identity and action path review
+
+After a lineage-verified dataset is prepared, an optional separate preflight
+joins each sample session to the existing date-precision evidence ledger.
+Use the full dataset ID and an explicit review cutoff later than the last
+session, not later than the current UTC date:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.research.data_admission identity-review --dataset-id FULL_DATASET_ID --as-of YYYY-MM-DD
+~~~
+
+A counted path requires a prior-known identity on every session, agreement
+with the retrospective resolved identity, one security ID throughout the
+path and a complete observed closing-bar path. A visible split, dividend,
+merger, ticker change or exit action on a path excludes it from the
+action-free subset (including the signal session; non-session actions
+are assigned to the next session). No adjusted or total return is invented.
+The retrospective evidence is for exclusion diagnostics, never a predictive
+feature. Existing claims can be incomplete, conflicting or retrospectively
+revised; feature lookback identity and vendor adjustment semantics remain
+unverified. No model permission or official data certification is issued.
+The review uses temporary DuckDB rows and a separate identity preflight
+report in the existing dataset directory, with a 550-session budget.

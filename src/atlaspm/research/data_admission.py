@@ -224,7 +224,9 @@ def prepare_real_research(start_month,end_month,*,execute=False,warmup_months=2,
 def main():
     import argparse,json
     parser=argparse.ArgumentParser(description="Prepare actual local research data; never grants formal training admission")
-    parser.add_argument("action",choices=("inventory","prepare"))
+    parser.add_argument("action",choices=("inventory","prepare","identity-review"))
+    parser.add_argument("--dataset-id")
+    parser.add_argument("--as-of",help="Explicit retrospective evidence cutoff YYYY-MM-DD")
     parser.add_argument("--start-month")
     parser.add_argument("--end-month")
     parser.add_argument("--execute",action="store_true")
@@ -237,7 +239,15 @@ def main():
     parser.add_argument("--minimum-train-rows",type=int,default=1000)
     parser.add_argument("--minimum-test-rows",type=int,default=100)
     args=parser.parse_args()
-    if args.action=="inventory":
+    if args.action=="identity-review":
+        if args.execute or not args.dataset_id or not args.as_of or args.start_month or args.end_month:
+            parser.error("identity-review requires --dataset-id and --as-of; no --execute or month flags")
+        out=inspect_research_dataset(args.dataset_id,memory=args.memory,threads=args.threads,
+              minimum_train_rows=args.minimum_train_rows,minimum_test_rows=args.minimum_test_rows,
+              identity_as_of=args.as_of)
+    elif args.dataset_id or args.as_of:
+        parser.error("--dataset-id and --as-of are scoped to identity-review")
+    elif args.action=="inventory":
         if args.execute:
             parser.error("inventory is read-only")
         out=real_data_inventory(args.start_month,args.end_month)
@@ -251,7 +261,8 @@ def main():
             minimum_test_rows=args.minimum_test_rows)
     print(json.dumps(out,indent=2,allow_nan=False))
     return 0 if out["status"] in {"LOCAL_DATA_INVENTORY_COMPLETE","DATA_PREPARATION_PLAN_READY",
-                                  "RESEARCH_DATASET_PREPARED_TRAINING_BLOCKED"} else 2
+                                  "RESEARCH_DATASET_PREPARED_TRAINING_BLOCKED",
+                                  "STRUCTURAL_PREFLIGHT_COMPLETE_TRAINING_BLOCKED"} else 2
 
 
 if __name__=="__main__":

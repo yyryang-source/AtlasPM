@@ -157,6 +157,32 @@ class RealDatasetTests(unittest.TestCase):
         self.assertFalse(report["approved_for_model_training"])
         self.assertFalse(report["model_registry_admission"])
 
+    def test_identity_paths_exclude_reused_symbol_and_visible_action(self):
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        self.seed()
+        r=self.build()
+        first={"symbol":"ABC","security_id":"old","valid_from":"2020-01-01","valid_to":"2020-02-04"}
+        second={"symbol":"ABC","security_id":"new","valid_from":"2020-02-04","valid_to":None}
+        gap={"symbol":"GAP","security_id":"gap","valid_from":"2020-01-01","valid_to":None}
+        def snapshot(*,as_of,trade_date):
+            identities=[first,second,gap]
+            members=[x for x in identities if x["valid_from"]<=trade_date
+                     and (x["valid_to"] is None or trade_date<x["valid_to"])]
+            return {"identities":identities,"members":members,"unresolved":[],
+                    "actions":[{"security_id":"new","effective_date":"2020-02-05","kind":"SPLIT"}]}
+        with patch.object(v,"_calendar",return_value=CAL), \
+             patch("atlaspm.data.quality_review._ledger_digest",return_value="a"*64), \
+             patch("atlaspm.data.unified.review_security",side_effect=snapshot):
+            report=pre.run(r["dataset_id"],minimum_train_rows=1,minimum_test_rows=1,
+                           identity_as_of="2020-02-07")
+        one=report["horizons"]["1"]
+        self.assertEqual(one["rows_excluded_by_identity_path"],1)
+        self.assertEqual(one["rows_excluded_by_visible_actions"],2)
+        self.assertEqual(one["reviewed_identity_action_free_rows"],
+                         one["closing_path_labeled_feature_complete_rows"]-3)
+        self.assertFalse(report["identity_path_review"]["feature_identity_history_verified"])
+        self.assertFalse(report["approved_for_model_training"])
+
     def test_preflight_rejects_rehashed_incorrect_label(self):
         from atlaspm.research import real_dataset_preflight_v61 as pre
         self.seed()
