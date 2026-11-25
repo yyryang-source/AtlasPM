@@ -223,6 +223,7 @@ def optimize_multiasset(ledger, context, market, limits):
     from atlaspm.engine.contracts import timestamp
     from atlaspm.execution.institutional_ledger import build_institutional_ledger, _position
     from atlaspm.execution.institutional_batch import propose_multi_asset_batch
+    from atlaspm.execution.institutional_gate import _policy_values
     from atlaspm.research.training_registry import digest
     if not ledger.get("_synthetic_fixture") or not str(context["account_id"]).startswith("DEMO-"):
         raise ValueError("MULTIASSET_RESEARCH_INPUT_NOT_CERTIFIED")
@@ -232,6 +233,7 @@ def optimize_multiasset(ledger, context, market, limits):
     if account is None or not account["account_ledger_ready_for_risk_review"]:
         raise ValueError("MULTIASSET_LEDGER_NOT_READY")
     policy=context["policy"]
+    _policy_values(policy)
     stamp=timestamp(ledger["valuation_at"],"valuation_at")
     if timestamp(market["as_of"],"as_of")!=stamp:
         raise ValueError("MULTIASSET_MARKET_CUTOFF_MISMATCH")
@@ -247,6 +249,8 @@ def optimize_multiasset(ledger, context, market, limits):
     new_puts=market.get("new_puts",[])
     if not isinstance(new_puts,list) or not 1<=len(positions)+len(new_puts)<=16:
         raise ValueError("MULTIASSET_UNIVERSE_LIMIT")
+    if any(not isinstance(p,dict) or p.get("type")!="option" or p.get("right")!="put" for p in new_puts):
+        raise ValueError("MULTIASSET_NEW_PUT_SCOPE")
     instruments=[(p,False) for p in positions]+[(_position(p,account_id),True) for p in new_puts]
     ids=[p["identifier"] for p,_ in instruments]
     if len(set(ids))!=len(ids) or market["symbols"]!=ids or set(market["inputs"])!=set(ids):
@@ -302,6 +306,8 @@ def optimize_multiasset(ledger, context, market, limits):
             if abs(delta)>1 or (p["right"]=="put" and delta>0) or (p["right"]=="call" and delta<0):
                 raise ValueError("MULTIASSET_DELTA")
             spot=underlying["mark_price"]
+            if new and data.get("trading_permission") is not True:
+                raise ValueError("MULTIASSET_OPTION_PERMISSION_REQUIRED")
             risk[1]=abs(delta)*spot/p["mark_premium"]
             risk[2]=.5*finite(data["gamma"],"gamma",minimum=0)*(spot*.01)**2/p["mark_premium"]
             risk[3]=finite(data["vega_per_vol_point"],"vega",minimum=0)/p["mark_premium"]
@@ -335,27 +341,43 @@ def optimize_multiasset(ledger, context, market, limits):
         return .5*gamma*variance(x)-float(mu@x[:n])-cash_return*available(x)+funding*(debt/nlv-x[-1])+fee(x)
     def constraints(x):
         q=x[:n]; net=1-fee(x)
-        values=[available(x)-payable/nlv-reserve,
+        values=[net-1e-8,available(x)-payable/nlv-reserve,
                 max_gross*net-float(q.sum()),max_stress*net-float(shocks@q),
                 max_turnover-float(np.abs(q-current).sum())-x[-1],
                 max_vol**2*net**2-variance(x)]
         values.extend(risk_caps*net-risk_matrix@q)
-        for i,(p,new,*_) in enumerate(rows):
-            if p["type"]=="option" and new:
-                j=ids.index(p["underlying"])
-                values.append(q[j]/rows[j][3]-q[i]/rows[i][3]*p["multiplier"])
+        # All puts on the same underlying compete for the same share backing.
+        # Do not let multiple individually covered legs reuse those shares.
+        for j,indices in put_groups.items():
+            values.append(q[j]/rows[j][3]-sum(q[i]/rows[i][3]*rows[i][0]["multiplier"] for i in indices))
         return np.asarray(values)
+    put_groups={}
+    new_underlyings={p["underlying"] for p,new,*_ in rows if new}
+    for i,(p,_,*_) in enumerate(rows):
+        if p["type"]=="option" and p["right"]=="put" and p["underlying"] in new_underlyings:
+            put_groups.setdefault(ids.index(p["underlying"]),[]).append(i)
     bounds=[(r[9],r[10]) for r in rows]+[(0.,min(debt/nlv,cap))]
-    result=minimize(objective,np.r_[current,0.],method="SLSQP",bounds=bounds,
-                    constraints=[{"type":"ineq","fun":constraints}],options={"maxiter":500,"ftol":1e-11})
     flags={"research_only":True,"trade_authorized":False,"live_execution_enabled":False,
-           "approved_for_model_training":False,"approved_for_backtest":False}
-    if not result.success or not np.all(np.isfinite(result.x)) or min(constraints(result.x)) < -1e-7:
+           "approved_for_model_training":False,"approved_for_backtest":False,
+           "global_optimum_verified":False,"solver":"SLSQP"}
+    def feasible(x):
+        if x.shape!=(n+1,) or not np.all(np.isfinite(x)):
+            return False
+        if any(v<lo-1e-10 or v>hi+1e-10 for v,(lo,hi) in zip(x,bounds)):
+            return False
+        residual=constraints(x)
+        return bool(np.all(np.isfinite(residual)) and np.min(residual)>=-1e-9 and np.isfinite(objective(x)))
+    try:
+        result=minimize(objective,np.r_[current,0.],method="SLSQP",bounds=bounds,
+                        constraints=[{"type":"ineq","fun":constraints}],options={"maxiter":500,"ftol":1e-11})
+    except (ValueError,ArithmeticError,RuntimeError):
+        return {**flags,"status":"BLOCKED_CONTINUOUS_SOLVE","legs":[]}
+    if not result.success or not feasible(result.x):
         return {**flags,"status":"BLOCKED_CONTINUOUS_SOLVE","legs":[]}
     x=np.r_[current,0.]; legs=[]
-    for i,(p,new,lot,unit,qty,_,cost,_,_,_,_) in enumerate(rows):
+    for i,(p,_new,lot,unit,_qty,_,cost,_,_,_,_) in enumerate(rows):
         change=(result.x[i]-current[i])*nlv/unit
-        delta=(1 if change>=0 else -1)*floor(abs(change)/lot+1e-10)*lot
+        delta=(1 if change>=0 else -1)*floor(abs(change)/lot)*lot
         if not delta:
             continue
         x[i]+=delta*unit/nlv
@@ -374,11 +396,11 @@ def optimize_multiasset(ledger, context, market, limits):
     if repayment:
         x[-1]=repayment/nlv
         legs.append({"leg_id":"OPT-DEBT","action":"REPAY_MARGIN","amount":repayment,"fee":0})
-    if min(constraints(x)) < -1e-7:
+    if not feasible(x):
         return {**flags,"status":"BLOCKED_DISCRETE_CONSTRAINTS","legs":[]}
     base={**flags,"continuous_weights":dict(zip(ids,map(float,result.x[:n]))),
           "discrete_weights":dict(zip(ids,map(float,x[:n]))),"remaining_debt":debt-repayment,
-          "settled_cash_after":available(x)*nlv,"expected_horizon_volatility":variance(x)**.5,
+          "settled_cash_after":available(x)*nlv,"expected_horizon_volatility":max(0.,variance(x))**.5,
           "risk_exposures":dict(zip(("dv01","abs_delta","gamma","vega","option_weight"),map(float,risk_matrix@x[:n]))),
           "legs":legs}
     if not legs:
@@ -392,5 +414,8 @@ def optimize_multiasset(ledger, context, market, limits):
     plan["risk_observation"]={**plan["risk_observation"],
         "pro_forma_gross_leverage":float(x[:n].sum()/(1-fee(x))),
         "pro_forma_stress_loss_fraction":float(shocks@x[:n]/(1-fee(x)))}
-    gate=propose_multi_asset_batch(ledger,plan)
+    try:
+        gate=propose_multi_asset_batch(ledger,plan)
+    except (ValueError,TypeError,KeyError,ArithmeticError):
+        return {**flags,"status":"BLOCKED_INDEPENDENT_PREFLIGHT","legs":[]}
     return {**base,"status":"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT","draft_plan":plan,"independent_preflight":gate}
