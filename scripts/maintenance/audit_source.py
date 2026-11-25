@@ -31,6 +31,39 @@ def alias_target(tree):
     return None
 
 
+def _collect_duplicate_bodies(tree, relative, duplicates):
+    for node in ast.walk(tree):
+        if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)):
+            continue
+        body=node.body
+        if body and isinstance(body[0],ast.Expr) and isinstance(body[0].value,ast.Constant) and isinstance(body[0].value.value,str):
+            body=body[1:]
+        # Only substantial identical bodies; matches are advisory, not dead code.
+        if len(body)<5 or sum(sum(1 for _ in ast.walk(n)) for n in body)<60:
+            continue
+        digest=hashlib.sha256("|".join(ast.dump(n,include_attributes=False) for n in body).encode()).hexdigest()
+        duplicates[digest].append(f"{relative}:{node.lineno}:{node.name}")
+
+
+def _resolve_alias_chains(aliases, modules, errors):
+    chains=[]
+    for name,target in sorted(aliases.items()):
+        seen={name}
+        depth=1
+        while target in aliases:
+            if target in seen:
+                errors.append(f"alias cycle: {name}")
+                break
+            seen.add(target)
+            target=aliases[target]
+            depth+=1
+        if target not in modules:
+            errors.append(f"missing alias target: {name} -> {target}")
+        if depth>1:
+            chains.append({"alias":name,"target":target,"depth":depth})
+    return chains
+
+
 def audit(root):
     src=root/"src"
     modules={}
@@ -64,32 +97,8 @@ def audit(root):
                 continue
             parts=name.split(".")
             counts[parts[1] if len(parts)>1 else "package_root"]+=1
-            for node in ast.walk(tree):
-                if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)):
-                    continue
-                body=node.body
-                if body and isinstance(body[0],ast.Expr) and isinstance(body[0].value,ast.Constant) and isinstance(body[0].value.value,str):
-                    body=body[1:]
-                # Only substantial identical bodies; matches are advisory, not dead code.
-                if len(body)<5 or sum(sum(1 for _ in ast.walk(n)) for n in body)<60:
-                    continue
-                digest=hashlib.sha256("|".join(ast.dump(n,include_attributes=False) for n in body).encode()).hexdigest()
-                duplicates[digest].append(f"{relative}:{node.lineno}:{node.name}")
-    chains=[]
-    for name,target in sorted(aliases.items()):
-        seen={name}
-        depth=1
-        while target in aliases:
-            if target in seen:
-                errors.append(f"alias cycle: {name}")
-                break
-            seen.add(target)
-            target=aliases[target]
-            depth+=1
-        if target not in modules:
-            errors.append(f"missing alias target: {name} -> {target}")
-        if depth>1:
-            chains.append({"alias":name,"target":target,"depth":depth})
+            _collect_duplicate_bodies(tree, relative, duplicates)
+    chains = _resolve_alias_chains(aliases, modules, errors)
     return dict(source_modules=len(modules),test_files=tests,
                 domain_counts=dict(sorted(counts.items())),
                 alias_count=len(aliases),multi_hop_aliases=chains,
