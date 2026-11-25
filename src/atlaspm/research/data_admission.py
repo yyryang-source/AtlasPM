@@ -252,7 +252,8 @@ def main():
               minimum_train_rows=args.minimum_train_rows,minimum_test_rows=args.minimum_test_rows,
               identity_as_of=args.as_of,
               matrix_request={"horizon":args.matrix_horizon,"fold_index":args.matrix_fold,
-                              "array_budget_mib":args.array_budget_mib} if matrix_requested else None)
+                              "array_budget_mib":args.array_budget_mib,
+                              "require_feature_history":True} if matrix_requested else None)
     elif args.dataset_id or args.as_of:
         parser.error("--dataset-id and --as-of are scoped to identity-review")
     elif args.action=="inventory":

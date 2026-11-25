@@ -127,12 +127,25 @@ def _install_identity_review(cx,calendar,as_of):
             "feature_identity_history_verified":False,"adjustment_applied":False}
 
 
+# Earliest close/volume observation used by each existing factor. Volatility
+# of 21 one-session returns needs 22 closes, including the signal session.
+FEATURE_LOOKBACK = {"ret_1d":1,"mom_5d":5,"mom_21d":21,"mom_63d":63,
+                    "mom_126d":126,"mom_252d":252,"volatility_21d":21,
+                    "price_vs_sma_20d":19,"volume_ratio_20d":20,
+                    "avg_dollar_volume_20d":19,"intraday_return":0,"intraday_range":0}
+
+
+def _feature_history_condition(lookback):
+    return (f"hist_close_n={lookback+1} AND hist_id_n={lookback+1}"
+            " AND hist_id_min=hist_id_max AND hist_action_n=0")
+
+
 def _identity_path_condition(h):
     return (f"features_complete AND label_{h}d IS NOT NULL AND close_n{h}={h+1}"
             f" AND id_n{h}={h+1} AND id_min{h}=id_max{h}")
 
 
-def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None):
+def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None,feature_lookback=None):
     """Recompute observed-price labels and count stricter closing-bar paths.
 
     A last observed intraday bar is not necessarily the session close.
@@ -159,6 +172,15 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None):
                          f"min(review_security_id) {w} AS id_min{h}",
                          f"max(review_security_id) {w} AS id_max{h}",
                          f"count(*) FILTER (WHERE review_action_on_session) {w} AS act_n{h}"])
+    if feature_lookback is not None:
+        if not identity_review or type(feature_lookback) is not int or not 0<=feature_lookback<=252:
+            raise ValueError("INVALID_FEATURE_HISTORY_REVIEW")
+        w=f"OVER (PARTITION BY symbol ORDER BY session_index RANGE BETWEEN {feature_lookback} PRECEDING AND CURRENT ROW)"
+        expr.extend([f"count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms) {w} AS hist_close_n",
+                     f"count(review_security_id) {w} AS hist_id_n",
+                     f"min(review_security_id) {w} AS hist_id_min",
+                     f"max(review_security_id) {w} AS hist_id_max",
+                     f"count(*) FILTER (WHERE review_action_on_session) {w} AS hist_action_n"])
     checks=[]
     for h in horizons:
         expected=f"CASE WHEN n{h}={h+1} AND isfinite(p{h}/close) THEN p{h}/close-1 END"
@@ -170,6 +192,9 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None):
         for h in horizons:
             condition=_identity_path_condition(h)
             strict+=f",count(*) FILTER (WHERE {condition}),count(*) FILTER (WHERE {condition} AND act_n{h}=0)"
+        if feature_lookback is not None:
+            for h in horizons:
+                strict+=f",count(*) FILTER (WHERE {_identity_path_condition(h)} AND act_n{h}=0 AND {_feature_history_condition(feature_lookback)})"
     counts=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
         SELECT session_index,count(*) FILTER (WHERE {" OR ".join(checks)}),
                count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms),{strict}
@@ -189,13 +214,18 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None):
         lo,hi,tl,th=(f[k] for k in ("train_start_index","train_end_index","test_start_index","test_end_index"))
         if any(lo<=i<=hi or tl<=i<=th for i,*_ in counts):
             cols=", ".join(matrix["features"])
+            history_filter=""
+            if matrix.get("require_feature_history"):
+                if feature_lookback is None:
+                    raise ValueError("FOLD_MATRIX_FEATURE_HISTORY_REQUIRED")
+                history_filter=" AND "+_feature_history_condition(feature_lookback)
             cx.execute(f"""INSERT INTO v6_fold_matrix
                 WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
                 SELECT CASE WHEN session_index BETWEEN ? AND ? THEN 'train' ELSE 'test' END,
                        session_index,review_security_id,{cols},label_{h}d,label_end_index_{h}d
                 FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
                     AND ((session_index BETWEEN ? AND ?) OR (session_index BETWEEN ? AND ?))
-                    AND {_identity_path_condition(h)} AND act_n{h}=0""",
+                    AND {_identity_path_condition(h)} AND act_n{h}=0{history_filter}""",
                 [lo,hi,month,lo,hi,tl,th])
     return [(int(i),int(close_count),*[int(n) for n in strict_counts])
             for i,_,close_count,*strict_counts in counts]
@@ -226,7 +256,9 @@ def _check_feature_source(cx,sample,source,features):
 
 def _matrix_request(cx,calendar,config,request):
     """Select one canonical purged fold, never caller-supplied date boundaries."""
-    if (not isinstance(request,dict) or set(request)!={"horizon","fold_index","array_budget_mib"}
+    if (not isinstance(request,dict) or not {"horizon","fold_index","array_budget_mib"}<=set(request)
+            or set(request)-{"horizon","fold_index","array_budget_mib","require_feature_history"}
+            or type(request.get("require_feature_history",False)) is not bool
             or type(request["horizon"]) is not int or request["horizon"] not in config["horizons"]
             or type(request["fold_index"]) is not int or request["fold_index"]<0
             or type(request["array_budget_mib"]) is not int or not 1<=request["array_budget_mib"]<=256):
@@ -323,7 +355,9 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
             "array_bytes_spilled":result["array_bytes_spilled"],
             "array_budget_mib":matrix["array_budget_mib"],
             "retrospective_subset_only":True,"prediction_universe_defined":False,
-            "feature_history_identity_verified":False,"arrays_retained":False,
+            "feature_history_identity_verified":False,
+            "feature_history_subset_required":matrix.get("require_feature_history",False),
+            "arrays_retained":False,
             "models_fitted":0,"training_started":False,"approved_for_model_training":False}
 
 
@@ -361,6 +395,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
     close_path_counts={h:[0]*len(calendar) for h in c["horizons"]}
     identity_counts={h:[0]*len(calendar) for h in c["horizons"]}
     action_free_counts={h:[0]*len(calendar) for h in c["horizons"]}
+    feature_history_counts={h:[0]*len(calendar) for h in c["horizons"]}
+    feature_lookback=max(FEATURE_LOOKBACK[name] for name in c["features"]) if identity_as_of is not None else None
     identity=None
     matrix=None
     matrix_report=None
@@ -375,14 +411,20 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             _check_feature_source(cx,p,source_paths[month],c["features"])
         for month,p in paths.items():
             window=dataset._window(month,months,calendar,max(c["horizons"]))
+            if feature_lookback is not None:
+                first_index=next(i for i,row in enumerate(calendar) if row[0][:7]==month)
+                first_month=calendar[max(0,first_index-feature_lookback)][0][:7]
+                window=[m for m in months if first_month<=m<=window[-1]]
             for i,closing,*counts in _check_labels(cx,[paths[k] for k in window],month,c["horizons"],
-                                                     identity_review=identity is not None,matrix=matrix):
+                                                     identity_review=identity is not None,matrix=matrix,
+                                                     feature_lookback=feature_lookback):
                 closing_observed[i]=closing
                 size=len(c["horizons"])
                 for j,h in enumerate(c["horizons"]):
                     close_path_counts[h][i]=counts[j]
                     if identity is not None:
                         identity_counts[h][i],action_free_counts[h][i]=counts[size+2*j:size+2*j+2]
+                        feature_history_counts[h][i]=counts[3*size+j]
             src=factor._files_sql([p])
             cols=", ".join(f"count(*) FILTER (WHERE features_complete AND label_{h}d IS NOT NULL)" for h in c["horizons"])
             for row in cx.execute(f"""SELECT session_index,count(*),count(*) FILTER (WHERE features_complete),{cols}
@@ -394,7 +436,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
                     horizon_counts[h][i]=int(count)
         if matrix is not None:
             f=matrix["fold"]
-            prefix=_prefix(action_free_counts[matrix["horizon"]])
+            selected_counts=feature_history_counts if matrix.get("require_feature_history") else action_free_counts
+            prefix=_prefix(selected_counts[matrix["horizon"]])
             matrix_report=_review_matrix_arrays(cx,matrix,
                 _sum(prefix,f["train_start_index"],f["train_end_index"]),
                 _sum(prefix,f["test_start_index"],f["test_end_index"]))
@@ -434,13 +477,20 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
         if identity is not None:
             if any(not 0<=a<=b<=c for a,b,c in zip(action_free_counts[h],identity_counts[h],close_path_counts[h],strict=True)):
                 raise ValueError("IDENTITY_PATH_COUNT_INCONSISTENT")
+            if any(not 0<=a<=b for a,b in zip(feature_history_counts[h],action_free_counts[h],strict=True)):
+                raise ValueError("FEATURE_HISTORY_PATH_COUNT_INCONSISTENT")
             action_prefix=_prefix(action_free_counts[h])
+            feature_prefix=_prefix(feature_history_counts[h])
             for row in rows:
                 train=_sum(action_prefix,row["train_start_index"],row["train_end_index"])
                 test=_sum(action_prefix,row["test_start_index"],row["test_end_index"])
                 row.update(reviewed_identity_action_free_train_rows=train,
                            reviewed_identity_action_free_test_rows=test,
                            reviewed_identity_action_free_minimum_pass=train>=minimum_train_rows and test>=minimum_test_rows)
+                ft=_sum(feature_prefix,row["train_start_index"],row["train_end_index"])
+                fv=_sum(feature_prefix,row["test_start_index"],row["test_end_index"])
+                row.update(reviewed_feature_history_train_rows=ft,reviewed_feature_history_test_rows=fv,
+                           reviewed_feature_history_minimum_pass=ft>=minimum_train_rows and fv>=minimum_test_rows)
         folds[str(h)]=rows
         totals[str(h)]={"labeled_feature_complete_rows":sum(counts),"fold_count":len(rows),
                         "folds_meeting_sample_minimum":sum(f["sample_count_pass"] for f in rows),
@@ -453,6 +503,9 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
                 rows_excluded_by_identity_path=sum(close_path_counts[h])-sum(identity_counts[h]),
                 rows_excluded_by_visible_actions=sum(identity_counts[h])-sum(action_free_counts[h]),
                 reviewed_identity_action_free_rows=sum(action_free_counts[h]),
+                reviewed_feature_history_rows=sum(feature_history_counts[h]),
+                rows_excluded_by_feature_history=sum(action_free_counts[h])-sum(feature_history_counts[h]),
+                folds_meeting_reviewed_feature_history_minimum=sum(f["reviewed_feature_history_minimum_pass"] for f in rows),
                 folds_meeting_reviewed_identity_action_free_minimum=sum(
                     f["reviewed_identity_action_free_minimum_pass"] for f in rows))
     report={"schema":SCHEMA,**v4.GUARDS,"dataset_id":dataset_id,
@@ -472,6 +525,12 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             "warning":"Fold counts are structural only. Unverified security identity, actions, rights and feature timing prevent formal training."}
     if identity is not None:
         report["identity_path_review"]=identity
+        report["feature_history_review"]={"maximum_lookback_sessions":feature_lookback,
+                "required_observations":feature_lookback+1,
+                "scope":"within_dataset_only",
+                "rule":"complete closing observations, one reviewed security ID, no visible action",
+                "uses_retrospective_evidence":True,"feature_values_recomputed":False,
+                "independent_feature_identity_verified":False}
         blockers=set(report["blockers"])
         if identity["daily_unresolved_claim_observations"] or identity["retrospective_unresolved_claims"]:
             blockers.add("UNRESOLVED_IDENTITY_OR_ACTION_CLAIMS")
@@ -480,6 +539,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
         for h,counts in totals.items():
             if not counts["fold_count"] or counts["folds_meeting_reviewed_identity_action_free_minimum"]!=counts["fold_count"]:
                 blockers.add("INSUFFICIENT_REVIEWED_IDENTITY_ACTION_FREE_SAMPLES:"+h)
+            if not counts["fold_count"] or counts["folds_meeting_reviewed_feature_history_minimum"]!=counts["fold_count"]:
+                blockers.add("INSUFFICIENT_REVIEWED_FEATURE_HISTORY_SAMPLES:"+h)
         report["blockers"]=sorted(blockers)
     if matrix_report is not None:
         report["fold_array_review"]=matrix_report

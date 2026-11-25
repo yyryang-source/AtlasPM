@@ -401,3 +401,17 @@ process RAM limit. This is a retrospective labeled subset, not a
 prediction universe or unbiased performance evaluation. Feature-lookback
 identity, adjustments, rights and independent admission remain unverified.
 No estimator, model artifact or registry promotion is invoked.
+
+
+Identity review also counts a stricter retrospective feature-history
+subset using the longest required existing factor lookback (21 prior
+sessions for the default features, up to 252). Each required observed
+session must have a closing bar, agreeing reviewed identity and no
+visible action, in addition to the existing forward-label conditions.
+Only sessions inside the dataset are reviewed, so early signals without
+enough in-dataset history are conservatively excluded even when earlier
+factor warmup files exist. The CLI fold-array check now requires this
+stricter subset. Existing Python diagnostic callers may still request
+the older forward-path-only matrix; neither subset authorizes training.
+Feature values are not independently recomputed or adjusted, and no
+source completeness or point-in-time certification is implied.

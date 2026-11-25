@@ -181,6 +181,10 @@ class RealDatasetTests(unittest.TestCase):
         self.assertEqual(one["reviewed_identity_action_free_rows"],
                          one["closing_path_labeled_feature_complete_rows"]-3)
         self.assertFalse(report["identity_path_review"]["feature_identity_history_verified"])
+        self.assertEqual(report["feature_history_review"]["maximum_lookback_sessions"],5)
+        self.assertEqual(one["reviewed_feature_history_rows"],0)
+        self.assertEqual(one["rows_excluded_by_feature_history"],one["reviewed_identity_action_free_rows"])
+        self.assertIn("INSUFFICIENT_REVIEWED_FEATURE_HISTORY_SAMPLES:1",report["blockers"])
         self.assertFalse(report["approved_for_model_training"])
 
     def test_reviewed_fold_arrays_use_purged_boundaries_and_separate_targets(self):
@@ -212,6 +216,34 @@ class RealDatasetTests(unittest.TestCase):
         self.assertFalse(review["arrays_retained"])
         self.assertFalse(review["prediction_universe_defined"])
         self.assertFalse(report["approved_for_model_training"])
+
+    def test_feature_history_excludes_prior_identity_change_and_action(self):
+        from contextlib import closing
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        self.seed()
+        path=Path("local_data/history_fixture.parquet")
+        with closing(v.factor._db("256MB",1)) as cx:
+            cx.execute("""CREATE TABLE observations(symbol VARCHAR, trade_date DATE,
+                session_index INTEGER, close DOUBLE, features_complete BOOLEAN,
+                last_bar_available_at_ms BIGINT, earliest_assumed_feature_time_ms BIGINT,
+                label_1d DOUBLE)""")
+            cx.execute("""CREATE TEMP TABLE v6_identity_review(
+                session_index INTEGER,symbol VARCHAR,security_id VARCHAR,action_on_session BOOLEAN)""")
+            rows=[]
+            identities=[]
+            for i in range(10):
+                for symbol in ("FULL","REUSED","ACTION"):
+                    rows.append((symbol,f"2020-01-{i+1:02d}",i,100.,True,300000,300000,0. if i<9 else None))
+                    identities.append((i,symbol,symbol+("-old" if symbol=="REUSED" and i<4 else ""),
+                                       symbol=="ACTION" and i==4))
+            cx.executemany("INSERT INTO observations VALUES (?,?,?,?,?,?,?,?)",rows)
+            cx.executemany("INSERT INTO v6_identity_review VALUES (?,?,?,?)",identities)
+            cx.execute(f"COPY observations TO {v.factor._quoted(path)} (FORMAT PARQUET)")
+            counts=pre._check_labels(cx,[path],"2020-01",[1],identity_review=True,feature_lookback=5)
+        # At index 5 all three future paths are clean; only FULL has a
+        # continuous identity and no visible action over its feature history.
+        self.assertEqual(counts[5],(5,3,3,3,3,1))
+        self.assertEqual(sum(row[-1] for row in counts),4)
 
     def test_preflight_rejects_rehashed_incorrect_label(self):
         from atlaspm.research import real_dataset_preflight_v61 as pre
