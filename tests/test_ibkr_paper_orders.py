@@ -340,6 +340,8 @@ class PaperLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"journal changed"):
             self.journal.save_reconciliation(batch["id"],{
                 "status":"pending","observed_at":"2026-11-24T00:00:00Z"},expected_batch=prior)
+        with self.assertRaisesRegex(ValueError,"journal changed"):
+            self.journal.apply(batch["id"],[],[],expected_batch=prior)
         self.assertEqual(self.journal.get(batch["id"])["reconciliation"]["status"],"matched")
 
     def test_review_changes_and_official_reject_shape(self):
