@@ -42,6 +42,13 @@ class PaperJournal:
                     execution_id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES paper_orders(client_id),
                     data TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS paper_controls (
+                    account_hash TEXT PRIMARY KEY, stopped INTEGER NOT NULL CHECK(stopped IN (0,1))
+                );
+                CREATE TABLE IF NOT EXISTS paper_control_events (
+                    id INTEGER PRIMARY KEY, account_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+                    stopped INTEGER NOT NULL, reason TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS paper_events (
                     id INTEGER PRIMARY KEY, client_id TEXT NOT NULL REFERENCES paper_orders(client_id),
                     created_at TEXT NOT NULL, state TEXT NOT NULL, detail TEXT
@@ -49,18 +56,51 @@ class PaperJournal:
             """)
             yield db
 
+    @staticmethod
+    def _require_running(db, account_hash):
+        row = db.execute("SELECT stopped FROM paper_controls WHERE account_hash=?", (account_hash,)).fetchone()
+        if row is not None and row["stopped"]:
+            raise ValueError("Paper submission stopped by operator")
+
+    @staticmethod
+    def _require_reconciled(db, account_hash):
+        # A terminal broker status alone does not establish cash/fill agreement.
+        # Include every earlier session, not just unknown submission results.
+        for row in db.execute("SELECT id, reconciliation FROM paper_batches WHERE account_hash=?", (account_hash,)):
+            active = db.execute(
+                """SELECT client_id FROM paper_orders WHERE batch_id=?
+                   AND state NOT IN ('filled','cancelled','rejected','expired','not_sent') LIMIT 1""",
+                (row["id"],),
+            ).fetchone()
+            if active:
+                raise ValueError(f"Resolve the ambiguous broker order {active['client_id']} before sending another batch")
+            report = json.loads(row["reconciliation"]) if row["reconciliation"] else {}
+            if report.get("status") != "matched":
+                raise ValueError("Prior Paper batch requires matched broker reconciliation")
+
+    def control(self, account_hash, *, stopped, reason):
+        """Persist operator stop/resume; cancellation and reconciliation stay available."""
+        if type(stopped) is not bool or not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 256:
+            raise ValueError("Paper control requires an explicit reason")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not stopped:
+                self._require_reconciled(db, account_hash)
+            db.execute("INSERT INTO paper_controls VALUES (?,?) ON CONFLICT(account_hash) DO UPDATE SET stopped=excluded.stopped",
+                       (account_hash, int(stopped)))
+            db.execute("INSERT INTO paper_control_events(account_hash,created_at,stopped,reason) VALUES (?,?,?,?)",
+                       (account_hash, _timestamp(), int(stopped), reason.strip()))
+        return {"status": "stopped" if stopped else "resumed", "inflight_order_may_remain": True}
+
+    def require_running(self, account_hash):
+        with self.connect() as db:
+            self._require_running(db, account_hash)
+
     def claim(self, reviewed: dict, fresh: dict) -> None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            unresolved = db.execute(
-                """SELECT o.client_id FROM paper_orders o JOIN paper_batches b ON b.id=o.batch_id
-                   WHERE b.account_hash=? AND o.state IN
-                       ('sending', 'unknown', 'confirmation_required', 'cancel_requested', 'cancel_unknown')
-                   LIMIT 1""",
-                (reviewed["account_id_sha256"],),
-            ).fetchone()
-            if unresolved:
-                raise ValueError(f"Resolve the ambiguous broker order {unresolved['client_id']} before sending another batch")
+            self._require_running(db, reviewed["account_id_sha256"])
+            self._require_reconciled(db, reviewed["account_id_sha256"])
             try:
                 db.execute("""INSERT INTO paper_batches(id, account_hash, session, created_at, baseline)
                               VALUES(?, ?, ?, ?, ?)""", (
@@ -92,6 +132,8 @@ class PaperJournal:
         if values[:4] == (prior["state"], prior["order_id"], prior["broker_filled"], prior["detail"]):
             return
         db.execute("UPDATE paper_orders SET state=?, order_id=?, broker_filled=?, detail=? WHERE client_id=?", values)
+        db.execute("UPDATE paper_batches SET reconciliation=NULL WHERE id=(SELECT batch_id FROM paper_orders WHERE client_id=?)",
+                   (client_id,))
         db.execute("INSERT INTO paper_events(client_id, created_at, state, detail) VALUES(?, ?, ?, ?)",
                    (client_id, _timestamp(), state, detail))
 
@@ -99,6 +141,12 @@ class PaperJournal:
                    previous: set[str], order_id: int | None = None, broker_filled: int | None = None) -> None:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if state == "sending":
+                row = db.execute("""SELECT b.account_hash FROM paper_batches b
+                    JOIN paper_orders o ON o.batch_id=b.id WHERE o.client_id=?""", (client_id,)).fetchone()
+                if row is None:
+                    raise ValueError("Unknown Paper order")
+                self._require_running(db, row["account_hash"])
             self._write_state(db, client_id, state, detail, order_id=order_id,
                               broker_filled=broker_filled, expected=previous)
 
@@ -119,9 +167,11 @@ class PaperJournal:
                     ) != fill:
                         raise ValueError("Broker reused an execution ID with conflicting fill details")
                     db.execute("UPDATE paper_executions SET data=? WHERE execution_id=?", (payload, fill["execution_id"]))
+                    db.execute("UPDATE paper_batches SET reconciliation=NULL WHERE id=?", (batch_id,))
                 else:
-                    db.execute("INSERT OR IGNORE INTO paper_executions VALUES (?, ?, ?)",
-                               (fill["execution_id"], fill["client_id"], payload))
+                    if db.execute("INSERT OR IGNORE INTO paper_executions VALUES (?, ?, ?)",
+                                  (fill["execution_id"], fill["client_id"], payload)).rowcount:
+                        db.execute("UPDATE paper_batches SET reconciliation=NULL WHERE id=?", (batch_id,))
             for observation in observations:
                 self._write_state(db, **observation)
             for order in db.execute("SELECT * FROM paper_orders WHERE batch_id=?", (batch_id,)).fetchall():
@@ -149,12 +199,20 @@ class PaperJournal:
         return dict(row) | {"baseline": json.loads(row["baseline"]), "orders": orders, "fills": fills,
                             "reconciliation": json.loads(row["reconciliation"]) if row["reconciliation"] else None}
 
-    def save_reconciliation(self, batch_id: str, report: dict) -> dict:
+    def save_reconciliation(self, batch_id: str, report: dict, *, expected_batch=None) -> dict:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT reconciliation FROM paper_batches WHERE id=?", (batch_id,)).fetchone()
             if row is None:
                 raise ValueError("Paper batch not found")
+            if expected_batch is not None:
+                orders = [dict(item) | {"ticket": json.loads(item["ticket"])} for item in db.execute(
+                    "SELECT * FROM paper_orders WHERE batch_id=? ORDER BY rowid", (batch_id,))]
+                fills = [json.loads(item[0]) for item in db.execute(
+                    """SELECT e.data FROM paper_executions e JOIN paper_orders o ON e.client_id=o.client_id
+                       WHERE o.batch_id=? ORDER BY e.execution_id""", (batch_id,))]
+                if orders != expected_batch["orders"] or fills != expected_batch["fills"]:
+                    raise ValueError("Paper journal changed during reconciliation; poll again")
             if row["reconciliation"] is not None:
                 previous = json.loads(row["reconciliation"])
                 if datetime.fromisoformat(previous["observed_at"]) > datetime.fromisoformat(report["observed_at"]):
