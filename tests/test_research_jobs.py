@@ -11,6 +11,7 @@ from subprocess import Popen
 from unittest.mock import patch
 
 from atlaspm.research_jobs import job_file, list_jobs, queue_job, read_job
+from atlaspm import research_jobs as jobs
 
 
 class ResearchJobsTests(unittest.TestCase):
@@ -57,6 +58,10 @@ class ResearchJobsTests(unittest.TestCase):
         report = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(report["selected"][0]["symbol"], "XYZ")
         self.assertEqual(path.with_name("prices.csv").read_bytes(), data.encode())
+        self.assertEqual(jobs.verified_report(self.root,job_id),path)
+        path.write_text("{}",encoding="utf-8")
+        with self.assertRaisesRegex(ValueError,"REPORT_INTEGRITY"):
+            jobs.verified_report(self.root,job_id)
         self.assertEqual(list_jobs(self.root, "stock-screen")[0]["id"], job_id)
 
     def test_child_process_failure_retains_log_without_report(self):
@@ -68,3 +73,80 @@ class ResearchJobsTests(unittest.TestCase):
         self.assertEqual(job["status"], "failed")
         self.assertFalse(job_file(self.root, job_id, "report.json").exists())
         self.assertIn("CSV", job_file(self.root, job_id, "run.log").read_text(encoding="utf-8"))
+
+
+    def queued_fixture(self):
+        with patch.object(jobs.subprocess,"Popen") as launch,patch.object(jobs,"Thread"):
+            job=queue_job(self.root,"stock-screen","sample",{"prices":b"test"},
+                          {"as-of":"2023-12-29"})
+        self.assertEqual(read_job(self.root,job)["status"],"queued")
+        return job,job_file(self.root,job,"job.json").parent
+
+    def test_input_mutation_blocks_worker_before_cli(self):
+        job,folder=self.queued_fixture()
+        (folder/"prices.csv").write_bytes(b"tampered")
+        with patch.object(jobs.subprocess,"run") as run:
+            jobs._execute(self.root,job)
+            run.assert_not_called()
+        self.assertEqual(read_job(self.root,job)["status"],"failed")
+        self.assertIn("INPUT_INTEGRITY",read_job(self.root,job)["error"])
+        self.assertFalse((folder/"worker.lock").exists())
+
+    def test_request_mutation_and_preexisting_report_block(self):
+        job,folder=self.queued_fixture()
+        state=read_job(self.root,job)
+        state["options"]["top"]=10
+        jobs._save_state(folder,state)
+        with patch.object(jobs.subprocess,"run") as run:
+            jobs._execute(self.root,job)
+            run.assert_not_called()
+        self.assertIn("REQUEST_INTEGRITY",read_job(self.root,job)["error"])
+        job,folder=self.queued_fixture()
+        (folder/"report.json").write_text("{}",encoding="utf-8")
+        with patch.object(jobs.subprocess,"run") as run:
+            jobs._execute(self.root,job)
+            run.assert_not_called()
+        self.assertIn("PREEXISTING_REPORT",read_job(self.root,job)["error"])
+
+    def test_exclusive_worker_and_explicit_retry(self):
+        job,folder=self.queued_fixture()
+        lock=folder/"worker.lock"
+        lock.touch()
+        with patch.object(jobs.subprocess,"run") as run:
+            jobs._execute(self.root,job)
+            run.assert_not_called()
+        self.assertEqual(read_job(self.root,job)["status"],"queued")
+        state=read_job(self.root,job)
+        state["status"]="failed"
+        jobs._save_state(folder,state)
+        with self.assertRaisesRegex(ValueError,"STOPPED_FAILED_WORKER"):
+            jobs.retry_job(self.root,job)
+        lock.unlink()
+        with patch.object(jobs.subprocess,"Popen"),patch.object(jobs,"Thread"):
+            retry=jobs.retry_job(self.root,job)
+        self.assertNotEqual(retry,job)
+        self.assertEqual(read_job(self.root,retry)["inputs"]["prices"]["sha256"],
+                         state["inputs"]["prices"]["sha256"])
+        self.assertEqual(read_job(self.root,job)["status"],"failed")
+
+    def test_copy_budget_and_invalid_argument(self):
+        with patch.object(jobs,"MAX_INPUT_BYTES",2),patch.object(jobs.subprocess,"Popen") as launch:
+            job=queue_job(self.root,"stock-screen","sample",{"prices":b"123"},
+                          {"as-of":"2023-12-29"})
+            launch.assert_not_called()
+        self.assertEqual(read_job(self.root,job)["status"],"failed")
+        with self.assertRaisesRegex(ValueError,"OPTION"):
+            queue_job(self.root,"stock-screen","sample",{},{"top":"--output"})
+
+    def test_change_during_run_does_not_seal_result(self):
+        job,folder=self.queued_fixture()
+        def mutate(*args,**kwargs):
+            (folder/"prices.csv").write_bytes(b"altered")
+            (folder/"report.json").write_text("{}",encoding="utf-8")
+            from types import SimpleNamespace
+            return SimpleNamespace(returncode=0)
+        with patch.object(jobs.subprocess,"run",side_effect=mutate):
+            jobs._execute(self.root,job)
+        self.assertEqual(read_job(self.root,job)["status"],"failed")
+        with self.assertRaisesRegex(ValueError,"COMPLETED_EVIDENCE"):
+            jobs.verified_report(self.root,job)
