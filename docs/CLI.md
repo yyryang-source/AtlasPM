@@ -1,6 +1,6 @@
 # AtlasPM CLI: stable commands, organized by domain
 
-There are **58 top-level CLI commands**, available through `atlaspm <command>` or `python -m atlaspm.cli <command>`. The selection, quant and broker routers register 56 commands. The main entry point also registers `market-db` and `portfolio-engine`.
+There are **62 top-level CLI commands**, available through `atlaspm <command>` or `python -m atlaspm.cli <command>`. The selection, quant and broker routers register 57 commands. The main entry point also registers `market-db`, `portfolio-engine`, `autonomous-alpha`, `architecture` and `lifecycle-review`.
 
 ```text
 src/atlaspm/
@@ -43,3 +43,17 @@ The local `local_data/` folder holds uncommitted private market/broker files; no
 ## Autonomous Alpha research (stage 4, incremental)
 
 See [Autonomous Alpha Engine](AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.
+
+## Offline foundation and declared lifecycle journal
+
+~~~powershell
+& $py -m atlaspm.cli architecture
+& $py -m atlaspm.cli lifecycle-review create --review-id review-001
+& $py -m atlaspm.cli lifecycle-review inspect --review-id review-001
+# Append only with the current revision_sha256 returned by create/inspect:
+& $py -m atlaspm.cli lifecycle-review append --review-id review-001 --step mandate --evidence-ref local-review-001 --outcome reviewed --expected-revision SHA256_FROM_INSPECT
+~~~
+
+The journal stores only declared review metadata below local_data/runs/lifecycle_reviews.
+Use a fresh review ID after a terminal block. No order, source verification,
+training permission or real execution is provided by this command.
