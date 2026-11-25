@@ -170,7 +170,7 @@ def prepare_real_research(start_month,end_month,*,execute=False,warmup_months=2,
         result["maintenance_started"]=True
         maintained=maintain(warm_start,end_month,execute=True,memory=memory,threads=threads)
         result["maintenance_months"]=[{k:v for k,v in row.items() if k in
-                                      {"month","bars","audit","factors","status"}}
+                                      {"month","bars","audit","factors","status","session_projection","error"}}
                                       for row in maintained["months"]]
         if maintained["all_requested_months_processed"] is not True:
             result["status"]="DATA_PREPARATION_MAINTENANCE_BLOCKED"

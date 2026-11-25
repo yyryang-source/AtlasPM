@@ -139,6 +139,45 @@ def diagnose(month: str, prior: dict | None = None):
             "other_structural_issues": other_issues, **GUARDS}
 
 
+def calendar_digest(month):
+    return hashlib.sha256(json.dumps(calendar_rows(month), default=str).encode()).hexdigest()
+
+
+def install_early_close_projection(cx, month):
+    """Only a fully reconciled, pure early-close disagreement is eligible.
+
+    Fresh V3 audit and V4 diagnostic; do not trust a caller's report or
+    change canonical QC. The source is an unverified cross-venue feed.
+    """
+    path = _source(month)
+    before = _signature(path)
+    prior = qc.audit(month, session="rth", save=False)
+    report = diagnose(month, prior)
+    counts = report["counts"]
+    excluded = counts.get("AFTER_EARLY_CLOSE", 0)
+    retained = counts.get("FULL_NYSE_SLOT", 0)
+    if (prior["quality_status"] != "STRUCTURAL_QC_FAILED"
+            or prior["structural_issues"] != [f"OUTSIDE_NYSE_SESSIONS:{excluded}"]
+            or prior["missing_whole_trading_dates"]
+            or report["status"] != "SESSION_DIAGNOSTIC_COMPLETE"
+            or report["prior_counts_match"] is not True
+            or set(counts) != {"AFTER_EARLY_CLOSE", "FULL_NYSE_SLOT"}
+            or excluded <= 0 or retained <= 0
+            or retained + excluded != report["total_bars"]
+            or report["source_signature"] != before):
+        raise ValueError("EARLY_CLOSE_PROJECTION_NOT_ELIGIBLE")
+    view = install_research_view(cx, month)
+    if (cx.execute(f"SELECT count(*) FROM {view}").fetchone()[0] != retained
+            or calendar_digest(month) != report["calendar_sha256"]
+            or _signature(path) != before):
+        raise ValueError("EARLY_CLOSE_PROJECTION_RECONCILIATION_FAILED")
+    return view, {"policy": "nyse_full_slots_early_close_v1",
+                  "calendar_sha256": report["calendar_sha256"],
+                  "canonical_quality_status": prior["quality_status"],
+                  "canonical_bars": report["total_bars"],
+                  "retained_bars": retained, "excluded_bars": excluded}
+
+
 def _prior(month):
     path = private_path(hf.ROOT / "quality" / "audits" / "session=rth" / f"{month}.json")
     if not path.is_file():

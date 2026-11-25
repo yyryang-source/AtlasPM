@@ -434,3 +434,16 @@ keys, nulls and numeric tolerances (1e-10 times max(1, absolute values)),
 and reports mismatched rows. Up to three target months per call. It does
 not replace files or re-aggregate daily projections from raw bars. This is
 same-algorithm reproducibility, not independent data or formula validation.
+
+### Narrow early-close research projection
+
+Canonical RTH files and V3 QC remain unchanged. If a month fails structural QC,
+maintenance may derive a daily research partition only when a fresh V3 audit
+and V4 diagnostic reconcile every excluded bar to AFTER_EARLY_CLOSE, with no
+other structural issue, missing whole session or partial boundary bucket.
+The existing V4 full-slot view is used before daily OHLCV aggregation.
+Excluded/retained counts and calendar digest are bound in daily metadata;
+source and derived counts are reconciled. Stale calendar evidence invalidates
+factor lineage. An existing projected daily partition is never silently
+replaced by an unprojected one. This is an exploratory NYSE projection,
+not primary venue verification or permission to fit or trade.
