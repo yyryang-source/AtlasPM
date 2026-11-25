@@ -109,3 +109,37 @@ class CurrentResearchTests(unittest.TestCase):
             out=self.run_view()
         self.assertEqual(out["securities"][0]["category_evidence_counts"],{"sec":1})
         self.assertEqual(out["excluded"]["specialist_rights_unconfirmed"],1)
+
+
+    def test_actual_queue_completion_clock_and_empty_untyped_dossier(self):
+        from atlaspm.research import intelligence
+        stamp=(datetime.now(UTC)-timedelta(seconds=1)).isoformat()
+        event=normalize({"provider":"sec","source_id":"actual","kind":"sec_disclosure",
+            "subjects":["ticker:AAA"],"published_at":stamp,"first_available_at":stamp,
+            "effective_at":None,"evidence_sha256":"a"*64,"delivery":"file","expiry_seconds":3600},
+            received_at=stamp)
+        binding={"kind":"sec_disclosure","subject":"ticker:AAA",
+                 "identity":{"security_id":self.sid,"provider_id":"0000000001","asset_type":"stock"},
+                 "task":{"route":"sec_local","params":{"start":"2020-01-01","end":"2020-01-09",
+                                                       "symbols":["0000000001"]}}}
+        queue.enqueue([event])
+        cutoff=datetime.now(UTC).isoformat()
+        with patch.object(intelligence,"_local_data_review",return_value={
+                "research_only":True,"subject_row_counts":{"0000000001":1}}):
+            self.assertEqual(queue.drain(as_of=cutoff,local_bindings=[binding])["completed"],1)
+        item=next(iter(queue._read_state(queue.PATH).values()))
+        self.assertIn("stored_at",item)
+        self.assertIn("review_completed_at",item["report"])
+        current_out=current.inspect(as_of=datetime.now(UTC).isoformat(),security_ids=[self.sid])
+        self.assertEqual(current_out["securities"][0]["category_evidence_counts"],{"sec":1})
+        earlier=current.inspect(as_of=stamp,security_ids=[self.sid])
+        self.assertEqual(earlier["securities"][0]["receipts"],[])
+        # A previous-style untyped association with no accepted report does not
+        # make a healthy typed dossier unreadable.
+        a=self.add("empty","sec")
+        d=a["report"]["joint_specialist_dossiers"][0]
+        d.update(security_id="ticker:AAA",research_ids=[],decision_sha256=None,
+                 coverage=dict.fromkeys(CATEGORIES,"missing"))
+        a["report"]["local_specialist_receipts"]=[]
+        out=self.run_view()
+        self.assertEqual(out["excluded"]["untyped_empty_dossier"],1)

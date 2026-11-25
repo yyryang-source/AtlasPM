@@ -80,13 +80,19 @@ def _dossier_rows(report,event,completed,now,excluded):
                 or any(v not in {"descriptive_reviewed","missing"} for v in d["coverage"].values())
                 or d["asset_type"] not in ASSETS or _time(d["as_of"])!=_time(report["as_of"])):
             raise ValueError("CURRENT_RESEARCH_DOSSIER_CONTRACT")
-        sid=validate_identity(d["security_id"],d["security_id"].startswith("SYN:"))
-        if sid.startswith("SYN:")!=(event["provider"]=="synthetic"):
-            raise ValueError("CURRENT_RESEARCH_FIXTURE_SCOPE")
         ids=d["research_ids"]
         if (not isinstance(ids,list) or len(ids)>4 or any(not _sha(x) for x in ids)
                 or len(set(ids))!=len(ids)):
             raise ValueError("CURRENT_RESEARCH_DOSSIER_IDS")
+        try:
+            sid=validate_identity(d["security_id"],d["security_id"].startswith("SYN:"))
+        except ValueError:
+            if ids or any(v!="missing" for v in d["coverage"].values()):
+                raise
+            excluded["untyped_empty_dossier"]+=1
+            continue
+        if sid.startswith("SYN:")!=(event["provider"]=="synthetic"):
+            raise ValueError("CURRENT_RESEARCH_FIXTURE_SCOPE")
         if ids and not _sha(d["decision_sha256"]):
             raise ValueError("CURRENT_RESEARCH_DECISION_DIGEST")
         # Match exact redacted receipts to dossier claims. Never use a bare
@@ -208,7 +214,8 @@ def inspect(*,as_of,path=queue.PATH,max_review_age_seconds=86400,security_ids=No
                         "action":"NO_TRADE","numeric_count":0,"trade_authorized":False,
                         "identity_independently_verified":False})
     return {"schema":"atlaspm_current_research_v1",**FLAGS,"as_of":now.isoformat(),
-            "queue_sha256":revision,"excluded":dict(excluded),"securities":results,
+            "queue_sha256":revision,"queue_initialized":revision is not None,
+            "excluded":dict(excluded),"securities":results,
             "historical_point_in_time_verified":False,"current_provider_connection_verified":False,
             "scope":"retained_event_receipts_only","trade_authorized":False}
 
