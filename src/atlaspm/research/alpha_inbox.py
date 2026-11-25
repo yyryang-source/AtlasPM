@@ -22,6 +22,7 @@ def connect(path):
     try:
         db.execute("CREATE TABLE IF NOT EXISTS evidence (id TEXT PRIMARY KEY, body TEXT NOT NULL, expires TEXT NOT NULL, received TEXT NOT NULL)")
         db.execute("CREATE INDEX IF NOT EXISTS evidence_expiry ON evidence(expires)")
+        db.execute("CREATE TABLE IF NOT EXISTS source_seen (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY, input_hash TEXT NOT NULL, body TEXT NOT NULL)")
         db.commit()
         return db
@@ -30,12 +31,14 @@ def connect(path):
         raise
 
 
-def ingest(*, provider, text, symbols, received_at, ttl=86400, path=PATH):
-    from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, local_rights, require_enabled
+def ingest(*, provider, text, symbols, received_at, ttl=86400, path=PATH, source_revision=None):
+    from atlaspm.data.provider_policy import ROLES, RIGHTS_ENV, RESTRICTED, local_rights, require_enabled
     import os
     if provider not in ROLES:
         raise ValueError("Unknown source")
     require_enabled(provider)
+    if provider in RESTRICTED and provider not in RIGHTS_ENV:
+        raise ValueError("Source has no approved local AI rights policy")
     if provider in RIGHTS_ENV:
         local_rights(provider, retention=True)
         if os.environ.get("ATLASPM_" + provider.upper() + "_LOCAL_AI_RIGHTS") != "1":
@@ -53,7 +56,13 @@ def ingest(*, provider, text, symbols, received_at, ttl=86400, path=PATH):
     row = {"provider": provider, "text": text, "symbols": sorted(set(symbols)),
            "received_at": received.isoformat(), "expires_at": (received+timedelta(seconds=ttl)).isoformat()}
     row["evidence_id"] = _digest(row)
+    if source_revision is not None and (not isinstance(source_revision,str) or not 1 <= len(source_revision) <= 256):
+        raise ValueError("Invalid source revision")
     with closing(connect(path)) as db, db:
+        if source_revision is not None:
+            key = _digest([provider, source_revision])
+            if not db.execute("INSERT OR IGNORE INTO source_seen VALUES(?,?)",(key,row["evidence_id"])).rowcount:
+                return 0
         cur = db.execute("INSERT OR IGNORE INTO evidence VALUES(?,?,?,?)",
                          (row["evidence_id"], json.dumps(row,ensure_ascii=False),row["expires_at"],row["received_at"]))
         return cur.rowcount
