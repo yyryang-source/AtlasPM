@@ -145,3 +145,11 @@ quotes, solves bounded bid/mid/ask implied vols and computes Greeks and
 joint spot/volatility shock P&L. American options, missing quotes and
 unidentified IVs remain explicitly blocked. No surface fitting or actual
 margin calculation is implied.
+
+This consolidated candidate uses a 1258-pass floor with --integrated on
+Windows and Linux. Do not interpret passing synthetic tests as all-project
+production acceptance. Independent historical source rights/identity/action
+coverage, unconsumed real holdout efficacy, authenticated IBKR Paper lifecycle,
+production observability, backup/recovery and operator authorization remain
+separate release gates. Unsupported American/multi-leg option execution and
+observed yield curve calibration are not claimed by these diagnostics.
