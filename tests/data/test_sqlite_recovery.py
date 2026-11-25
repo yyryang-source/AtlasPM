@@ -78,3 +78,33 @@ class SQLiteRecoveryTests(unittest.TestCase):
         self.assertFalse((recovery.ROOT/"partial"/"manifest.json").exists())
         with self.assertRaises(FileNotFoundError):
             recovery.verify("partial",**self.opts)
+
+
+    def test_registry_backup_restore_checks_record_contracts(self):
+        from atlaspm.research.training_registry import register,FLAGS,load
+        from atlaspm.research.training_artifacts import ModelArtifacts,SCHEMA
+        p=Path("local_data/research.sqlite3")
+        run_id=register(p,{"fixture":True},{**FLAGS,"dataset_sha256":"a"*64})
+        store=ModelArtifacts(p)
+        artifact=store.save({**FLAGS,"schema":SCHEMA,"model":"historical_mean","weights":[]})
+        a=recovery.backup("registry",registry_path=p,**self.opts)
+        b=recovery.restore_isolated("registry","registry-copy",**self.opts)
+        copy=Path(b["folder"])/"market.sqlite3"
+        self.assertEqual(a["scope"],"research_registry")
+        self.assertEqual(load(copy,run_id)["run_id"],run_id)
+        self.assertEqual(ModelArtifacts(copy).load(artifact)["model"],"historical_mean")
+        self.assertFalse(b["live_execution_enabled"])
+
+    def test_registry_corruption_unknown_tables_block_sealing(self):
+        from atlaspm.research.training_registry import register,FLAGS
+        p=Path("local_data/research.sqlite3")
+        register(p,{}, {**FLAGS,"dataset_sha256":"a"*64})
+        with closing(sqlite3.connect(p)) as con,con:
+            con.execute("UPDATE research_runs SET report_json='{}'")
+        with self.assertRaises(ValueError):
+            recovery.backup("bad-registry",registry_path=p,**self.opts)
+        self.assertFalse((recovery.ROOT/"bad-registry"/"manifest.json").exists())
+        with closing(sqlite3.connect(p)) as con,con:
+            con.execute("CREATE TABLE account_secret(value TEXT)")
+        with self.assertRaisesRegex(ValueError,"REGISTRY_SCHEMA"):
+            recovery.backup("unknown",registry_path=p,**self.opts)
