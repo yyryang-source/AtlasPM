@@ -247,7 +247,7 @@ def artifact_decision(artifacts, *, security_id, as_of, future_session_dates, we
         sessions=payload["sessions"]
         if (not isinstance(sessions,list) or not 1<=len(sessions)<=252 or
                 any(_timestamp(s["close_at"])>cutoff for s in sessions) or
-                _timestamp(sessions[-1]["close_at"])!=cutoff):
+                _timestamp(sessions[-1]["close_at"]).date()!=cutoff.date()):
             raise ValueError("ARTIFACT_DECISION_WINDOW_CUTOFF")
         store=ModelArtifacts(private_path(Path(task["artifact_db"]),exists=True))
         record=store.load(key)
@@ -266,8 +266,9 @@ def artifact_decision(artifacts, *, security_id, as_of, future_session_dates, we
                 raise ValueError("ARTIFACT_DECISION_INCOMPLETE_IDENTITY")
             window.append({"date":session["date"],"close_at":session["close_at"],"asset":asset})
         stamp=cutoff.isoformat()
+        feature_stamp=_timestamp(sessions[-1]["close_at"]).isoformat()
         evidence=[{"sha256":digest(window),"source":"synthetic","rights_status":"synthetic_test_only",
-                   "available_at":stamp,"received_at":stamp},
+                   "available_at":feature_stamp,"received_at":feature_stamp},
                   {"sha256":key,"source":"synthetic","rights_status":"synthetic_test_only",
                    "available_at":None,"received_at":stamp}]
         raw={"security_id":security_id,"asset_type":"stock","category":"factor",
@@ -629,7 +630,7 @@ def validate_local_bindings(bindings):
     """Operator-supplied event routing only; never inferred vendor mapping."""
     from atlaspm.research.financial_events import KINDS
     allowed={
-        "volume_anomaly":{"technical_local","factor_local"},
+        "volume_anomaly":{"technical_local","factor_local","artifact_decision"},
         "sec_disclosure":{"sec_local","fundamental_local"},
         "earnings":{"fundamental_local"},
         "earnings_forecast":{"institutional"},
@@ -639,7 +640,7 @@ def validate_local_bindings(bindings):
         "credit_outlook":{"credit_history"},
         "credit_watch":{"credit_history"},
         "bond_trade":{"bond_local"},
-        "index_change":{"factor_local"},
+        "index_change":{"factor_local","artifact_decision"},
     }
     if not isinstance(bindings,list) or len(bindings)>16:
         raise ValueError("LOCAL_BINDING_CAPACITY")
@@ -652,6 +653,8 @@ def validate_local_bindings(bindings):
             or b["task"]["route"] not in allowed.get(b["kind"],set())
             or not isinstance(b["task"]["params"],dict)):
             raise ValueError("INVALID_LOCAL_RESEARCH_BINDING")
+        if b["task"]["route"]=="artifact_decision" and b["task"]["params"].get("security_id")!=b["subject"]:
+            raise ValueError("ARTIFACT_BINDING_IDENTITY_MISMATCH")
         key=(b["kind"],b["subject"])
         if key in keys:
             raise ValueError("DUPLICATE_LOCAL_RESEARCH_BINDING")
