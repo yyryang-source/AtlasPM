@@ -72,6 +72,17 @@ class ProtectivePutTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Insufficient cash for option purchase: B"):
             self._run(cash=472)
 
+    def test_roll_respects_cash_reserve_before_receipt(self):
+        options = OptionHistory(self.contracts, self.quotes, self.settlements)
+        settings = ProtectivePutSettings("SPY", 100, 500, roll_sessions=2, target_dte=30,
+                                         minimum_cash_usd=28)
+        with self.assertRaisesRegex(ValueError, "Insufficient cash for option purchase: B"):
+            compare_protective_put(options, self.marks, settings)
+        settings = ProtectivePutSettings("SPY", 100, 500, roll_sessions=2, target_dte=30,
+                                         minimum_cash_usd=27)
+        result=compare_protective_put(options,self.marks,settings)
+        self.assertTrue(all(r["cash_available_usd"]>=27 for r in result["curve"]))
+
     def test_multiasset_matched_funding_treasury_closure_and_maturity(self):
         root = self.contracts.parent
         treasury_contracts = root / "treasury_contracts.csv"
@@ -97,6 +108,11 @@ class ProtectivePutTest(unittest.TestCase):
             options, treasury, self.marks, put, settings, treasury_closed=frozenset({date(2024, 1, 10)}),
             stress_window=(date(2024, 1, 9), date(2024, 1, 11)),
         )
+        self.assertTrue(all(r["cash_available_usd"]>=500 for r in result["put_replay"]["curve"]))
+        with self.assertRaisesRegex(ValueError, "Insufficient cash for option purchase"):
+            compare_multiasset_hedge(options, treasury, self.marks, put,
+                MultiassetSettings(11900, 500, "999999990", 1000),
+                treasury_closed=frozenset({date(2024,1,10)}))
         opening = result["opening"]
         self.assertEqual(opening["stock_treasury"], opening["stock_treasury_put"])
         self.assertGreater(opening["stock_only"]["stock_shares"], opening["stock_treasury"]["stock_shares"])

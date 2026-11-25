@@ -153,3 +153,30 @@ coverage, unconsumed real holdout efficacy, authenticated IBKR Paper lifecycle,
 production observability, backup/recovery and operator authorization remain
 separate release gates. Unsupported American/multi-leg option execution and
 observed yield curve calibration are not claimed by these diagnostics.
+
+### Covered hedge funding and terminal strategy comparison
+
+Rolling option replay optionally preserves minimum_cash_usd before each
+purchase, sale fee and physical-call cash debit. Mixed stock/Treasury/put
+research passes the portfolio reserve to the option sleeve; unsettled
+option credits and Treasury cash receipts cannot fund the sleeve. This is
+conservative separate-sleeve funding, not actual brokerage margin.
+The new hedge_scenarios.compare_expiry_hedges function compares fixed
+unhedged, protective-put, put-spread and collar terminal payoffs using
+synchronized fresh bid/ask observations, full share coverage and an
+explicit common European cash-settled expiry. No short execution or
+settlement is implemented: the short legs are terminal payoff assumptions,
+not trade drafts. Premium credits cannot fund debits. Explicit scenarios
+are not probabilities or real historical strategy evidence.
+
+Multi-horizon research optionally accepts monitoring (window_dates,
+minimum_dates, coverage, drift_ratio, minimum_improvement, patience,
+cooldown_dates). The policy is bound into the selection lock. A fixed
+historical-mean baseline is fit for diagnostics only, not another candidate
+selection. The existing matured-label monitor and review scheduler are
+reused separately per horizon; only complete matured cohorts are used and
+review requests cannot launch retraining or promotion. The additional
+baseline fits count toward the resource budget. Default behavior is unchanged.
+The hedge scenario module has a read-only CLI using local_data inputs:
+`python -m atlaspm.strategies.options.hedge_scenarios --contracts ... --quotes ... --settlements ... --plan ...`.
+The plan is the explicit JSON keyword arguments of compare_expiry_hedges.

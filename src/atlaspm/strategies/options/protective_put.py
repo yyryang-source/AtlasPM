@@ -37,6 +37,7 @@ class ProtectivePutSettings:
     roll_sessions: int = 21
     max_quote_age_minutes: int = 1
     eod_snapshot: bool = False
+    minimum_cash_usd: float = 0.0
 
 
 def load_stock_marks(path: Path) -> list[StockMark]:
@@ -129,7 +130,8 @@ def compare_protective_put(history: OptionHistory, marks: list[StockMark],
     orders.append({"at": end.at.isoformat(), "contract_id": held[0], "side": "sell", "contracts": held[1],
                    "cash_at": end.sale_cash_at.isoformat()})
     replay = replay_long_options(history, {
-        "initial_cash_usd": settings.cash_usd, "initial_shares": {settings.underlying: settings.shares},
+        "initial_cash_usd": settings.cash_usd, "minimum_cash_usd": settings.minimum_cash_usd,
+        "initial_shares": {settings.underlying: settings.shares},
         "fee_per_contract_usd": settings.fee_per_contract_usd, "max_quote_age_minutes": settings.max_quote_age_minutes,
         "orders": orders, "valuation_times": [mark.at.isoformat() for mark in marks],
     })

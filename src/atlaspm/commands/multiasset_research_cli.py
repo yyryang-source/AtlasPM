@@ -31,6 +31,7 @@ def _put_settings(args: argparse.Namespace, cash_usd: float) -> ProtectivePutSet
         fee_per_contract_usd=args.fee_per_contract_usd, otm_fraction=args.otm_fraction,
         target_dte=args.target_dte, max_dte=args.max_dte, roll_sessions=args.roll_sessions,
         max_quote_age_minutes=args.max_quote_age_minutes, eod_snapshot=args.eod_snapshot,
+        minimum_cash_usd=getattr(args,"minimum_cash_usd",0.0),
     )
 
 
@@ -154,6 +155,7 @@ def register_parsers(sub) -> None:
     protective_put = sub.add_parser("protective-put-backtest", parents=[put_arguments],
                                      help="Compare a rolling put hedge with the same stock holding")
     protective_put.add_argument("--cash-usd", type=float, required=True)
+    protective_put.add_argument("--minimum-cash-usd",type=float,default=0.0)
     protective_put.add_argument("--output", type=Path, default=Path("local_data/protective_put_backtest.json"))
 
     treasury = sub.add_parser("treasury-replay", help="Mark a settled Treasury holding and replay its cash flows")

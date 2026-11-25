@@ -88,7 +88,8 @@ def compare_multiasset_hedge(
                            "entry_cost_usd": mixed_fee},
     }
     opening["stock_treasury_put"] = opening["stock_treasury"].copy()
-    hedge = compare_protective_put(option_history, marks, replace(put_settings, cash_usd=mixed_cash))
+    hedge = compare_protective_put(option_history, marks, replace(put_settings, cash_usd=mixed_cash,
+                                                            minimum_cash_usd=max(minimum_cash, put_settings.minimum_cash_usd)))
 
     curve = []
     for treasury_mark, hedge_mark in zip(treasury["valuations"], hedge["curve"], strict=True):
