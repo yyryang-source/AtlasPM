@@ -32,7 +32,7 @@ def main():
         architecture=json.loads(run("-m","atlaspm.cli","architecture"))
         if architecture["status"]!="OFFLINE_FOUNDATION_CONTRACT_PASS" or architecture["errors"]:
             raise RuntimeError("WHEEL_ARCHITECTURE_FAILED")
-        for name in ("atlaspm.data.sqlite_recovery","atlaspm.framework.runtime_health",
+        for name in ("atlaspm.data.sqlite_recovery","atlaspm.data.lake_recovery","atlaspm.framework.runtime_health",
                      "atlaspm.research.current_research"):
             run("-m",name,"--help")
         print(json.dumps({"status":"INSTALLED_WHEEL_SMOKE_PASS",
