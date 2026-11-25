@@ -24,6 +24,16 @@ def observations(series, *, start, end, as_of, gateway=DEFAULT_GATEWAY):
                        "realtime_end": decision.isoformat(), "file_type": "json",
                        "limit": 1000, "sort_order": "asc"})
     response = gateway.fetch("fred", "https://api.stlouisfed.org/fred/series/observations?" + query)
+    return analyze_observations(response, series=series, start=start, end=end, as_of=as_of)
+
+
+def analyze_observations(response, *, series, start, end, as_of):
+    """Validate the same actual response for a live fetch or authorized local capture."""
+    if response.provider != "fred" or not isinstance(series,str) or not re.fullmatch(r"[A-Za-z0-9_]{1,64}",series):
+        raise ValueError("Invalid FRED response scope")
+    first,last,decision=(date.fromisoformat(value) for value in (start,end,as_of))
+    if not first<=last<decision<=date.today() or (last-first).days>366:
+        raise ValueError("Invalid FRED observation dates")
     data = response.data()
     rows = data.get("observations")
     if not isinstance(rows, list) or type(data.get("count")) is not int or data["count"] != len(rows) or len(rows) > 1000:
