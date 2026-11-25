@@ -185,6 +185,15 @@ class UnifiedPipelineTests(unittest.TestCase):
             repeat=pipeline.maintain(month,month,execute=True)
             self.assertEqual(repeat["months"][0]["factors"],"existing")
             self.assertFalse(repeat["approved_for_model_training"])
+            # A cached projected daily partition cannot authorize a newly
+            # failed original audit; leave the prior derived file intact.
+            saved=daily.read_bytes()
+            with patch.object(v4.qc,"audit",return_value={**prior,
+                       "structural_issues":["OUTSIDE_NYSE_SESSIONS:1","NO_CONVERSION_QC_METADATA"]}):
+                rejected=pipeline.maintain(month,month,execute=True)
+            self.assertFalse(rejected["all_requested_months_processed"])
+            self.assertEqual(daily.read_bytes(),saved)
+            self.assertEqual(bars.read_bytes(),before)
             with patch.object(v4.qc,"_calendar",return_value=[(day,stamp(9,30),stamp(13,5))]):
                 changed=pipeline.factor_preflight(month,month)
             self.assertFalse(changed["structural_preflight_passed"])
