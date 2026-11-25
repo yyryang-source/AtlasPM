@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import date
 from math import exp, fsum, isfinite
-from bisect import bisect_left
 from typing import Any
 
 from atlaspm.data.treasury_history import TreasuryHistory, TreasuryPayment

@@ -136,3 +136,12 @@ the execution model limits is rejected, never silently clipped.
 Nominal Treasury replay optionally accepts curve_node_shocks_bps (numeric
 maturity-year keys): linear interpolation of zero-rate shocks on the existing
 flat fitted base and key-rate DV01. This is not a calibrated observed curve.
+
+European option risk diagnostics are available through
+atlaspm.strategies.options.option_risk.review_chain (existing OptionHistory,
+explicit as-of, spot and availability, continuous rate and dividend yield).
+It checks 1–128 contracts of one underlying, selects only fresh same-day
+quotes, solves bounded bid/mid/ask implied vols and computes Greeks and
+joint spot/volatility shock P&L. American options, missing quotes and
+unidentified IVs remain explicitly blocked. No surface fitting or actual
+margin calculation is implied.
