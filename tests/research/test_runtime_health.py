@@ -97,3 +97,15 @@ class RuntimeHealthTests(unittest.TestCase):
                 h.backup("denied")
             rights.assert_called_once_with("ibkr",retention=True)
         self.assertFalse((h.ROOT/"denied.json").exists())
+
+
+    def test_redirected_recovery_directory_rejected(self):
+        orchestrator.set_control("stop")
+        actual=h.private_path
+        def redirected(p,*args,**kwargs):
+            if p==h.ROOT:
+                return actual(queue.PATH.parent)
+            return actual(p,*args,**kwargs)
+        with patch.object(h,"private_path",side_effect=redirected):
+            with self.assertRaisesRegex(ValueError,"REDIRECTED_DIRECTORY"):
+                h.backup("financial_event_queue")

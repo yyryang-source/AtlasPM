@@ -150,3 +150,19 @@ class ResearchJobsTests(unittest.TestCase):
         self.assertEqual(read_job(self.root,job)["status"],"failed")
         with self.assertRaisesRegex(ValueError,"COMPLETED_EVIDENCE"):
             jobs.verified_report(self.root,job)
+
+
+    def test_retry_copy_must_match_reviewed_snapshot(self):
+        job,folder=self.queued_fixture()
+        state=read_job(self.root,job)
+        state["status"]="failed"
+        jobs._save_state(folder,state)
+        original=jobs._verified_inputs
+        def change(*args):
+            sources=original(*args)
+            sources["prices"].write_bytes(b"new")
+            return sources
+        with patch.object(jobs,"_verified_inputs",side_effect=change),patch.object(jobs.subprocess,"Popen") as launch:
+            retry=jobs.retry_job(self.root,job)
+            launch.assert_not_called()
+        self.assertEqual(read_job(self.root,retry)["status"],"failed")

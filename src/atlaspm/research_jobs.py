@@ -190,11 +190,13 @@ def retry_job(root,job_id):
     if state["status"]!="failed" or (folder/"worker.lock").exists():
         raise ValueError("RESEARCH_JOB_RETRY_REQUIRES_STOPPED_FAILED_WORKER")
     sources=_verified_inputs(folder,state)
-    return queue_job(root,state["command"],state["label"],sources,state["options"])
+    return queue_job(root,state["command"],state["label"],sources,state["options"],
+                     expected_inputs=state["inputs"])
 
 
 def queue_job(
     root: Path, command: str, label: str, inputs: dict[str, Path | bytes], options: dict,
+    *, expected_inputs=None,
 ) -> str:
     _validate_request(command,label,inputs,options)
     job_id = uuid4().hex
@@ -223,6 +225,11 @@ def queue_job(
                 "file": snapshot.name, "sha256": digest.hexdigest(), "bytes":size,
                 "source": source.name if isinstance(source, Path) else "页面导入或内置样本",
             }
+        if expected_inputs is not None and (
+                set(expected_inputs)!=set(state["inputs"]) or any(
+                    any(expected_inputs[k].get(field)!=v[field] for field in ("sha256","bytes"))
+                    for k,v in state["inputs"].items())):
+            raise ValueError("RESEARCH_JOB_RETRY_SNAPSHOT_CHANGED")
         state["request_sha256"]=_request_hash(state)
         _save_state(folder, state)
         argv = [sys.executable, "-X", "utf8", "-m", "atlaspm.research_jobs", job_id]

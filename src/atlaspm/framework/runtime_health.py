@@ -121,6 +121,8 @@ def _recovery_path(identifier):
                                       *(f"LPT{i}" for i in range(1,10))}):
         raise ValueError("RECOVERY_ID")
     root=private_path(ROOT)
+    if root!=Path.cwd().resolve()/ROOT:
+        raise ValueError("RECOVERY_REDIRECTED_DIRECTORY")
     p=private_path(ROOT/(identifier+".json"))
     # Recovery cannot alias an existing source or redirected file.
     if p.parent!=root or p.name!=identifier+".json" or (ROOT/(identifier+".json")).is_symlink():
