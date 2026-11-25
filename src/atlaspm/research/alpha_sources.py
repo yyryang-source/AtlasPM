@@ -1,5 +1,6 @@
 """Approved source adapters into the common alpha inbox, no separate AI calls."""
 import json
+from atlaspm.research.financial_events import _digest
 
 from atlaspm.research.alpha_inbox import ingest
 from atlaspm.research.options_intelligence import fetch_alerts
@@ -10,7 +11,8 @@ def options_once(*, limit=100):
     report=fetch_alerts(limit=limit)
     stamp=report["transport"]["retrieved_at_utc"]
     return sum(ingest(provider="unusual_whales",text=json.dumps(row,ensure_ascii=False,sort_keys=True),
-                      symbols=[row["ticker"]],received_at=stamp,ttl=300)
+                      symbols=[row["ticker"]],received_at=stamp,ttl=300,
+                      source_revision=_digest(row))
                for row in report["alerts"])
 
 
@@ -19,7 +21,8 @@ def news_once(provider, month, *, as_of):
         raise ValueError("Unsupported news source")
     report=review(provider,month,as_of=as_of)
     return sum(ingest(provider=provider,text=json.dumps(row,ensure_ascii=False,sort_keys=True),
-                      symbols=row["symbols"],received_at=row["observed_at"],ttl=86400)
+                      symbols=row["symbols"],received_at=row["observed_at"],ttl=86400,
+                      source_revision=row["evidence_id"])
                for row in report["events"] if row["fresh"])
 
 
@@ -66,5 +69,6 @@ def institutional_once(*, subject, symbol, as_of):
         if len(encoded) > 24000:
             raise ValueError("Institutional claims exceed context budget")
         added += ingest(provider="investment_banks", text=encoded, symbols=[symbol],
-                        received_at=row["received_at"], ttl=2592000)
+                        received_at=row["received_at"], ttl=2592000,
+                        source_revision=row["revision"])
     return added
