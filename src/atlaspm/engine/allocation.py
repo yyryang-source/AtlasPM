@@ -46,9 +46,17 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     turnover_limit = finite(constraints.get("max_turnover", 2.0), "max_turnover", minimum=0)
     if cap > 1 or cash_reserve >= 1 or exposure > 4:
         raise ValueError("INVALID_PORTFOLIO_CONSTRAINT")
+    # Preserve fixed-budget legacy behavior unless the caller explicitly
+    # chooses cash-flexible synthetic mean-variance research.
+    flexible = constraints.get("allow_cash_slack", False)
+    if type(flexible) is not bool:
+        raise ValueError("INVALID_CASH_SLACK_POLICY")
+    if flexible and (method!="mean_variance" or account.kind!="cash"
+                     or not account.account_id.startswith("SYN-")):
+        raise ValueError("CASH_SLACK_REQUIRES_SYNTHETIC_CASH_MEAN_VARIANCE")
     # V1 cannot validate broker margin; risky investment remains cash-funded.
     target_total = min(exposure, 1 - cash_reserve)
-    if target_total <= 0 or cap * n + 1e-9 < target_total:
+    if not n or (not flexible and (target_total <= 0 or cap * n + 1e-9 < target_total)):
         raise ValueError("INFEASIBLE_NAME_CAP_OR_CASH_TARGET")
     equity = account.net_liquidation
     held = {h.symbol: h for h in account.holdings}
@@ -68,12 +76,13 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
                      for s in industries}
     if any(v > 1 for v in sector_limits.values()):
         raise ValueError("SECTOR_LIMIT_EXCEEDS_ONE")
-    if sum(min(sector_limits[s], cap * len(ids)) for s, ids in industries.items()) + 1e-9 < target_total:
+    if not flexible and sum(min(sector_limits[s], cap * len(ids)) for s, ids in industries.items()) + 1e-9 < target_total:
         raise ValueError("INFEASIBLE_SECTOR_CAPS")
 
     target_budget = float(target_total)
     bounds = [(0., cap)] * n
-    base = [{"type": "eq", "fun": lambda x: float(np.sum(x) - target_budget)}]
+    base = ([{"type":"ineq","fun":lambda x:float(target_budget-np.sum(x))}]
+            if flexible else [{"type":"eq","fun":lambda x:float(np.sum(x)-target_budget)}])
     for sector, ids in industries.items():
         limit = sector_limits[sector]
         base.append({"type": "ineq", "fun": lambda x, idx=tuple(ids), lim=limit:
@@ -87,13 +96,36 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     if method == "risk_parity":
         seed = inverse_volatility_weights(dict(zip(symbols, map(float, sigma))), max_weight=max(cap / target_total, 1/n))
         budget = np.array([seed[s] for s in symbols], dtype=float)
-    elif method == "mean_variance":
+    elif method == "mean_variance" and not flexible:
         # Keep prior tested AtlasPM mean-variance implementation as initializer.
         seed = optimize_mean_variance(dict(zip(symbols, map(float, mu))),
                                      cov.tolist(), max_weight=max(cap / target_total, 1/n),
                                      risk_aversion=finite(constraints.get("risk_aversion", 4.0), "risk_aversion", minimum=0.00001))
         budget = np.array([seed["weights"][s] for s in symbols], dtype=float)
     x0 = budget * target_total
+    vol_cap=shock=stress_cap=None
+    if flexible:
+        vol_cap=finite(constraints.get("max_annual_volatility",.7),"max_annual_volatility",minimum=0)
+        shock=finite(constraints.get("uniform_equity_shock",.2),"uniform_equity_shock",minimum=0)
+        stress_cap=finite(constraints.get("max_stress_loss_fraction",.5),"max_stress_loss_fraction",minimum=0)
+        if shock>1 or stress_cap>1:
+            raise ValueError("INVALID_RISK_SHOCK_OR_CAP")
+        if shock:
+            target_budget=min(target_budget,stress_cap/shock)
+        # Start from clipped holdings; a failed solve is never converted to
+        # cash or another strategy. Independent post-solve risk checks remain.
+        x0=np.minimum(np.maximum(current,0.),cap)
+        for sector,ids in industries.items():
+            total=float(np.sum(x0[ids]))
+            if total>sector_limits[sector] and total>0:
+                x0[ids]*=sector_limits[sector]/total
+        total=float(np.sum(x0))
+        if total>target_budget and total>0:
+            x0*=target_budget/total
+        v=float(x0@cov@x0)
+        if v>vol_cap**2 and v>0:
+            x0*=vol_cap/sqrt(v)
+        base.append({"type":"ineq","fun":lambda x:float(vol_cap**2-x@cov@x)})
     budgets = constraints.get("risk_budgets", {})
     if method == "risk_budgeting":
         if not isinstance(budgets, dict) or set(budgets) != set(symbols):
@@ -188,7 +220,11 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         iterations = int(result.nit)
 
     tol = 1e-6
-    if (abs(sum(weights)-target_total) > tol
+    actual_total=float(np.sum(weights))
+    exposure_invalid=(actual_total>target_budget+tol if flexible
+                      else abs(actual_total-target_total)>tol)
+    if (not np.isfinite(weights).all() or exposure_invalid
+        or (flexible and variance(weights)>vol_cap**2+1e-9)
         or any(w < -tol or w > cap+tol for w in weights)
         or any(sum(weights[ids]) > sector_limits[s]+tol for s, ids in industries.items())
         or sum(abs(weights-current)) > turnover_limit+tol):
@@ -197,7 +233,11 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     return {
         "method": method, "symbols": symbols,
         "weights": {s: float(w) for s, w in zip(symbols, weights)},
-        "target_cash_fraction": 1-target_total, "iterations": iterations,
+        "target_cash_fraction": 1-actual_total if flexible else 1-target_total, "iterations": iterations,
+        **({"cash_slack_enabled":True,"risky_exposure_limit":target_budget,
+            "modeled_risky_exposure":actual_total,
+            "modeled_expected_annual_return":float(mu@weights),
+            "risk_constraints_in_solver":True} if flexible else {}),
         "modeled_variance": modeled_variance,
         "modeled_annual_volatility": sqrt(max(0.,modeled_variance)),
         "turnover_fraction_conservative": float(sum(abs(weights-current))),

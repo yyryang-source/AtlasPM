@@ -167,7 +167,9 @@ def _risk_gate(candidates: list[Candidate], account: Account,
 
     # Reuse the original risk-budget gate on the risky sleeve. It assumes
     # fully invested long-only and uses a conservative 1x gross-risk proxy.
-    base_risk = check_risk_budget(
+    # A deliberately cash-only synthetic target has no normalized risky
+    # sleeve. This is not a waiver of other independent risk checks.
+    base_risk = None if risky<=1e-12 else check_risk_budget(
         {s: weights[s]/risky for s in symbols}, cov,
         proposed_leverage=1.0, max_allowed_leverage=1.0,
         max_name_weight=1.0, max_annual_volatility=max(annual_vol_cap/max(risky,1e-8), .00001),

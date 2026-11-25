@@ -185,6 +185,41 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         self.assertAlmostEqual(sum(result["weights"].values()),.805,delta=1e-6)
         self.assertFalse(result["live_execution_enabled"])
 
+    def test_cash_slack_does_not_force_negative_return_exposure(self) -> None:
+        from atlaspm.engine.allocation import optimize_target
+        from atlaspm.engine.contracts import Account, validate_candidates, timestamp
+        account=Account.from_payload(self.payload["account"])
+        candidates=validate_candidates(self.payload["signals"],
+                    as_of=timestamp(self.payload["as_of"],"as_of"),max_age_seconds=86400)
+        market=copy.deepcopy(self.payload["market"])
+        market["expected_returns"]={"AAA":-.2,"BBB":-.1}
+        constraints=dict(self.payload["constraints"],method="mean_variance",allow_cash_slack=True)
+        result=optimize_target(candidates,account,market,constraints)
+        self.assertAlmostEqual(result["target_cash_fraction"],1.,places=6)
+        self.assertFalse(result["broker_order_submission_enabled"])
+        market["expected_returns"]={"AAA":.3,"BBB":.2}
+        constraints.update(max_annual_volatility=.03,max_stress_loss_fraction=.02)
+        result=optimize_target(candidates,account,market,constraints)
+        self.assertLessEqual(sum(result["weights"].values()),.1+1e-6)
+        self.assertLessEqual(result["modeled_annual_volatility"],.03+1e-6)
+        self.assertGreater(sum(result["weights"].values()),0.)
+        self.assertAlmostEqual(result["target_cash_fraction"],1-sum(result["weights"].values()))
+        self.assertTrue(result["risk_constraints_in_solver"])
+
+    def test_cash_slack_keeps_independent_risk_and_synthetic_permissions(self) -> None:
+        self.payload["market"]["expected_returns"]={"AAA":-.2,"BBB":-.1}
+        self.payload["constraints"].update(method="mean_variance",allow_cash_slack=True)
+        result=self.run_case()
+        self.assertIn(result["decision"],{"BLOCK","SYNTHETIC_PAPER_CLOSED_LOOP_COMPLETE"})
+        self.assertFalse(result["live_execution_enabled"])
+        self.assertFalse(result["broker_order_submission_enabled"])
+        if "allocation" in result:
+            self.assertAlmostEqual(result["allocation"]["target_cash_fraction"],1.,places=6)
+        self.payload["constraints"]["method"]="equal_weight"
+        result=self.run_case()
+        self.assertEqual(result["decision"],"BLOCK")
+        self.assertIn("CASH_SLACK_REQUIRES_SYNTHETIC_CASH_MEAN_VARIANCE",result["block_reasons"][0])
+
     def test_direct_optimizer_methods_obey_all_fractional_limits(self) -> None:
         from atlaspm.engine.allocation import optimize_target
         from atlaspm.engine.contracts import Account, validate_candidates, timestamp
