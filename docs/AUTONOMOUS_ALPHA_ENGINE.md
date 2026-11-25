@@ -118,3 +118,21 @@ existing isolated event/research/OMS/multiasset/settlement offline fixture.
 A paused orchestrator does not count as a passing integrated release. CI
 uses the same gate. This is not certification of provider rights, independent
 historical evidence, real-model efficacy or authenticated Paper execution.
+
+### Integrated strategy and execution review
+
+Optional strategy_review=true with replay_payload and rank_weights evaluates
+three predeclared synthetic cases: locked model ranks, prior completed-close
+momentum (same replay, optimizer and risk policy), and unchanged model ranks
+with doubled fees/slippage/impact and half the participation cap. All cases
+use the same full holdout dates and fixed universe; the momentum baseline
+starts after the first observed holdout close. The fractional equal-weight
+buy-and-hold reference is descriptive and frictionless. No winner selection.
+The review reconciles per-symbol/day overnight and intraday P&L, modeled fees,
+slippage and impact against executed orders, holdings, cash and daily NAV;
+sector attribution requires unchanged declared sector assignments. No real
+broker TCA or opportunity cost of unfilled orders is asserted. Stress outside
+the execution model limits is rejected, never silently clipped.
+Nominal Treasury replay optionally accepts curve_node_shocks_bps (numeric
+maturity-year keys): linear interpolation of zero-rate shocks on the existing
+flat fitted base and key-rate DV01. This is not a calibrated observed curve.

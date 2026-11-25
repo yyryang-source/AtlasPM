@@ -37,7 +37,7 @@ class RankReplayTests(unittest.TestCase):
         marks=execution(p)
         marks["optimizer"]={"method":"equal_weight","lookback_sessions":3,"max_name_weight":1.0}
         before=deepcopy(marks)
-        out=alpha.research(p,**settings(),replay_payload=marks,rank_weights=WEIGHTS)
+        out=alpha.research(p,**settings(),replay_payload=marks,rank_weights=WEIGHTS,strategy_review=True)
         r=out["synthetic_rank_replay"]
         sim=r["simulation"]
         self.assertEqual(marks,before)
@@ -54,6 +54,13 @@ class RankReplayTests(unittest.TestCase):
         self.assertFalse(r["approved_for_model_training"])
         self.assertFalse(r["approved_for_backtest"])
         self.assertEqual(out["signals"],[])
+        review=r["strategy_review"]
+        self.assertEqual(set(review["strategies"]),{"model_rank","momentum","cost_liquidity_stress"})
+        self.assertFalse(review["winner_selected"])
+        for strategy in review["strategies"].values():
+            self.assertTrue(strategy["attribution"]["reconciled"])
+            self.assertEqual(strategy["metrics"]["observations"],len(marks["sessions"])-1)
+            self.assertAlmostEqual(sum(strategy["sector_net_pnl"].values()),strategy["attribution"]["net_pnl"])
 
     def test_coverage_ties_and_labels_never_used_for_ranking(self):
         p=panel()
