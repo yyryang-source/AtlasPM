@@ -511,7 +511,7 @@ def _local_data_review(route, args, cutoff):
             raise ValueError("LOCAL_FUNDAMENTAL_SCAN_BUDGET")
         batches=iter_fundamentals(path,as_of=day.isoformat(),**params)
     else:
-        dataset={"technical_local":"equity_daily","sec_local":"sec_filings",
+        dataset={"technical_local":"equity_daily","regime_local":"equity_daily","sec_local":"sec_filings",
                  "bond_local":"bond_quotes","factor_local":args.get("dataset")}[route]
         if route=="factor_local" and dataset not in {"factors_hf","factors_sqlite"}:
             raise ValueError("LOCAL_FACTOR_DATASET")
@@ -531,7 +531,7 @@ def _local_data_review(route, args, cutoff):
             # Decimal/date values are preserved as strings in evidence hashes.
             receipts.append(digest([batch.dataset,batch.columns,batch.origin,
                 batch.source_version_hint,[[str(v) for v in row] for row in batch.rows]]))
-            if route=="technical_local":
+            if route in {"technical_local","regime_local"}:
                 for sym,when,price,source in batch.rows:
                     if sym in sources and sources[sym]!=source:
                         raise ValueError("MIXED_LOCAL_PRICE_SOURCE")
@@ -547,7 +547,7 @@ def _local_data_review(route, args, cutoff):
                     fundamentals.setdefault(sym,[]).append(values)
     if not count:
         raise ValueError("NO_LOCAL_RESEARCH_EVIDENCE")
-    report={"rows_read":count,"evidence_batch_hashes":receipts,"source_date_cutoff":day.isoformat(),
+    report={"research_only":True,"rows_read":count,"evidence_batch_hashes":receipts,"source_date_cutoff":day.isoformat(),
             "identity_verified":False,"point_in_time_verified":False,
             "approved_for_model_training":False,"approved_for_backtest":False,
             "external_ai_allowed":False,"numeric_eligible":False,"trade_authorized":False}
@@ -556,6 +556,21 @@ def _local_data_review(route, args, cutoff):
         report["technical_screen"]=screen_stocks_from_prices(prices,end.isoformat(),top=len(symbols))
         if not report["technical_screen"]["eligible_count"]:
             raise ValueError("NO_ELIGIBLE_TECHNICAL_RESEARCH")
+    elif route=="regime_local":
+        from atlaspm.research.training_dataset import MarketRegimes
+        if set(prices)!=set(symbols) or len(symbols)<2:
+            raise ValueError("REGIME_REQUIRES_COMPLETE_MULTI_ASSET_SCOPE")
+        dates=sorted(set.intersection(*(set(series) for series in prices.values())))
+        if len(dates)<21 or dates[-1]!=end or any(set(series)!=set(dates) for series in prices.values()):
+            raise ValueError("REGIME_REQUIRES_ALIGNED_FRESH_PRICE_HISTORY")
+        if any((b-a).days>7 for a,b in zip(dates,dates[1:])):
+            raise ValueError("REGIME_PRICE_CALENDAR_GAP")
+        tracker=MarketRegimes()
+        for when in dates:
+            tracker.observe(when.isoformat(),{sym:(series[when],[]) for sym,series in prices.items()})
+        report["regime"]={"model":"equal_weight_regime_proxy_v1","state":tracker.states[dates[-1].isoformat()],
+                          "symbols":symbols,"observed_on":dates[-1].isoformat(),
+                          "market_representativeness_verified":False}
     elif route=="fundamental_local":
         from atlaspm.strategies.equity.stock_screener import screen_stocks_from_prices
         with closing(iter_batches("equity_daily",**params)) as stream:
@@ -598,6 +613,9 @@ def local_specialist_tasks(tasks, *, as_of):
         "artifact_decision":{"artifacts","security_id","future_session_dates","weights","cost_fraction"},
         "events":{"events"},
         "technical_local":{"start","end","symbols"},
+        "regime_local":{"start","end","symbols"},
+        "macro_local":{"path","sha256","retrieved_at","series","start","end","vintage","rights_reviewed"},
+        "treasury_local":{"cusip","face_usd","opening","end","sources"},
         "fundamental_local":{"start","end","symbols","path"},
         "options_local":{"path","sha256","retrieved_at","ticker"},
         "sec_local":{"start","end","symbols"},
@@ -650,6 +668,41 @@ def local_specialist_tasks(tasks, *, as_of):
                     raise ValueError("OPTIONS_LOCAL_SUBJECT_MISMATCH_OR_EMPTY")
                 report["numeric_eligible"]=False
                 report["signal_block_reason"]="OPTION_FLOW_NOT_CALIBRATED_RETURN_FORECAST"
+            elif route=="macro_local":
+                from atlaspm.data.provider_policy import require_enabled
+                from atlaspm.data.api_gateway import Response
+                from atlaspm.data.fred_observations import analyze_observations
+                from datetime import date
+                require_enabled("fred")
+                stamp=_timestamp(args["retrieved_at"])
+                if (args["rights_reviewed"] is not True or stamp>_timestamp(cutoff)
+                        or date.fromisoformat(args["vintage"])>stamp.date()):
+                    raise ValueError("MACRO_LOCAL_RIGHTS_OR_LOOKAHEAD")
+                with private_path(Path(args["path"]),exists=True).open("rb") as handle:
+                    body=handle.read(2*1024*1024+1)
+                if len(body)>2*1024*1024 or sha256(body).hexdigest()!=args["sha256"]:
+                    raise ValueError("MACRO_LOCAL_EVIDENCE_MISMATCH")
+                report=analyze_observations(Response("fred",args["sha256"],stamp.isoformat(),body),
+                    series=args["series"],start=args["start"],end=args["end"],as_of=args["vintage"])
+                if not any(row["value"]!="." for row in report["observations"]):
+                    raise ValueError("MACRO_LOCAL_NO_OBSERVATIONS")
+                report.update(research_only=True,numeric_eligible=False,
+                              signal_block_reason="MACRO_OBSERVATIONS_NOT_CALIBRATED_ASSET_RETURNS")
+            elif route=="treasury_local":
+                from datetime import date
+                from zoneinfo import ZoneInfo
+                from atlaspm.execution.paper_oms import _load_lifecycle_history
+                from atlaspm.strategies.bonds.treasury_replay import replay_treasury_holding
+                opening,end=date.fromisoformat(args["opening"]),date.fromisoformat(args["end"])
+                day=_timestamp(cutoff).astimezone(ZoneInfo("America/New_York")).date()
+                if not opening<end<day or (end-opening).days>366:
+                    raise ValueError("TREASURY_LOCAL_DATE_SCOPE")
+                history,hashes=_load_lifecycle_history(
+                    {"lifecycle_sources":{"treasury":args["sources"]}},"treasury")
+                report=replay_treasury_holding(history,args["cusip"],args["face_usd"],[opening,end],
+                                               include_opening_date_payment=False)
+                report.update(research_only=True,source_hashes=hashes,numeric_eligible=False,
+                              signal_block_reason="TREASURY_VALUATION_NOT_CALIBRATED_RETURN_FORECAST")
             elif route=="factor_admission":
                 from atlaspm.research.training_admission import audit_factor_months
                 if not isinstance(args["months"],list) or len(args["months"])>3:
@@ -663,7 +716,7 @@ def local_specialist_tasks(tasks, *, as_of):
                     any(_timestamp(row["close_at"])>_timestamp(cutoff) for row in sessions)):
                     raise ValueError("LOCAL_ARTIFACT_LOOKAHEAD")
                 report=predict_local_artifact(**args)
-            elif route in {"technical_local","fundamental_local","sec_local","bond_local","factor_local"}:
+            elif route in {"technical_local","fundamental_local","sec_local","bond_local","factor_local","regime_local"}:
                 report=_local_data_review(route,args,cutoff)
             else:
                 report=event_research(review(args["events"],as_of=cutoff))
@@ -680,7 +733,7 @@ def validate_local_bindings(bindings):
     """Operator-supplied event routing only; never inferred vendor mapping."""
     from atlaspm.research.financial_events import KINDS
     allowed={
-        "volume_anomaly":{"technical_local","factor_local","artifact_decision"},
+        "volume_anomaly":{"technical_local","factor_local","artifact_decision","regime_local"},
         "sec_disclosure":{"sec_local","fundamental_local"},
         "earnings":{"fundamental_local"},
         "earnings_forecast":{"institutional"},
@@ -689,7 +742,9 @@ def validate_local_bindings(bindings):
         "credit_rating":{"credit_history","bond_local"},
         "credit_outlook":{"credit_history"},
         "credit_watch":{"credit_history"},
-        "bond_trade":{"bond_local"},
+        "bond_trade":{"bond_local","treasury_local"},
+        "macro_release":{"macro_local","regime_local"},
+        "rate_decision":{"macro_local","regime_local","treasury_local"},
         "options_flow":{"options_local"},
         "index_change":{"factor_local","artifact_decision"},
     }
