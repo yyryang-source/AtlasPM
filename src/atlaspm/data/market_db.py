@@ -364,6 +364,8 @@ def register_parser(sub):
     actions.add_parser('hf-5m-security-inventory-v53',help='Inventory reviewed historical evidence')
     h=actions.add_parser('hf-5m-security-ingest-v53',help='Append explicitly reviewed local JSONL assertions')
     h.add_argument('--claims',required=True)
+    h.add_argument('--preview',action='store_true',help='Validate batch without creating or writing the ledger')
+    h.add_argument('--expected-sha256',help='Require exact previously reviewed input bytes')
     h=actions.add_parser('hf-5m-security-snapshot-v53',help='Research-only point-in-time security and event snapshot')
     h.add_argument('--as-of',required=True)
     h.add_argument('--trade-date')
@@ -585,7 +587,7 @@ def run(args):
         if args.db_action == 'hf-5m-security-inventory-v53':
             return master.inventory()
         if args.db_action == 'hf-5m-security-ingest-v53':
-            return master.ingest(args.claims)
+            return master.ingest(args.claims,preview=args.preview,expected_sha256=args.expected_sha256)
         if args.db_action == 'hf-5m-security-snapshot-v53':
             return master.snapshot(args.as_of,args.trade_date)
         return master.adjustment(args.security_id,args.bar_date,args.as_of,

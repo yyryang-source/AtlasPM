@@ -1006,3 +1006,19 @@ symbol/CIK/venue assignments also blocks agreement. Later-known conflicts
 are not used in earlier daily statistics. A source key is never promoted
 to an AtlasPM global security ID. At most 100 normalized rows may share a
 source family/key in a batch.
+
+### Bounded reviewed-claim preview and atomic import
+
+The existing V5.3 import accepts --preview and --expected-sha256. Preview
+uses the same validation and duplicate counting as import but never creates
+or writes the ledger. After independent review of original evidence and
+normalized assertions, a caller may bind the exact input bytes by providing
+the preview input_sha256 when explicitly importing. Counts are recomputed in
+the transaction; preview does not reserve a ledger revision or establish
+source authenticity, interval correctness or approval. Limits: 16 MiB input,
+10,000 claim rows, 1,000 distinct source objects and 2 GiB aggregate evidence
+file size. Both input bytes and original evidence hashes are rechecked before
+commit; changed evidence or input rolls back the claim transaction. This is
+not a filesystem snapshot or defense against an adversarial concurrent
+writer; keep evidence stable throughout import. Duplicate JSON members are
+rejected, as are self-referencing claim inputs. No permission is granted.
