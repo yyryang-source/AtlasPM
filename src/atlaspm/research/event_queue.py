@@ -140,10 +140,22 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None, local_bindin
                 research=event_research(report)
                 local_receipts=[]
                 if matches and report["events"] and not report["events"][0]["expired"]:
-                    from atlaspm.research.intelligence import local_specialist_tasks
+                    from atlaspm.research.intelligence import local_specialist_tasks,specialist_decision_receipt
                     local_calls+=len(matches)
                     out=local_specialist_tasks([b["task"] for b in matches],as_of=as_of)
-                    local_receipts=[{k:v for k,v in r.items() if k!="report"} for r in out["tasks"]]
+                    by_task={r["task_sha256"]:r for r in out["tasks"]}
+                    for binding in matches:
+                        key_sha=digest([out["as_of"],binding["task"]])
+                        item=by_task[key_sha]
+                        receipt={k:v for k,v in item.items() if k!="report"}
+                        try:
+                            decision=specialist_decision_receipt(binding["task"],item,
+                                security_id=binding["subject"],identity=binding.get("identity"),as_of=as_of)
+                        except (ValueError,TypeError,KeyError,ImportError):
+                            decision={"status":"BLOCKED_CONTRACT_OR_DECISION_VALIDATION","trade_authorized":False}
+                        # Persist only local identifiers and decisions, never raw licensed results.
+                        receipt["decision_receipt"]=decision
+                        local_receipts.append(receipt)
                 task["report"]={"research_requests":report["research_requests"],
                                 "risk_review_requests":report["risk_review_requests"],
                                 "review_sha256":digest(report),"as_of":as_of,
