@@ -753,6 +753,103 @@ def local_specialist_tasks(tasks, *, as_of):
             "network_calls":0,"trade_authorized":False}
 
 
+def specialist_decision_receipt(task, result, *, security_id, identity, as_of):
+    """Route an actually executed specialist report through contract/fusion/decision.
+
+    Operator association is explicit, never an independently verified permanent
+    identifier. This path cannot create numeric alpha from descriptive output.
+    Only hashes and eligibility counts leave this function, not licensed text.
+    """
+    from atlaspm.research.research_contract import descriptive_report
+    from atlaspm.research.training_registry import digest
+    from atlaspm.engine.autonomous_decision import decide
+    route=task["route"]
+    if result["status"]!="LOCAL_REVIEW_COMPLETED":
+        return {"status":"BLOCKED_SPECIALIST_INPUT","trade_authorized":False}
+    report=result["report"]
+    if route=="artifact_decision":
+        if task["params"]["security_id"]!=security_id:
+            raise ValueError("ARTIFACT_DECISION_IDENTITY_MISMATCH")
+        decision=report["decision"]
+        return {"status":"NUMERIC_PREDICTIONS_REVIEWED_NOT_ADMITTED",
+                "decision_sha256":digest(decision),"numeric_eligible":False,
+                "forecast_count":len(report["forecasts"]),"trade_authorized":False}
+    if identity is None:
+        return {"status":"BLOCKED_EXPLICIT_INSTRUMENT_ASSOCIATION_REQUIRED","trade_authorized":False}
+    native=identity["provider_id"]
+    args=task["params"]
+    selected=None
+    category=None
+    provider="local_research"
+    version=route+"_v1"
+    kind="objective"
+    if route in {"technical_local","fundamental_local"}:
+        category="technical" if route=="technical_local" else "fundamental"
+        screen=report["technical_screen" if route=="technical_local" else "fundamental_screen"]
+        selected=[row for row in screen["ranked"] if row["symbol"]==native]
+        version=screen["method"]
+    elif route in {"yahoo_finance","bloomberg"}:
+        category="news"; provider=route
+        selected=[row for row in report["events"] if native in row["symbols"] and row["fresh"]]
+        version=report["model"]
+    elif route=="institutional":
+        category="analyst"; provider="investment_banks"; kind="institutional_opinion"
+        if native==args["subject"]==report["subject"] and report["evidence_receipts"]:
+            selected=report["values"]
+        version=report["model"]
+    elif route=="credit_history":
+        category="credit"; provider="xpressapi"
+        if native==args["identifier"]:
+            selected=report["ratings"]
+    elif route=="options_local":
+        category="options"; provider="unusual_whales"
+        if native==args["ticker"]:
+            selected=[row for row in report["alerts"] if row["ticker"]==native and row["fresh"]]
+        version=report["model"]
+    elif route=="treasury_local":
+        category="bond"; provider="treasury"
+        if native==args["cusip"]==report["cusip"]:
+            selected=report["valuations"]
+        version=report["method"]
+    elif route=="macro_local":
+        category="macro"; provider="fred"
+        if security_id=="macro:"+native and native==report["series"]:
+            selected=report["observations"]
+    elif route=="regime_local":
+        category="regime"
+        if security_id.startswith("index:") and native==",".join(sorted(args["symbols"])):
+            selected=report["regime"]
+    elif route=="factor_diagnostics":
+        category="industry" if args["industry_csv"] is not None else "factor"
+        if security_id.startswith("index:") and native==args["source"]:
+            selected=report["factor_diagnostics"]
+    else:
+        return {"status":"EVIDENCE_ONLY_NO_SPECIALIST_FORECAST","trade_authorized":False}
+    if not selected:
+        return {"status":"BLOCKED_NO_MATCHING_SPECIALIST_OUTPUT","trade_authorized":False}
+    # A mapping supplied by the operator is not proof that a ticker, CUSIP or
+    # index universe represents the typed security. Never label this synthetic.
+    if security_id.startswith("SYN:"):
+        return {"status":"BLOCKED_REAL_EVIDENCE_SYNTHETIC_ID_MISMATCH","trade_authorized":False}
+    stamp=_timestamp(as_of).isoformat()
+    output_hash=digest([result["report_sha256"],native,selected])
+    checked=descriptive_report({"research_only":True,"provider":provider,"model":version},
+        security_id=security_id,asset_type=identity["asset_type"],category=category,kind=kind,
+        as_of=stamp,evidence=[{"sha256":output_hash,"source":provider,
+            "rights_status":"operator_attested_not_independently_verified",
+            "available_at":None,"received_at":stamp}])
+    decision=decide([checked["contract"]],as_of=stamp,weights={version:1},
+                    horizon_days=1,cost_fraction=0)
+    candidate=decision["candidates"][0]
+    if candidate["action"]!="NO_TRADE" or candidate["numeric_count"]!=0:
+        raise ValueError("DESCRIPTIVE_SPECIALIST_MUST_NOT_AUTHORIZE_ALPHA")
+    return {"status":"DESCRIPTIVE_CONTRACT_DECISION_REVIEWED",
+            "research_id":checked["research_id"],"category":category,
+            "output_sha256":output_hash,"decision_sha256":digest(decision),
+            "numeric_eligible":False,"identity_independently_verified":False,
+            "action":"NO_TRADE","trade_authorized":False}
+
+
 def validate_local_bindings(bindings):
     """Operator-supplied event routing only; never inferred vendor mapping."""
     from atlaspm.research.financial_events import KINDS
@@ -777,7 +874,7 @@ def validate_local_bindings(bindings):
     keys=set()
     kinds={}
     for b in bindings:
-        if (not isinstance(b,dict) or set(b)!={"kind","subject","task"} or b["kind"] not in KINDS
+        if (not isinstance(b,dict) or set(b) not in ({"kind","subject","task"},{"kind","subject","task","identity"}) or b["kind"] not in KINDS
             or not isinstance(b["subject"],str) or not 1<=len(b["subject"])<=160
             or not isinstance(b["task"],dict) or set(b["task"])!={"route","params"}
             or b["task"]["route"] not in allowed.get(b["kind"],set())
@@ -785,7 +882,14 @@ def validate_local_bindings(bindings):
             raise ValueError("INVALID_LOCAL_RESEARCH_BINDING")
         if b["task"]["route"]=="artifact_decision" and b["task"]["params"].get("security_id")!=b["subject"]:
             raise ValueError("ARTIFACT_BINDING_IDENTITY_MISMATCH")
-        key=(b["kind"],b["subject"])
+        if "identity" in b:
+            identity=b["identity"]
+            if (not isinstance(identity,dict) or set(identity)!={"provider_id","asset_type"}
+                    or identity["asset_type"] not in {"stock","etf","option","bond"}
+                    or not isinstance(identity["provider_id"],str)
+                    or not 1<=len(identity["provider_id"])<=256):
+                raise ValueError("INVALID_SPECIALIST_IDENTITY_ASSOCIATION")
+        key=(b["kind"],b["subject"],b["task"]["route"])
         if key in keys:
             raise ValueError("DUPLICATE_LOCAL_RESEARCH_BINDING")
         keys.add(key)
