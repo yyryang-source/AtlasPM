@@ -86,3 +86,55 @@ def institutional_once(*, subject, symbol, as_of):
                         received_at=row["received_at"], ttl=2592000,
                         source_revision=row["revision"])
     return added
+
+
+def treasury_once(*, gateway=None):
+    from atlaspm.data.api_gateway import DEFAULT_GATEWAY
+    gateway = gateway or DEFAULT_GATEWAY
+    url = ("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/"
+           "accounting/od/treasury_securities_auctions_v2?sort=-auction_date&page%5Bsize%5D=20")
+    response = gateway.fetch("treasury", url)
+    rows = response.data().get("data")
+    if not isinstance(rows, list) or len(rows)>20:
+        raise ValueError("Invalid auction page")
+    from datetime import date
+    added = 0
+    for row in rows:
+        if not isinstance(row,dict):
+            raise ValueError("Invalid auction row")
+        if date.fromisoformat(row["auction_date"]) > date.today():
+            continue
+        evidence = {k:row.get(k) for k in ("cusip","auction_date","security_type","security_term",
+                    "high_yield","high_rate","bid_to_cover_ratio","total_accepted","issue_date")}
+        added += ingest(provider="treasury", text=json.dumps(evidence,sort_keys=True),
+                        symbols=[], received_at=response.fetched_at, ttl=86400,
+                        source_revision=_digest(evidence))
+    return added
+
+
+def fred_once(series):
+    import os
+    from datetime import date, timedelta
+    from atlaspm.data.fred_observations import observations
+    # Series-level rights are not implied by access to FRED.
+    if series not in os.environ.get("ATLASPM_FRED_LOCAL_AI_SERIES","").split(","):
+        raise ValueError("FRED series local AI and retention rights required")
+    today=date.today()
+    report=observations(series,start=(today-timedelta(days=365)).isoformat(),
+                        end=(today-timedelta(days=1)).isoformat(),as_of=today.isoformat())
+    rows=[r for r in report["observations"] if r["value"]!="."][-12:]
+    if not rows:
+        return 0
+    evidence={"series":series,"observations":rows,"publication_time_verified":False}
+    return ingest(provider="fred",text=json.dumps(evidence,sort_keys=True),symbols=[],
+                  received_at=report["retrieved_at_utc"],ttl=86400,
+                  source_revision=_digest([series,[(r["date"],r["value"]) for r in rows]]))
+
+
+def credit_once(*, scope, identifier_type, identifier, symbol):
+    from datetime import date
+    from atlaspm.research.credit_intelligence import fetch_ratings
+    report=fetch_ratings(scope,identifier_type,[identifier],as_of=date.today().isoformat())
+    return sum(ingest(provider="xpressapi",text=json.dumps(row,sort_keys=True),
+                      symbols=[symbol],received_at=report["transport"]["retrieved_at_utc"],
+                      ttl=86400,source_revision=_digest(row)) for row in report["ratings"])
