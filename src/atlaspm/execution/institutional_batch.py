@@ -257,12 +257,15 @@ def propose_multi_asset_batch(
     # For a protective put, ensure enough *remaining* long underlying shares
     # to cover its total contract multiplier. Otherwise this is speculative
     # long put exposure, not a covered protection overlay.
-    for (kind, option_id), raw_pos in source_by_key.items():
-        if kind == "option" and ("option", option_id) not in initial_keys:
-            underlying = raw_pos["underlying"]
-            backing = source_by_key.get(("equity", underlying))
-            if backing is None or backing["shares"] + 1e-8 < raw_pos["contracts"] * raw_pos["multiplier"]:
-                blockers.append("PROTECTIVE_PUT_EXCEEDS_UNDERLYING_SHARES")
+    new_put_underlyings = {p["underlying"] for key, p in source_by_key.items()
+                           if key[0] == "option" and key not in initial_keys}
+    for underlying in sorted(new_put_underlyings):
+        backing = source_by_key.get(("equity", underlying))
+        required = sum(p["contracts"] * p["multiplier"] for key, p in source_by_key.items()
+                       if key[0] == "option" and p["right"] == "put"
+                       and p["underlying"] == underlying and p["contracts"] > 0)
+        if backing is None or backing["shares"] + 1e-8 < required:
+            blockers.append("PROTECTIVE_PUT_EXCEEDS_UNDERLYING_SHARES")
 
     projected: list[dict[str, Any]] = []
     for (kind, identifier), raw_pos in source_by_key.items():
