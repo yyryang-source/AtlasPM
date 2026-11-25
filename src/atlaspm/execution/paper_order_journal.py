@@ -150,9 +150,11 @@ class PaperJournal:
             self._write_state(db, client_id, state, detail, order_id=order_id,
                               broker_filled=broker_filled, expected=previous)
 
-    def apply(self, batch_id: str, observations: list[dict], fills: list[dict]) -> None:
+    def apply(self, batch_id: str, observations: list[dict], fills: list[dict], *, expected_batch=None) -> dict:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if expected_batch is not None and self._get(db,batch_id) != expected_batch:
+                raise ValueError("Paper journal changed during broker observation; poll again")
             origins = {row[0] for row in db.execute("SELECT client_id FROM paper_orders WHERE batch_id=?", (batch_id,))}
             if any(item["client_id"] not in origins for item in observations + fills):
                 raise ValueError("Broker evidence belongs to another Paper batch")
@@ -186,18 +188,25 @@ class PaperJournal:
                         self._write_state(db, order["client_id"], "filled", "Confirmed by full broker executions",
                                           broker_filled=cumulative)
 
-    def get(self, batch_id: str) -> dict | None:
-        with self.connect() as db:
-            row = db.execute("SELECT * FROM paper_batches WHERE id=?", (batch_id,)).fetchone()
-            if row is None:
-                return None
-            orders = [dict(item) | {"ticket": json.loads(item["ticket"])} for item in db.execute(
-                "SELECT * FROM paper_orders WHERE batch_id=? ORDER BY rowid", (batch_id,))]
-            fills = [json.loads(item[0]) for item in db.execute(
-                """SELECT e.data FROM paper_executions e JOIN paper_orders o ON e.client_id=o.client_id
-                   WHERE o.batch_id=? ORDER BY e.execution_id""", (batch_id,))]
+            return self._get(db,batch_id)
+
+    @staticmethod
+    def _get(db,batch_id):
+        row = db.execute("SELECT * FROM paper_batches WHERE id=?", (batch_id,)).fetchone()
+        if row is None:
+            return None
+        orders = [dict(item) | {"ticket": json.loads(item["ticket"])} for item in db.execute(
+            "SELECT * FROM paper_orders WHERE batch_id=? ORDER BY rowid", (batch_id,))]
+        fills = [json.loads(item[0]) for item in db.execute(
+            """SELECT e.data FROM paper_executions e JOIN paper_orders o ON e.client_id=o.client_id
+               WHERE o.batch_id=? ORDER BY e.execution_id""", (batch_id,))]
         return dict(row) | {"baseline": json.loads(row["baseline"]), "orders": orders, "fills": fills,
                             "reconciliation": json.loads(row["reconciliation"]) if row["reconciliation"] else None}
+
+    def get(self, batch_id: str) -> dict | None:
+        with self.connect() as db:
+            db.execute("BEGIN")
+            return self._get(db,batch_id)
 
     def save_reconciliation(self, batch_id: str, report: dict, *, expected_batch=None) -> dict:
         with self.connect() as db:
@@ -206,12 +215,7 @@ class PaperJournal:
             if row is None:
                 raise ValueError("Paper batch not found")
             if expected_batch is not None:
-                orders = [dict(item) | {"ticket": json.loads(item["ticket"])} for item in db.execute(
-                    "SELECT * FROM paper_orders WHERE batch_id=? ORDER BY rowid", (batch_id,))]
-                fills = [json.loads(item[0]) for item in db.execute(
-                    """SELECT e.data FROM paper_executions e JOIN paper_orders o ON e.client_id=o.client_id
-                       WHERE o.batch_id=? ORDER BY e.execution_id""", (batch_id,))]
-                if orders != expected_batch["orders"] or fills != expected_batch["fills"]:
+                if self._get(db,batch_id) != expected_batch:
                     raise ValueError("Paper journal changed during reconciliation; poll again")
             if row["reconciliation"] is not None:
                 previous = json.loads(row["reconciliation"])
