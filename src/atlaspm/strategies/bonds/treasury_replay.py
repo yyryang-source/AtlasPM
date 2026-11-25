@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import date
 from math import exp, fsum, isfinite
 from typing import Any
@@ -12,6 +12,47 @@ from atlaspm.data.treasury_history import TreasuryHistory, TreasuryPayment
 
 def _value_at_yield(annual_yield: float, cashflows: list[tuple[float, float]]) -> float:
     return fsum(amount * exp(-annual_yield * years) for years, amount in cashflows)
+
+
+def curve_shock(cashflows, flat_rate, node_shocks_bps):
+    """Illustrative key-rate shock on a flat continuously compounded base.
+
+    Piecewise linear shocks in zero rates, flat extrapolation at endpoints.
+    Positive key DV01 is a gain for a one bp downward bump, per 100 face.
+    Not observed market curve, calibrated YTM or verified hedge sizing.
+    """
+    if (not isinstance(node_shocks_bps,dict) or not 2<=len(node_shocks_bps)<=12
+            or any(type(k) not in (int,float) or not isfinite(k) or not 0<k<=50
+                   or type(v) not in (int,float) or not isfinite(v) or abs(v)>10000
+                   for k,v in node_shocks_bps.items())
+            or not isfinite(flat_rate) or abs(flat_rate)>5
+            or not cashflows or any(not isfinite(t) or not 0<t<=100 or not isfinite(a) or a<0
+                                     for t,a in cashflows)):
+        raise ValueError("INVALID_TREASURY_CURVE_SCENARIO")
+    nodes=sorted(node_shocks_bps)
+    def value(shocks):
+        def bump(t):
+            i=bisect_left(nodes,t)
+            if i==0:
+                return shocks[nodes[0]]
+            if i==len(nodes):
+                return shocks[nodes[-1]]
+            lo,hi=nodes[i-1],nodes[i]
+            return shocks[lo]+(shocks[hi]-shocks[lo])*(t-lo)/(hi-lo)
+        return fsum(a*exp(-(flat_rate+bump(t)/10000)*t) for t,a in cashflows)
+    zero=dict.fromkeys(nodes,0.)
+    base=value(zero)
+    if base<=0:
+        raise ValueError("INVALID_TREASURY_CURVE_BASE")
+    key={}
+    for node in nodes:
+        down={**zero,node:-1.}
+        up={**zero,node:1.}
+        key[str(node)]=(value(down)-value(up))/2
+    return {"flat_base_value_per_100":base,"scenario_value_per_100":value(node_shocks_bps),
+            "scenario_pnl_per_100":value(node_shocks_bps)-base,"key_rate_dv01_per_100":key,
+            "parallel_dv01_per_100":(value(dict.fromkeys(nodes,-1.))-value(dict.fromkeys(nodes,1.)))/2,
+            "model_only":True,"observed_curve_verified":False}
 
 
 def _rate_risk(dirty: float, future: list[TreasuryPayment], at: date, shock_bps: float) -> dict[str, float]:
@@ -35,7 +76,8 @@ def _rate_risk(dirty: float, future: list[TreasuryPayment], at: date, shock_bps:
 
 def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int, dates: list[date], *,
                             initial_cash_usd: float = 0, max_quote_age_days: int = 3,
-                            shock_bps: float = 100, include_opening_date_payment: bool = True) -> dict[str, Any]:
+                            shock_bps: float = 100, include_opening_date_payment: bool = True,
+                            curve_node_shocks_bps=None) -> dict[str, Any]:
     terms = history.terms[cusip]
     if (not dates or dates != sorted(set(dates)) or not terms.issued_on <= dates[0] < terms.maturity
             or type(face_usd) is not int or face_usd <= 0 or face_usd % terms.face_increment_usd
@@ -63,6 +105,7 @@ def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int,
         quote_on = None
         accrued = bond_value = dv01 = shock_pnl = 0.0
         rate = None
+        curve_risk=None
         live_face = face_usd if day < terms.maturity else 0
         if live_face:
             quote = history.quote_at(cusip, day, max_quote_age_days)
@@ -76,6 +119,11 @@ def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int,
             risk = _rate_risk(dirty, schedule[index:], day, shock_bps)
             rate = risk["model_flat_yield_continuous"]
             dv01, shock_pnl = units * risk["dv01_per_100"], units * risk["shock_pnl_per_100"]
+            if curve_node_shocks_bps is not None:
+                curve_risk=curve_shock([((p.paid_on-day).days/365,p.coupon_per_100+p.principal_per_100)
+                                        for p in schedule[index:]],rate,curve_node_shocks_bps)
+                curve_risk["scenario_pnl_usd"]=units*curve_risk["scenario_pnl_per_100"]
+                curve_risk["key_rate_dv01_usd"]={k:units*v for k,v in curve_risk["key_rate_dv01_per_100"].items()}
         nav = cash + receivable + bond_value
         marks.append({"date": day.isoformat(), "quote_date": quote_on, "held_face_usd": live_face,
                       "clean_close_per_100": clean, "accrued_interest_usd": units * accrued,
@@ -83,7 +131,8 @@ def replay_treasury_holding(history: TreasuryHistory, cusip: str, face_usd: int,
                       "payment_receivable_usd": receivable, "coupon_paid_to_date_usd": paid_coupon,
                       "principal_paid_to_date_usd": paid_principal, "nav_usd": nav,
                       "model_flat_yield_continuous": rate, "dv01_usd": dv01,
-                      "rate_shock_pnl_usd": shock_pnl, "rate_shock_nav_usd": nav + shock_pnl})
+                      "rate_shock_pnl_usd": shock_pnl, "rate_shock_nav_usd": nav + shock_pnl,
+                      **({"curve_scenario":curve_risk} if curve_node_shocks_bps is not None else {})})
     return {"method": "nominal_treasury_settled_holding_replay", "cusip": cusip, "initial_face_usd": face_usd,
             "initial_cash_usd": initial_cash_usd, "rate_shock_bps": shock_bps, "max_quote_age_days": max_quote_age_days,
             "cashflows": cashflows, "valuations": marks, "live_execution_enabled": False}

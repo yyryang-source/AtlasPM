@@ -121,7 +121,7 @@ def _holdout_diagnostics(rows, dates, expected, horizon, start):
 
 
 def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
-             candidates=None, selection_metric="mae", replay_payload=None, rank_weights=None):
+             candidates=None, selection_metric="mae", replay_payload=None, rank_weights=None, strategy_review=False):
     config = {} if config is None else config
     candidates = [{"model":"historical_mean"},{"model":"ridge"}] if candidates is None else candidates
     names, configs, planned_fits = _plan(payload,horizons,config,candidates,
@@ -129,10 +129,12 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
     sessions = payload["sessions"]
     if (replay_payload is None)!=(rank_weights is None):
         raise ValueError("ALPHA_REPLAY_REQUIRES_PAYLOAD_AND_WEIGHTS")
+    if type(strategy_review) is not bool or (strategy_review and replay_payload is None):
+        raise ValueError("ALPHA_STRATEGY_REVIEW_REQUIRES_REPLAY")
     bridge=None
     if replay_payload is not None:
         from atlaspm.research.alpha_replay_bridge import RankReplay
-        bridge=RankReplay(payload,holdout_start,tuple(configs),rank_weights,replay_payload)
+        bridge=RankReplay(payload,holdout_start,tuple(configs),rank_weights,replay_payload,strategy_review=strategy_review)
     prefix = {**payload,"sessions":sessions[:holdout_start]}
     locks = {}
     # Selection-only uses the prefix, but the tournament's boundary checks

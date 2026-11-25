@@ -60,6 +60,17 @@ class TreasuryReplayTest(unittest.TestCase):
             self.assertAlmostEqual(mark["nav_usd"], mark["cash_available_usd"] + mark["payment_receivable_usd"]
                                    + mark["dirty_market_value_usd"])
 
+    def test_curve_scenario_reuses_holding_valuation_and_stops_at_maturity(self):
+        days=[date(2024,6,28),date(2024,12,31)]
+        out=replay_treasury_holding(self._history(),"999999990",10000,days,
+                                    curve_node_shocks_bps={.25:100,1.:100})
+        opened,matured=out["valuations"]
+        risk=opened["curve_scenario"]
+        self.assertAlmostEqual(risk["scenario_pnl_usd"],opened["rate_shock_pnl_usd"])
+        self.assertAlmostEqual(sum(risk["key_rate_dv01_usd"].values()),opened["dv01_usd"],places=6)
+        self.assertIsNone(matured["curve_scenario"])
+        self.assertFalse(risk["observed_curve_verified"])
+
     def test_zero_coupon_bill_and_future_price_rejection(self):
         history = self._history()
         due = date(2024, 7, 1)

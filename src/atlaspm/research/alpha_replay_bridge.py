@@ -18,7 +18,8 @@ SCHEMA="atlaspm_synthetic_alpha_replay_bridge_v1"
 
 
 class RankReplay:
-    def __init__(self,panel,holdout_start,horizons,weights,execution):
+    def __init__(self,panel,holdout_start,horizons,weights,execution,*,strategy_review=False):
+        self.strategy_review=strategy_review
         if not isinstance(execution,dict) or set(execution)-{
                 "mode","synthetic_fixture","sessions","initial_cash","fee_bps",
                 "slippage_bps","cash_reserve","top_k","rebalance_sessions",
@@ -51,6 +52,7 @@ class RankReplay:
         self.days={}
         self.ranks={}
         self.ids=None
+        self.sectors=None
         for s,m in zip(sessions,marks):
             if (not isinstance(m,dict) or set(m)!={"date","open_at","close_at","source",
                                                   "open","close","volume","sectors"}
@@ -81,6 +83,10 @@ class RankReplay:
                     raise ValueError("ALPHA_REPLAY_SECTOR_REQUIRED")
             if timestamp(m["open_at"],"open_at")>=timestamp(m["close_at"],"close_at"):
                 raise ValueError("ALPHA_REPLAY_MARK_TIME")
+            if self.sectors is None:
+                self.sectors=dict(m["sectors"])
+            if self.strategy_review and self.sectors!=m["sectors"]:
+                raise ValueError("ALPHA_REPLAY_REVIEW_FIXED_SECTORS_REQUIRED")
             self.days[s["date"]]=assets
         top=execution.get("top_k",2)
         if type(top) is not int or not 1<=top<=len(self.ids):
@@ -92,7 +98,7 @@ class RankReplay:
         self.policy_sha256=digest({"weights":self.weights,
             "execution_policy":{k:v for k,v in self.execution.items() if k!="sessions"},
             "rank_method":"mean_tie_aware_percentile_v1",
-            "common_days":self.common_days})
+            "common_days":self.common_days,"strategy_review":self.strategy_review})
 
     def add(self,horizon,rows):
         if horizon not in self.weights or horizon in self.ranks:
@@ -153,10 +159,15 @@ class RankReplay:
                         status="SYNTHETIC_RANK_COHORT"
             review.append({"date":day,"status":status,"signals":len(m["signals"])})
         result=replay(self.execution)
+        evaluation={}
+        if self.strategy_review:
+            from atlaspm.engine.replay_review import review as evaluate_review
+            evaluation["strategy_review"]=evaluate_review(self.execution,result,common_days=self.common_days,
+                                                 sectors=self.sectors)
         return {"schema":SCHEMA,**FLAGS,"approved_for_backtest":False,
                 "selection_lock_sha256":selection_lock,"policy_sha256":self.policy_sha256,
                 "normalized_weights":{str(h):w for h,w in self.weights.items()},
                 "rank_method":"fixed_weight_percentile_rank_not_expected_return",
-                "cohorts":review,"simulation":result,"broker_side_effects":False,
+                "cohorts":review,"simulation":result,"broker_side_effects":False,**evaluation,
                 "production_model_approved":False,
                 "warning":"Synthetic next-open cash replay only. No end-of-sample forced exit, calibrated return forecast or evidence of real alpha."}
