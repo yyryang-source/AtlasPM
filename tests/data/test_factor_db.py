@@ -102,6 +102,42 @@ class FactorDuckDBTests(FactorContractTests):
         self.assertEqual(2, factor_db.status()['months'])
         self.assertFalse(result['approved_for_model_training'])
 
+    def test_strict_factor_windows_reset_on_missing_session_and_early_bar(self):
+        from contextlib import closing
+        # Exercise the actual DuckDB factor windows on 25 exchange ordinals.
+        # Two named symbols share prices but one is missing a session and one
+        # closes early. No need for installed calendar extras in this fixture.
+        month="2026-02"
+        path=factor_db._path(month,"hf","rth","daily")
+        path.parent.mkdir(parents=True,exist_ok=True)
+        rows=[]
+        calendar=[]
+        for i in range(25):
+            day=f"2026-02-{i+1:02d}"
+            stamp=(i+1)*900000
+            calendar.append((day,i,stamp))
+            for symbol in ("FULL","GAP","EARLY"):
+                if symbol=="GAP" and i==21:
+                    continue
+                value=100.+i
+                rows.append((symbol,day,value,value,value,value,100.,1,1,
+                             stamp-(600000 if symbol=="EARLY" and i==21 else 300000)))
+        with closing(duckdb.connect()) as con:
+            con.execute("""CREATE TABLE daily(symbol VARCHAR,trade_date DATE,open DOUBLE,high DOUBLE,
+                low DOUBLE,close DOUBLE,volume_shares DOUBLE,observed_5m_bars BIGINT,
+                observed_1m_bars BIGINT,last_observed_bar_ms BIGINT)""")
+            con.executemany("INSERT INTO daily VALUES (?,?,?,?,?,?,?,?,?,?)",rows)
+            con.execute(f"COPY daily TO {factor_db._quoted(path)} (FORMAT PARQUET)")
+            factor_db._install_strict_calendar(con,calendar)
+            sql=factor_db._factor_sql([path],month,strict_calendar=True)
+            out=con.execute(f"""SELECT symbol,ret_1d,mom_5d,mom_21d,volatility_21d,
+                price_vs_sma_20d,volume_ratio_20d FROM ({sql})
+                WHERE trade_date='2026-02-23' ORDER BY symbol""").fetchall()
+        self.assertEqual([r[0] for r in out],["EARLY","FULL","GAP"])
+        self.assertTrue(all(x is None for x in out[0][1:]))
+        self.assertTrue(all(x is not None for x in out[1][1:]))
+        self.assertTrue(all(x is None for x in out[2][1:]))
+
     def test_factor_audit_rejects_null_close_but_allows_missing_warmup(self):
         self._write_month("2026-01")
         factor_db.build("2026-01", memory="256MB", threads=1)

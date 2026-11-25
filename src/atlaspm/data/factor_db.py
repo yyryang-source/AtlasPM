@@ -38,6 +38,8 @@ FACTOR_DEFS = {
 }
 FEATURES = tuple(FACTOR_DEFS)
 LOOKBACK_MONTHS = 36
+STRICT_WINDOW_POLICY = "exact_nyse_close_contiguous_v1"
+LEGACY_WINDOW_POLICY = "observed_rows_v1"
 
 
 def _month_first(month: str) -> date:
@@ -249,7 +251,34 @@ def _materialize_daily(con, month: str, source: str, session: str,
         csv_stage.unlink(missing_ok=True)
 
 
-def _factor_sql(paths: list[Path], month: str) -> str:
+def _strict_calendar(history, cache=None):
+    """Actual NYSE ordinals, including months missing from the local lake."""
+    from atlaspm.data.hf_stock5m_audit import _calendar
+    cache = {} if cache is None else cache
+    first = _month_first(history[0].stem[-7:])
+    last = _month_first(history[-1].stem[-7:])
+    span = _month_diff(last, first)
+    if not 0 <= span <= LOOKBACK_MONTHS:
+        raise ValueError("Invalid factor calendar history range")
+    rows = []
+    for offset in range(span+1):
+        y,m = divmod(first.year*12+first.month-1+offset,12)
+        month = f"{y:04d}-{m+1:02d}"
+        if month not in cache:
+            cache[month] = _calendar(month)
+        rows.extend((day.isoformat(),closing) for day,_,closing in cache[month])
+    if not rows or any(a[0]>=b[0] for a,b in zip(rows,rows[1:])):
+        raise ValueError("Invalid factor session calendar")
+    identity = hashlib.sha256(json.dumps(rows,separators=(",",":")).encode()).hexdigest()
+    return [(day,i,close) for i,(day,close) in enumerate(rows)],identity
+
+
+def _install_strict_calendar(con, rows):
+    con.execute("CREATE OR REPLACE TEMP TABLE factor_sessions(trade_date DATE PRIMARY KEY, session_index INTEGER, close_ms BIGINT)")
+    con.executemany("INSERT INTO factor_sessions VALUES (?,?,?)",rows)
+
+
+def _factor_sql(paths: list[Path], month: str, *, strict_calendar=False) -> str:
     source = _files_sql(paths)
     end = _month_first(month)
     year, mon = end.year + (end.month == 12), (end.month % 12) + 1
@@ -262,28 +291,53 @@ def _factor_sql(paths: list[Path], month: str) -> str:
         f"CASE WHEN close_{n} > 0 AND date_diff('day',day_{n},trade_date) BETWEEN 1 AND {max_days} "
         f"THEN close/close_{n}-1 END AS {('ret_1d' if n==1 else 'mom_'+str(n)+'d')}"
         for n, max_days in lags)
+    # Preserve source rows, including off-calendar observations; never
+    # manufacture prices. Each invalid closing observation forms a boundary
+    # on both sides, as does a missing exchange session. All rolling windows
+    # below partition by the same segment, including volatility of returns.
+    prefix = ""
+    partition = "symbol"
+    eligible = ""
+    if strict_calendar:
+        prefix = f"""aligned AS (
+            SELECT d.*, s.session_index,
+              coalesce(d.last_observed_bar_ms+300000=s.close_ms,false) AS valid_close
+            FROM {source} d LEFT JOIN factor_sessions s USING(trade_date)
+        ), boundaries AS (
+            SELECT *, CASE WHEN valid_close AND lag(valid_close) OVER w
+                AND session_index=lag(session_index) OVER w+1
+                THEN 0 ELSE 1 END AS new_segment
+            FROM aligned WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
+        ), segmented AS (
+            SELECT *, sum(new_segment) OVER (PARTITION BY symbol ORDER BY trade_date
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS segment
+            FROM boundaries
+        ), """
+        source = "segmented"
+        partition = "symbol,segment"
+        eligible = "valid_close AND "
     return f"""
-    WITH lagged AS (
+    WITH {prefix}lagged AS (
       SELECT *, {lag_expr},
-        avg(close) OVER (PARTITION BY symbol ORDER BY trade_date
+        avg(close) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS sma20,
-        count(close) OVER (PARTITION BY symbol ORDER BY trade_date
+        count(close) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS sma20_n,
-        avg(volume_shares) OVER (PARTITION BY symbol ORDER BY trade_date
+        avg(volume_shares) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS prior_volume_20,
-        count(volume_shares) OVER (PARTITION BY symbol ORDER BY trade_date
+        count(volume_shares) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS prior_volume_n,
-        avg(close*volume_shares) OVER (PARTITION BY symbol ORDER BY trade_date
+        avg(close*volume_shares) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS adv20,
-        count(volume_shares) OVER (PARTITION BY symbol ORDER BY trade_date
+        count(volume_shares) OVER (PARTITION BY {partition} ORDER BY trade_date
             ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS adv20_n
-      FROM {source} WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
+      FROM {source} WINDOW w AS (PARTITION BY {partition} ORDER BY trade_date)
     ), daily_ret AS (
       SELECT *, {ret_expr} FROM lagged
     ), rolled AS (
-      SELECT *, stddev_samp(ret_1d) OVER (PARTITION BY symbol ORDER BY trade_date
+      SELECT *, stddev_samp(ret_1d) OVER (PARTITION BY {partition} ORDER BY trade_date
           ROWS BETWEEN 20 PRECEDING AND CURRENT ROW) AS sd21,
-        count(ret_1d) OVER (PARTITION BY symbol ORDER BY trade_date
+        count(ret_1d) OVER (PARTITION BY {partition} ORDER BY trade_date
           ROWS BETWEEN 20 PRECEDING AND CURRENT ROW) AS sd21_n
       FROM daily_ret
     )
@@ -294,8 +348,8 @@ def _factor_sql(paths: list[Path], month: str) -> str:
       CASE WHEN sma20_n=20 AND sma20>0 THEN close/sma20-1 END AS price_vs_sma_20d,
       CASE WHEN prior_volume_n=20 AND prior_volume_20>0 THEN volume_shares/prior_volume_20 END AS volume_ratio_20d,
       CASE WHEN adv20_n=20 THEN adv20 END AS avg_dollar_volume_20d,
-      CASE WHEN open>0 THEN close/open-1 END AS intraday_return,
-      CASE WHEN open>0 THEN (high-low)/open END AS intraday_range
+      CASE WHEN {eligible}open>0 THEN close/open-1 END AS intraday_return,
+      CASE WHEN {eligible}open>0 THEN (high-low)/open END AS intraday_range
     FROM rolled WHERE trade_date >= DATE '{month}-01' AND trade_date < DATE '{end_date}'
     ORDER BY symbol,trade_date
     """
@@ -312,7 +366,12 @@ def catalog() -> dict:
 
 def build(month: str, *, source: str = "hf", session: str = "rth",
           sqlite_db: Path = DB_PATH, memory: str = "4GB", threads: int = 4,
-          dry_run: bool = False, refresh: bool = False) -> dict:
+          dry_run: bool = False, refresh: bool = False,
+          strict_calendar: bool | None = None) -> dict:
+    if strict_calendar is not None and type(strict_calendar) is not bool:
+        raise ValueError("strict_calendar must be boolean or None")
+    if strict_calendar and source!="hf":
+        raise ValueError("Exact closing-bar windows require the HF source")
     first = _month_first(month)
     dest = _path(month, source, session, "factors")
     source_path = _month_source(month, source, session, sqlite_db)
@@ -335,18 +394,31 @@ def build(month: str, *, source: str = "hf", session: str = "rth",
         fingerprint = _fingerprint(history)
         meta_path = dest.with_suffix(".json")
         old = _read_meta(meta_path)
-        if not refresh and dest.is_file() and old and old.get("history_fingerprint") == fingerprint and old.get("version") == VERSION:
+        old_policy = (old or {}).get("window_policy", LEGACY_WINDOW_POLICY)
+        # Standalone maintenance of an already strict partition preserves
+        # its policy. An explicit False can still request legacy research.
+        strict = (old_policy==STRICT_WINDOW_POLICY) if strict_calendar is None else strict_calendar
+        if strict and source!="hf":
+            raise ValueError("Exact closing-bar windows require the HF source")
+        policy = STRICT_WINDOW_POLICY if strict else LEGACY_WINDOW_POLICY
+        calendar_rows,calendar_sha = _strict_calendar(history) if strict else (None,None)
+        if (not refresh and dest.is_file() and old and old.get("history_fingerprint")==fingerprint
+                and old.get("version")==VERSION and old_policy==policy
+                and old.get("window_calendar_sha256")==calendar_sha):
             return {**old, "state": "existing", "factor_file": str(dest)}
+        if strict:
+            _install_strict_calendar(con,calendar_rows)
         dest.parent.mkdir(parents=True, exist_ok=True)
         temp = private_path(dest.with_suffix(".parquet.part"))
         try:
-            con.execute(f"COPY ({_factor_sql(history,month)}) TO {_quoted(temp)} "
+            con.execute(f"COPY ({_factor_sql(history,month,strict_calendar=strict)}) TO {_quoted(temp)} "
                         "(FORMAT PARQUET, COMPRESSION ZSTD)")
             stats = _audit_file(con, temp, month)
             if not stats["valid"]:
                 raise ValueError("Factor output failed structural QC; previous output preserved")
             meta = {"version": VERSION, "month": month, "source": source, "session": session,
                     "history_fingerprint": fingerprint, "daily_input_months": len(history),
+                    "window_policy":policy,"window_calendar_sha256":calendar_sha,
                     "factor_count": len(FEATURES), "rows": stats["rows"],
                     "non_null_factor_values": stats["non_null_factor_values"],
                     "source_price_adjustment": ("UNVERIFIED_HF_RAW" if source == "hf"
@@ -355,6 +427,8 @@ def build(month: str, *, source: str = "hf", session: str = "rth",
                     "coverage_verified": False, "data_rights_verified": False,
                     "approved_for_model_training": False,
                     "research_only": True, "live_execution_enabled": False}
+            if _fingerprint(history)!=fingerprint:
+                raise ValueError("Daily inputs changed during factor construction")
             os.replace(temp, dest)
             _write_meta(meta_path, meta)
             return {**meta, "state": "built", "factor_file": str(dest)}

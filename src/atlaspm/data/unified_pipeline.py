@@ -59,7 +59,7 @@ def maintain(start_month, end_month, *, execute=False, memory="256MB", threads=1
                 raise unified.DataQualityError("Existing 5m audit did not pass structural checks")
             if unified._version(bars) != signature:
                 raise unified.DataQualityError("Bars changed during audit")
-            built = factor_db.build(month, source="hf", memory=memory, threads=threads)
+            built = factor_db.build(month, source="hf", memory=memory, threads=threads,strict_calendar=True)
             record["factors"] = built["state"]
             if unified._version(bars) != signature:
                 raise unified.DataQualityError("Bars changed during factor build; review derivatives")
@@ -92,6 +92,7 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
     inventory = _month_list(start_month, end_month)
     records = []
     hash_cache = {}
+    calendar_cache = {}
 
     def content(path):
         signature = unified._version(path)
@@ -136,6 +137,15 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
                                  if 0 <= factor_db._month_diff(first, factor_db._month_first(p.stem[-7:])) <= factor_db.LOOKBACK_MONTHS)
                 if not history or m.get("history_fingerprint") != factor_db._fingerprint(history):
                     record["blockers"].append("STALE_FACTOR_HISTORY")
+                policy=m.get("window_policy",factor_db.LEGACY_WINDOW_POLICY)
+                record["window_policy"]=policy
+                if policy==factor_db.STRICT_WINDOW_POLICY and history:
+                    _,calendar_sha=factor_db._strict_calendar(history,calendar_cache)
+                    record["window_calendar_sha256"]=calendar_sha
+                    if m.get("window_calendar_sha256")!=calendar_sha:
+                        record["blockers"].append("STALE_FACTOR_WINDOW_CALENDAR")
+                elif policy!=factor_db.LEGACY_WINDOW_POLICY:
+                    record["blockers"].append("UNKNOWN_FACTOR_WINDOW_POLICY")
                 # A stale historical daily projection also invalidates derived
                 # factors even if the derived daily file itself has not changed.
                 record["lookback_content"] = {}

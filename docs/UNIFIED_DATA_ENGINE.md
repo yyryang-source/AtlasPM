@@ -339,3 +339,17 @@ within the session, historical identity, adjustments, vendor availability
 or rights. The preparation pipeline reports a separate blocker if strict
 fold sample minima fail. Aggregation reuses the existing label window pass;
 no second sample warehouse or model fitting is introduced.
+
+
+Canonical offline maintenance now requests exact NYSE closing-bar contiguous
+factor windows (HF only). Missing exchange sessions, off-calendar days or
+missing closing-bar observations reset the rolling segment. Momentum,
+volatility, moving average and volume windows cannot bridge these boundaries.
+Original daily observations remain intact. The factor cache records the
+window policy and calendar hash; canonical preflight detects a changed
+calendar. Standalone legacy factor builds remain available for exploratory
+compatibility, and an already strict partition retains its policy by default.
+Canonical maintenance requires the existing calendar extra. This does not
+certify historical identity continuity, adjustments, intra-session coverage,
+rights or feature availability. A changed policy rebuilds derived factor
+partitions; no source bars are replaced.

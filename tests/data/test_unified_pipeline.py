@@ -52,7 +52,7 @@ class UnifiedPipelineTests(unittest.TestCase):
               patch.object(pipeline.factor_db, "build", return_value={"state": "existing"}) as build):
             report = pipeline.maintain("2020-01", "2020-01", execute=True)
         audit.assert_called_once_with("2020-01", "2020-01", session="rth", resume=True, dry_run=False)
-        build.assert_called_once_with("2020-01", source="hf", memory="256MB", threads=1)
+        build.assert_called_once_with("2020-01", source="hf", memory="256MB", threads=1,strict_calendar=True)
         self.assertTrue(report["all_requested_months_processed"])
         self.assertFalse(report["approved_for_model_training"])
 
