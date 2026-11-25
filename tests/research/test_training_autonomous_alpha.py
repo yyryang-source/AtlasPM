@@ -156,6 +156,49 @@ class AlphaTests(unittest.TestCase):
             db.unlink()
             self.assertFalse(db.exists())
 
+    def test_independent_review_binding_and_revocation_remain_research_only(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from unittest.mock import patch
+        import hashlib,hmac,os
+        from atlaspm.research.alpha_lifecycle import request_review,decide_review,review_status,transition
+        from atlaspm.research.training_registry import canonical
+        root=Path("local_data")
+        root.mkdir(exist_ok=True)
+        p=fixture()
+        with TemporaryDirectory(dir=root) as tmp:
+            db=Path(tmp)/"alpha.sqlite3"
+            result=research(p,**options(p),models=["historical_mean"],cost_bps=0,registry_path=db)
+            version=result["strategy_version"]
+            request=request_review(db,version=version,requester="researcher",purpose="promotion")
+            self.assertEqual(request["review_state"],"REQUEST")
+            self.assertEqual(request["binding"]["dataset_sha256"],result["dataset_sha256"])
+            self.assertEqual(request_review(db,version=version,requester="researcher",purpose="promotion"),request)
+            key="ab"*32
+            def review(reviewer,decision,reason,signature=None):
+                body={"request_id":request["request_id"],"reviewer":reviewer,
+                      "decision":decision,"reason":reason}
+                sig=hmac.new(bytes.fromhex(key),canonical(body).encode(),hashlib.sha256).hexdigest()
+                return decide_review(db,**body,signature=sig if signature is None else signature)
+            with patch.dict(os.environ,{"ATLASPM_GOVERNANCE_REVIEWER":"researcher","ATLASPM_GOVERNANCE_REVIEW_KEY":key}):
+                with self.assertRaisesRegex(ValueError,"SELF_APPROVAL"):
+                    review("researcher","APPROVE","reviewed")
+            with patch.dict(os.environ,{"ATLASPM_GOVERNANCE_REVIEWER":"reviewer","ATLASPM_GOVERNANCE_REVIEW_KEY":key}):
+                with self.assertRaisesRegex(ValueError,"SIGNATURE_INVALID"):
+                    review("reviewer","APPROVE","reviewed","0"*64)
+                approved=review("reviewer","APPROVE","reviewed")
+                self.assertEqual(approved["review_state"],"APPROVE")
+                self.assertFalse(approved["formal_approval_enabled"])
+                self.assertFalse(approved["operational_model_active"])
+                self.assertFalse(approved["paper_eligible"])
+                with self.assertRaisesRegex(ValueError,"REVIEW_TRANSITION"):
+                    review("reviewer","APPROVE","duplicate")
+                self.assertEqual(review("reviewer","REVOKE","new concern")["review_state"],"REVOKE")
+            with self.assertRaisesRegex(ValueError,"REQUIRES_NEW_VERSION"):
+                request_review(db,version=version,requester="researcher",purpose="rollback",predecessor=version)
+            transition(db,version,"SUSPENDED","operator review")
+            self.assertEqual(review_status(db,request["request_id"])["review_state"],"INVALIDATED")
+
     def test_benchmark_reports_real_measurements(self):
         import json
         from atlaspm.research.alpha_benchmark import benchmark
