@@ -154,3 +154,43 @@ class ProfilePreflightTests(unittest.TestCase):
                 _profile_ticket("DUR123",identity,price,shares)
         with self.assertRaises(ValueError):
             profile_preview_check(symbol="AAA",limit_price="100",allow_preview=False)
+
+
+class OrderSnapshotDiagnosticTests(unittest.TestCase):
+    def test_initial_blank_response_is_not_used_as_snapshot(self):
+        from atlaspm.execution.ibkr_whatif import _complete_profile_orders
+        from unittest.mock import Mock
+        transport = Mock()
+        transport._request.return_value = []
+        complete = {"snapshot":True,"orders":[]}
+        transport.get.return_value = complete
+        self.assertIs(_complete_profile_orders(transport,"DUR123"),complete)
+        transport._request.assert_called_once_with("/iserver/account/orders",params={"force":"true"})
+        transport.get.assert_called_once_with("/iserver/account/orders")
+
+    def test_incomplete_second_response_fails_closed_with_redacted_shape(self):
+        from atlaspm.execution.ibkr_whatif import _complete_profile_orders, ProfileCheckError
+        from unittest.mock import Mock
+        transport = Mock()
+        transport._request.return_value = []
+        for response in ([], {"orders":[]}, {"snapshot":False,"orders":[]},
+                         {"snapshot":True,"orders":[],"error":"private DUR123"}):
+            transport.get.return_value = response
+            with self.assertRaises(ProfileCheckError) as ctx:
+                _complete_profile_orders(transport,"DUR123")
+            self.assertEqual(ctx.exception.stage,"ORDER_LIST_VALIDATE")
+            self.assertEqual(ctx.exception.reason,"COMPLETE_ORDER_SNAPSHOT_REQUIRED")
+            self.assertNotIn("DUR123",str(ctx.exception.metadata))
+
+    def test_selected_account_error_redacts_values_and_stage(self):
+        from atlaspm.execution.ibkr_whatif import _profile_selected_account, ProfileCheckError, _profile_stage
+        with self.assertRaises(ProfileCheckError) as ctx:
+            _profile_selected_account({"selectedAccount":"U123","accounts":["U123"]},"DUR123")
+        self.assertEqual(ctx.exception.stage,"SELECTED_ACCOUNT")
+        self.assertFalse(ctx.exception.metadata["selected_matches"])
+        self.assertNotIn("U123",str(ctx.exception.metadata))
+        def fail():
+            raise ValueError("private account DUR123")
+        with self.assertRaises(ProfileCheckError) as ctx:
+            _profile_stage("MARGIN_SUMMARY_READ",fail)
+        self.assertEqual(ctx.exception.reason,"ValueError")

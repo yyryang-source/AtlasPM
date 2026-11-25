@@ -51,7 +51,8 @@ class GatewayHTTPError(ValueError):
 
 
 def _safe_endpoint_label(endpoint):
-    if endpoint in {"/iserver/auth/status", "/sso/validate", "/portfolio/accounts", "/tickle"}:
+    if endpoint in {"/iserver/auth/status", "/sso/validate", "/portfolio/accounts", "/tickle",
+                    "/iserver/accounts", "/iserver/account/orders"}:
         return endpoint
     if re.fullmatch(r"/portfolio/[A-Za-z0-9_-]{1,64}/(?:ledger|summary)", endpoint):
         return "/portfolio/{account}/" + endpoint.rsplit("/", 1)[1]

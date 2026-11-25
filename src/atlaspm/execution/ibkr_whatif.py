@@ -235,6 +235,86 @@ def preview_draft(
     }
 
 
+class ProfileCheckError(ValueError):
+    """Safe diagnostic stage; never include broker response or account selector."""
+    def __init__(self, stage, reason, **metadata):
+        super().__init__(reason)
+        self.stage = stage
+        self.reason = reason
+        self.metadata = metadata
+
+
+def _profile_stage(stage, fn, *args, **kwargs):
+    from atlaspm.execution.ibkr_gateway import GatewayHTTPError
+    try:
+        return fn(*args, **kwargs)
+    except ProfileCheckError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
+        # Only known internal codes may be copied; broker strings may contain
+        # identifiers, balances or other confidential fields.
+        known = {
+            "PAPER_PREFLIGHT_IDENTITY_REQUIRED", "PAPER_PREFLIGHT_SELECTED_ACCOUNT_MISMATCH",
+            "PAPER_PREFLIGHT_ACCOUNT_MISMATCH", "PAPER_SESSION_NOT_READY",
+            "PAPER_SSO_NOT_VALIDATED", "PAPER_LOGIN_TYPE_NOT_VERIFIED",
+            "PAPER_DEMO_ACCOUNT_NOT_VERIFIED", "PAPER_HEARTBEAT_NOT_READY",
+            "PAPER_PROFILE_INVALID", "PAPER_PROFILE_CA_FILE_NOT_FOUND",
+            "PAPER_PROFILE_SIZE_LIMIT", "PAPER_SSO_PACING_STATE_INVALID",
+            "PAPER_SSO_CLOCK_REVIEW_REQUIRED",
+        }
+        reason = (f"HTTP_{exc.status}" if isinstance(exc, GatewayHTTPError)
+                  else str(exc) if str(exc) in known else type(exc).__name__)
+        raise ProfileCheckError(stage, reason) from None
+
+
+def _profile_selected_account(session, account_id):
+    if not isinstance(session, dict):
+        raise ProfileCheckError("SELECTED_ACCOUNT", "ACCOUNT_SESSION_NOT_OBJECT")
+    accounts = session.get("accounts")
+    selected = session.get("selectedAccount")
+    if (selected != account_id or not isinstance(accounts, list)
+            or account_id not in accounts
+            or ("isPaper" in session and session["isPaper"] is not True)):
+        raise ProfileCheckError("SELECTED_ACCOUNT", "PAPER_PREFLIGHT_SELECTED_ACCOUNT_MISMATCH",
+                                selected_field_present="selectedAccount" in session,
+                                selected_matches=selected == account_id,
+                                account_list_present=isinstance(accounts, list),
+                                account_list_contains_profile=isinstance(accounts, list) and account_id in accounts,
+                                paper_flag_present="isPaper" in session,
+                                paper_flag_contradicts="isPaper" in session and session["isPaper"] is not True)
+
+
+def _complete_profile_orders(transport, account_id):
+    """Documented order-list preflight followed by a separate unfiltered read.
+
+    The first force refresh may return a blank array. It is never an order
+    snapshot and must not establish that the account has no working orders.
+    Shared transport owns endpoint pacing, including the second GET.
+    """
+    from atlaspm.execution.ibkr_equity_snapshot import _orders
+    _profile_stage("ORDER_LIST_INITIALIZE", transport._request,
+                   "/iserver/account/orders", params={"force":"true"})
+    response = _profile_stage("ORDER_LIST_READ", transport.get, "/iserver/account/orders")
+    obj = isinstance(response, dict)
+    rows = response.get("orders") if obj else None
+    flag = response.get("snapshot") if obj else None
+    metadata = {"response_kind":"object" if obj else "array" if isinstance(response,list) else "other",
+                "snapshot_flag":"true" if flag is True else "false" if flag is False else "missing_or_invalid",
+                "orders_array_present":isinstance(rows,list),
+                "returned_order_count":len(rows) if isinstance(rows,list) else None,
+                "broker_error_present":obj and bool(response.get("error"))}
+    if not obj or flag is not True or not isinstance(rows,list) or len(rows)>=1000 or metadata["broker_error_present"]:
+        raise ProfileCheckError("ORDER_LIST_VALIDATE", "COMPLETE_ORDER_SNAPSHOT_REQUIRED", **metadata)
+    try:
+        _orders(response, account_id)
+        # Reject conflicting ownership aliases; do not infer ownership.
+        if any(any(row[key] != account_id for key in ("acct","account") if key in row) for row in rows):
+            raise ValueError("conflicting ownership")
+    except (ValueError,TypeError,KeyError,OverflowError):
+        raise ProfileCheckError("ORDER_LIST_VALIDATE", "ORDER_ROWS_UNVERIFIED", **metadata) from None
+    return response
+
+
 def paper_profile_preflight(capture, summary, session, orders, *, now):
     """Real Paper account risk inputs, never a verified financing ledger.
 
@@ -254,10 +334,7 @@ def paper_profile_preflight(capture, summary, session, orders, *, now):
             or capture.get("live_execution_enabled") is not False
             or capture.get("broker_order_submission_enabled") is not False):
         raise ValueError("PAPER_PREFLIGHT_IDENTITY_REQUIRED")
-    if not isinstance(session, dict) or session.get("selectedAccount") != account_id or (
-            not isinstance(session.get("accounts"), list) or account_id not in session["accounts"]
-            or ("isPaper" in session and session["isPaper"] is not True)):
-        raise ValueError("PAPER_PREFLIGHT_SELECTED_ACCOUNT_MISMATCH")
+    _profile_selected_account(session, account_id)
     raw = capture["raw"]
     selected = raw["selected_account"]
     if (selected.get("type") != "DEMO" or selected.get("currency") != "USD"
@@ -342,17 +419,21 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
         marker = _sync_path(PAPER_MARKET_RESERVATION)
         if marker.exists():
             raise ValueError("PREVIOUS_MARKET_RESERVATION_UNCERTAIN")
-        profile = load_paper_profile()
+        profile = _profile_stage("LOCAL_PROFILE", load_paper_profile)
         account_id = profile["account"]
-        transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
-        _paper_sso_cooldown(progress)
-        _write_sync_json(_PAPER_SSO_ATTEMPT, {"attempted_at_utc":datetime.now(timezone.utc).isoformat()})
-        capture = collect_ibkr_readonly_account(transport, account_id=account_id, paper_only=True)
-        session = transport.get("/iserver/accounts")
-        summary = transport.get(f"/portfolio/{account_id}/summary")
-        orders = transport.get("/iserver/account/orders")
-        risk = paper_profile_preflight(capture, summary, session, orders, now=datetime.now(timezone.utc))
-        transport.keepalive()
+        transport = _profile_stage("TLS_TRANSPORT", LocalGatewayTransport, profile["url"], ca_file=profile["ca_file"])
+        _profile_stage("SSO_PACING", _paper_sso_cooldown, progress)
+        _profile_stage("SSO_PACING_WRITE", _write_sync_json, _PAPER_SSO_ATTEMPT,
+                       {"attempted_at_utc":datetime.now(timezone.utc).isoformat()})
+        capture = _profile_stage("PAPER_ACCOUNT_CAPTURE", collect_ibkr_readonly_account,
+                                 transport, account_id=account_id, paper_only=True)
+        session = _profile_stage("SELECTED_ACCOUNT_READ", transport.get, "/iserver/accounts")
+        _profile_selected_account(session, account_id)
+        summary = _profile_stage("MARGIN_SUMMARY_READ", transport.get, f"/portfolio/{account_id}/summary")
+        orders = _complete_profile_orders(transport, account_id)
+        risk = _profile_stage("RISK_RECONCILIATION", paper_profile_preflight,
+                              capture, summary, session, orders, now=datetime.now(timezone.utc))
+        _profile_stage("HEARTBEAT", transport.keepalive)
         reasons = list(risk["reasons"])
         report = {**FLAGS, "status":"PAPER_PREFLIGHT_CHECK_COMPLETED",
                   "paper_identity_verified":True, "active_order_count":risk["active_order_count"],
@@ -401,7 +482,7 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
                     or ("isPaper" in selected and selected["isPaper"] is not True)):
                 reasons.append("SELECTED_ACCOUNT_CHANGED")
                 return report
-            if _orders(transport.get("/iserver/account/orders"), account_id)[0]:
+            if _orders(_complete_profile_orders(transport, account_id), account_id)[0]:
                 reasons.append("ACTIVE_ORDERS_REQUIRE_RECONCILIATION")
                 return report
             transport.keepalive()
@@ -460,6 +541,11 @@ def main() -> int:
                                            shares=args.shares, allow_preview=args.allow_paper_preview)
             print(json.dumps(result,indent=2,allow_nan=False))
             return 0
+        except ProfileCheckError as exc:
+            print(json.dumps({"status":"PAPER_PREFLIGHT_BLOCKED","stage":exc.stage,
+                              "reason":exc.reason, **exc.metadata,
+                              "submitted":False,"trade_authorized":False,"live_execution_enabled":False}))
+            return 2
         except (OSError,ValueError,TypeError,KeyError,OverflowError) as exc:
             from atlaspm.execution.ibkr_gateway import GatewayHTTPError
             reason = f"HTTP_{exc.status} at {exc.endpoint}" if isinstance(exc,GatewayHTTPError) else type(exc).__name__

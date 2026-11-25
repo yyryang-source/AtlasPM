@@ -277,3 +277,12 @@ are used. No automatic preview retry. The old cash-only reviewed workbench
 and DU-only submission guard are unchanged. A successful diagnostic does
 not prove financing/collateral, field-level quote timestamps or independent
 risk approval. No preview receipt is accepted by the order journal.
+
+
+Order-list preflight uses the documented force-refresh GET, discards its
+initial response, and then requests an unfiltered complete snapshot using
+the transport's existing per-endpoint pacing. Only snapshot=true with a
+valid bounded order array is accepted. Incomplete responses are blocked,
+not treated as zero orders. Stage-specific failures report safe codes and
+schema flags/counts, never raw account or order data. No account switching.
+Reference: https://www.interactivebrokers.com/docs/web-api/v1/endpoints/order-monitoring/live-orders
