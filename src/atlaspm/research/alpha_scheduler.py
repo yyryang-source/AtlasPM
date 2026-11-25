@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import json
 import time
 
-from atlaspm.research.alpha_sources import options_once, news_once, institutional_once
+from atlaspm.research.alpha_sources import options_once, news_once, institutional_once, treasury_once, fred_once, credit_once
 from atlaspm.research import event_queue
 
 
@@ -39,11 +39,24 @@ def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep):
 def main():
     parser=ArgumentParser(description=__doc__)
     parser.add_argument("--options",action="store_true")
+    parser.add_argument("--treasury",action="store_true")
+    parser.add_argument("--fred",action="append",default=[])
+    parser.add_argument("--credit",action="append",default=[],help="Reviewed scope:identifier_type:identifier:SYMBOL")
     parser.add_argument("--news",action="append",choices=["yahoo_finance","bloomberg"],default=[])
     parser.add_argument("--institutional",action="append",default=[],help="Reviewed subject=SYMBOL mapping")
     parser.add_argument("--cycles",type=int,default=100)
     args=parser.parse_args()
     tasks={}
+    if args.treasury:
+        tasks["treasury"]=(300,treasury_once)
+    for series in args.fred:
+        tasks["fred:"+series]=(300,lambda s=series:fred_once(s))
+    for item in args.credit:
+        parts=item.split(":")
+        if len(parts)!=4 or not all(parts):
+            parser.error("Expected scope:identifier_type:identifier:SYMBOL")
+        scope,kind,identifier,symbol=parts
+        tasks["credit:"+item]=(900,lambda a=scope,b=kind,c=identifier,d=symbol:credit_once(scope=a,identifier_type=b,identifier=c,symbol=d))
     if args.options:
         tasks["unusual_whales"]=(5,options_once)
     for provider in args.news:
