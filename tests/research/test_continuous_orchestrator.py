@@ -373,6 +373,40 @@ class ContinuousTests(unittest.TestCase):
         self.assertTrue(out["independent_preflight"]["pro_forma_unexecuted"]["self_financing_identity_verified"])
         self.assertFalse(out["trade_authorized"])
         self.assertFalse(out["global_optimum_verified"])
+
+        # Joint local shocks on actual instrument marks; test the discrete
+        # output arithmetic as well as the infeasible scenario budget.
+        from copy import deepcopy
+        scenario_market=deepcopy(market)
+        scenario_market["inputs"][symbols[1]]["convexity"]=25.
+        scenario_market["factor_stress_scenarios"]=[{
+            "name":"rates_up_equity_down","equity_returns":{"QQQ":-.1},
+            "yield_shift_bps":100,"volatility_shift_points":-2,
+            "annual_financing_rate_additive":.02}]
+        stressed=optimize_multiasset(ledger,context,scenario_market,
+                                     dict(limits,max_factor_stress_loss_fraction=.2))
+        self.assertEqual(stressed["status"],"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT",stressed)
+        review=stressed["factor_stress_review"]
+        s=review["scenarios"][0]
+        self.assertAlmostEqual(s["instrument_return_approximations"][symbols[0]],-.1)
+        self.assertAlmostEqual(s["instrument_return_approximations"][symbols[1]],-.04225)
+        self.assertAlmostEqual(s["instrument_return_approximations"][symbols[2]],1.34)
+        w=stressed["discrete_weights"]
+        expected=.1*w[symbols[0]]+.04225*w[symbols[1]]+.06*10/365*stressed["remaining_debt"]/123950
+        self.assertAlmostEqual(s["loss_budget_fraction"],expected)
+        self.assertTrue(s["within_limit"])
+        self.assertFalse(review["positive_mark_pnl_offsets_used"])
+        self.assertFalse(review["full_repricing_verified"])
+        self.assertFalse(stressed["trade_authorized"])
+        blocked=optimize_multiasset(ledger,context,scenario_market,
+                                     dict(limits,max_factor_stress_loss_fraction=.001))
+        self.assertEqual(blocked["status"],"BLOCKED_CONTINUOUS_SOLVE")
+        self.assertEqual(blocked["legs"],[])
+        del scenario_market["inputs"][symbols[1]]["convexity"]
+        with self.assertRaises(ValueError):
+            optimize_multiasset(ledger,context,scenario_market,
+                                dict(limits,max_factor_stress_loss_fraction=.2))
+
         with patch("scipy.optimize.minimize",side_effect=ValueError("solver failure")):
             refused=optimize_multiasset(ledger,context,market,limits)
         self.assertEqual(refused["status"],"BLOCKED_CONTINUOUS_SOLVE")

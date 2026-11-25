@@ -282,6 +282,75 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     }
 
 
+def _factor_stress_rows(instruments, market, limits, policy_cap):
+    """Bounded local scenario approximation; not a full repricing model.
+
+    Factor shocks are simultaneous, applied to the exact instruments in
+    the optimizer. Positive scenario marks are diagnostic only: the
+    constrained loss budget never credits hypothetical hedge gains.
+    """
+    scenarios=market.get("factor_stress_scenarios")
+    if "factor_stress_scenarios" not in market and "max_factor_stress_loss_fraction" not in limits:
+        return [],None
+    if (not isinstance(scenarios,list) or not 1<=len(scenarios)<=20
+            or "max_factor_stress_loss_fraction" not in limits):
+        raise ValueError("MULTIASSET_FACTOR_STRESS_POLICY_REQUIRED")
+    cap=finite(limits["max_factor_stress_loss_fraction"],"factor_stress_cap",minimum=0)
+    if cap>policy_cap:
+        raise ValueError("MULTIASSET_FACTOR_STRESS_CAP_EXCEEDS_POLICY")
+    equity={p["identifier"]:p for p,_ in instruments if p["type"]=="equity"}
+    inputs=market["inputs"]
+    names=set()
+    rows=[]
+    for s in scenarios:
+        if (not isinstance(s,dict) or set(s)!={"name","equity_returns","yield_shift_bps",
+                    "volatility_shift_points","annual_financing_rate_additive"}):
+            raise ValueError("MULTIASSET_INVALID_FACTOR_STRESS_SCENARIO")
+        name=s["name"]
+        if not isinstance(name,str) or not name or len(name)>80 or name in names:
+            raise ValueError("MULTIASSET_FACTOR_STRESS_NAME")
+        names.add(name)
+        shocks=s["equity_returns"]
+        if not isinstance(shocks,dict) or set(shocks)!=set(equity):
+            raise ValueError("MULTIASSET_FACTOR_STRESS_EQUITY_COVERAGE")
+        shocks={k:finite(v,"equity_shock") for k,v in shocks.items()}
+        yield_bps=finite(s["yield_shift_bps"],"yield_shift_bps")
+        vol_points=finite(s["volatility_shift_points"],"volatility_shift_points")
+        apr_add=finite(s["annual_financing_rate_additive"],"annual_financing_rate_additive",minimum=0)
+        apr=finite(market["annual_financing_rate"],"annual_financing_rate",minimum=0)+apr_add
+        # Limit the explicitly approximate local shock domain. Large stress
+        # events still use the existing independent full-premium-loss gate.
+        if (any(abs(v)>.25 for v in shocks.values()) or abs(yield_bps)>200
+                or abs(vol_points)>20 or apr>1):
+            raise ValueError("MULTIASSET_FACTOR_STRESS_SHOCK_RANGE")
+        dy=yield_bps/10000
+        returns=[]
+        for p,_ in instruments:
+            i=p["identifier"]
+            d=inputs[i]
+            if p["type"]=="equity":
+                ret=shocks[i]
+            elif p["type"]=="treasury":
+                convexity=finite(d.get("convexity"),"treasury_convexity",minimum=0)
+                if convexity>10000:
+                    raise ValueError("MULTIASSET_FACTOR_STRESS_CONVEXITY_RANGE")
+                ret=-p["modified_duration"]*dy+.5*convexity*dy**2
+            else:
+                ds=equity[p["underlying"]]["mark_price"]*shocks[p["underlying"]]
+                delta=finite(d["delta"],"delta")
+                gamma=finite(d["gamma"],"gamma",minimum=0)
+                vega=finite(d["vega_per_vol_point"],"vega",minimum=0)
+                ret=(delta*ds+.5*gamma*ds**2+vega*vol_points)/p["mark_premium"]
+            # All supported instruments are long: model marks cannot lose
+            # more than their market value. A positive approximate return
+            # never reduces another sleeve's loss budget.
+            ret=finite(ret,"factor_stress_return")
+            returns.append(max(-1.,ret))
+        rows.append({"name":name,"returns":returns,
+                     "financing_fraction":apr*market["horizon_days"]/365})
+    return rows,cap
+
+
 def optimize_multiasset(ledger, context, market, limits):
     """Joint constrained research solve over supported exact-leg instruments.
 
@@ -406,6 +475,12 @@ def optimize_multiasset(ledger, context, market, limits):
     risk_caps=np.array([finite(limits[k],"risk_limit",minimum=0) for k in
                         ("max_dv01_per_nlv","max_abs_delta_per_nlv","max_gamma_per_nlv","max_vega_per_nlv","max_option_weight")])
     n=len(ids)
+    factor_rows,factor_cap=_factor_stress_rows(instruments,market,limits,max_stress)
+    factor_returns=np.asarray([s["returns"] for s in factor_rows],dtype=float)
+    factor_losses=np.maximum(-factor_returns,0.)
+    factor_funding=np.asarray([s["financing_fraction"] for s in factor_rows],dtype=float)
+    def factor_stress(x):
+        return factor_losses@x[:n]+factor_funding*max(0.,debt/nlv-x[-1])
     def fee(x):
         return float(costs@np.abs(x[:n]-current))
     def available(x):
@@ -422,6 +497,8 @@ def optimize_multiasset(ledger, context, market, limits):
                 max_turnover-float(np.abs(q-current).sum())-x[-1],
                 max_vol**2*net**2-variance(x)]
         values.extend(risk_caps*net-risk_matrix@q)
+        if factor_rows:
+            values.extend(factor_cap*net-factor_stress(x))
         # All puts on the same underlying compete for the same share backing.
         # Do not let multiple individually covered legs reuse those shares.
         for j,indices in put_groups.items():
@@ -479,6 +556,24 @@ def optimize_multiasset(ledger, context, market, limits):
           "settled_cash_after":available(x)*nlv,"expected_horizon_volatility":max(0.,variance(x))**.5,
           "risk_exposures":dict(zip(("dv01","abs_delta","gamma","vega","option_weight"),map(float,risk_matrix@x[:n]))),
           "legs":legs}
+    if factor_rows:
+        net=1-fee(x)
+        stressed=factor_stress(x)
+        base["factor_stress_review"]={
+            "method":"synthetic_delta_gamma_vega_duration_convexity_loss_only",
+            "max_loss_fraction":factor_cap,
+            "scenario_count":len(factor_rows),
+            "positive_mark_pnl_offsets_used":False,
+            "denominator":"post_estimated_trade_fee_nlv",
+            "full_repricing_verified":False,
+            "broker_margin_verified":False,
+            "scenarios":[{"name":s["name"],
+                "instrument_return_approximations":dict(zip(ids,s["returns"])),
+                "signed_mark_pnl_fraction":float(factor_returns[i]@x[:n]/net),
+                "financing_cost_fraction":float(factor_funding[i]*max(0.,debt/nlv-x[-1])/net),
+                "loss_budget_fraction":float(stressed[i]/net),
+                "within_limit":bool(stressed[i]<=factor_cap*net+1e-9)}
+                for i,s in enumerate(factor_rows)]}
     if not legs:
         return {**base,"status":"NO_CHANGE"}
     plan=deepcopy(context)
