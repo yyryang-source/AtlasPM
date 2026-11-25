@@ -61,3 +61,34 @@ inference, portfolio optimizer alpha sizing, end-to-end research feedback,
 real-data identity/corporate actions/survivorship validation, reproducible
 full-scale resource benchmarks. RegimeNet and legacy screeners are not yet wired
 to this entry point. No real data, weights, account information or orders go to Git.
+
+
+## Multi-horizon research tournament (synthetic only)
+
+The optional module `python -m atlaspm.research.alpha_multi_horizon --file local_data/multi_alpha.json`
+reuses the existing V6.2 model tournament and purged trainer for 1, 5 and
+21-session labels (other existing supported horizons can be selected).
+Request fields: payload (synthetic panel), holdout_start (zero-based index),
+optional horizons, config (tournament common options except horizon),
+candidates (2–8) and selection_metric. All horizons must align to the same
+refit boundary. Default test_sessions is 4; with minimum_train_sessions=10,
+embargo_sessions=1 and sequence_length=1, index 60 aligns the defaults.
+Ensure enough sessions remain after the boundary for the longest label.
+
+Every horizon's candidate identity/configuration is locked using only the
+prefix before any selected model receives full data. Only locked winners
+refit on matured past labels. All horizons share the holdout start, but
+their validation periods and matured label counts differ. Metrics are not
+directly comparable across horizons. A deterministic fixed-spacing
+nonoverlapping holdout diagnostic reports missing whole cross-sections,
+rather than replacing missing dates with convenient later ones. It is a
+prediction diagnostic, not a trading return series, Sharpe estimate or
+claim of independent observations. No cross-horizon return compounding.
+
+The report retains selection lock SHA-256, per-horizon trial metrics,
+winner-only holdout metrics and cohort coverage, and releases full
+prediction arrays after each horizon. Limits: 2,000 sessions, 200,000 asset
+rows, 64 features, 8 candidates and 2,000 planned fold fits. These are
+workload bounds, not a total RAM or runtime guarantee. No model promotion,
+signals, portfolio handoff, real-data training or broker authorization.
+The existing one-horizon Alpha entry point is unchanged.
