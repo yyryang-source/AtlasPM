@@ -896,3 +896,26 @@ No source market parquet is modified, no formal label is published and no
 real training or execution permission is granted. The missing independent
 historical sources, full corporate-action coverage, vendor price semantics
 and rights remain external blockers.
+
+### Legacy periodic-filing sampling (optional)
+
+A local 2000 pilot fetched 100 current-report bodies but produced no
+supported cover observations. This is a selection/extraction coverage
+limitation, not proof that historical identities are absent. V5.2 now
+indexes 10-K, 10-K405, 10-KSB, 20-F, 40-F, 10-Q and 10-QSB from the existing
+hash-verified raw SEC indexes (parser v52.2). Rebuild the four local year
+partitions; no quarterly index redownload is needed when raw objects exist.
+
+~~~powershell
+& $py -m atlaspm.cli market-db hf-5m-filings-build-v52 --start-quarter 2000-Q1 --end-quarter 2000-Q4
+& $py -m atlaspm.data.hf_stock5m_identity_v56 --year 2000 --periodic-first --max-issuers 20 --max-requests 20 --fetch
+~~~
+
+The optional strategy selects at most one body per historical issuer: earliest
+annual filing in the year, otherwise earliest quarterly filing. It refuses
+missing or stale index quarters and preserves the old current-report strategy
+as the default. Periodic-only sampling is not a complete historical universe;
+issuers without periodic filings are excluded from that pilot. Modern cover
+facts and exact legacy three-column tables remain the only supported
+observations; older two-column covers do not prove a trading symbol.
+No stable identity, historical interval, action or training approval is inferred.

@@ -143,3 +143,39 @@ class BatchTests(unittest.TestCase):
         self.assertTrue(r["network_stopped"])
         self.assertFalse(r["page_complete"])
         self.assertEqual(fetch.call_count,1)
+
+
+    def test_periodic_annual_priority_one_body_per_issuer_and_rebuild(self):
+        annual={**filing(day="2020-03-20",number="000010"),"form":"10-K405"}
+        quarterly={**filing(day="2020-01-15",number="000011"),"form":"10-Q"}
+        other={**filing(cik="0000000124",day="2020-02-20",number="000012"),"form":"10-QSB"}
+        cx=f._db()
+        try:
+            cx.executemany("INSERT INTO filings VALUES (?,?,?,?,?,?)",
+                [[x[k] for k in ("quarter","cik","issuer","form","filed_date","source_url")]
+                 for x in (annual,quarterly,other)])
+        finally:
+            cx.close()
+        with patch.object(v.ev,"download") as download:
+            with self.assertRaisesRegex(ValueError,"PERIODIC_INDEX_REBUILD_REQUIRED"):
+                v.run(2020,periodic_first=True)
+            download.assert_not_called()
+        cx=f._db()
+        try:
+            cx.execute("UPDATE partitions SET parser_version=?,candidate_rows=6",[f.VERSION])
+            for q in ("2020-Q2","2020-Q3","2020-Q4"):
+                cx.execute("INSERT INTO partitions VALUES (?,?,?,?,0)",[q,"a"*64,f.VERSION,0])
+        finally:
+            cx.close()
+        plan=v.plan(2020,periodic_first=True)
+        self.assertEqual(plan["filings"],[annual,other])
+        self.assertEqual(plan["stale_periodic_index_quarters"],[])
+        self.assertEqual(v.plan(2020,max_issuers=1)["filings"],[self.items[1]])
+        with patch.object(v.ev,"download") as download:
+            result=v.run(2020,periodic_first=True)
+        download.assert_not_called()
+        self.assertEqual(result["filings_selected"],2)
+        self.assertFalse(result["page_complete"])
+        self.assertEqual(result["certified_identities"],0)
+        self.assertEqual(result["claims_ingested"],0)
+        self.assertFalse(result["approved_for_model_training"])

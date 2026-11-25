@@ -19,7 +19,7 @@ from atlaspm.data.hf_stock5m_certification_v5 import ROOT
 from atlaspm.data.market_db import private_path
 
 BASE = ROOT / "filings_v52"
-VERSION = "v52.1"
+VERSION = "v52.2"
 URL = re.compile(r"https://www\.sec\.gov/Archives/edgar/data/[0-9]+/[0-9-]+\.txt")
 KINDS = {
     "split": ("8-K", "8-K/A", "6-K", "6-K/A"),
