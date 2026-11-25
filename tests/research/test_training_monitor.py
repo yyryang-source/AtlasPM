@@ -49,6 +49,25 @@ class MonitoringTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'MONITOR_DATE_OR_SECURITY_ORDER'):
             monitor_predictions(p)
 
+    def test_partial_and_missing_dates_expire_calibration_and_champion(self):
+        p=streams()
+        for rows in p.values():
+            for row in rows:
+                if row["date"]>="2020-01-20" and row["security_id"]=="SYN:0":
+                    row["actual"]=None
+        report=monitor_predictions(p,minimum_dates=3,window_dates=5,coverage=.75)
+        self.assertEqual(report["daily"][18]["champion"],"ridge")
+        self.assertEqual(report["daily"][-1]["champion"],"historical_mean")
+        self.assertEqual(report["daily"][-1]["matured_date_slots"],5)
+        self.assertEqual(report["daily"][-1]["incomplete_matured_dates"],5)
+        self.assertIsNone(report["daily"][-1]["models"]["ridge"]["interval_half_width"])
+        relaxed=monitor_predictions(p,minimum_dates=3,window_dates=5,coverage=.75,
+                                    minimum_label_fraction=.5)
+        self.assertEqual(relaxed["daily"][-1]["champion"],"ridge")
+        self.assertLess(relaxed["coverage_as_of_last_prediction"]["ridge"]["assessed_dates"],
+                        len(relaxed["daily"])-3)
+        self.assertFalse(relaxed["automatic_promotion_enabled"])
+
     def test_missing_and_alignment(self):
         p=streams()
         for rows in p.values():

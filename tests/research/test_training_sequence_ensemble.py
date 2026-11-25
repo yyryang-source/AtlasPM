@@ -74,6 +74,18 @@ class EnsembleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'INVALID_LABEL_MATURITY'):
             adaptive_ensemble(p)
 
+    def test_missing_matured_dates_expire_old_weights(self):
+        p=self.forecasts()
+        for rows in p.values():
+            for row in rows[2:]:
+                row["actual"]=None
+        out=adaptive_ensemble(p,window_dates=3,minimum_dates=1,
+                             reference_model="bad")
+        self.assertGreater(out["weight_history"][4]["weights"]["good"],.99)
+        self.assertEqual(out["weight_history"][7]["matured_dates"],0)
+        self.assertEqual(out["weight_history"][7]["incomplete_matured_dates"],3)
+        self.assertTrue(out["weight_history"][7]["fallback_to_reference"])
+
     def test_alignment_refused(self):
         p=self.forecasts()
         p["good"].pop()

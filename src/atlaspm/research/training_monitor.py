@@ -1,17 +1,17 @@
 """Chronological OOS uncertainty, performance drift and research-only model selection."""
 from __future__ import annotations
 
-from collections import deque
 from itertools import groupby
 from math import ceil
 from statistics import fmean
 from atlaspm.research.training_registry import FLAGS
 from atlaspm.engine.contracts import finite
-from atlaspm.research.training_predictions import aligned_forecasts
+from atlaspm.research.training_predictions import aligned_forecasts, MaturedDateWindow
 
 
 def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
-                        drift_ratio=1.5,baseline="historical_mean",minimum_improvement=.05):
+                        drift_ratio=1.5,baseline="historical_mean",minimum_improvement=.05,
+                        minimum_label_fraction=1.):
     """Use past matured date blocks only. Daily max residual calibrates a
     cross-sectional interval; empirical coverage is not a guarantee under drift.
     Champion status means research candidate, never operational approval.
@@ -26,8 +26,7 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
     if not .5<coverage<1 or ratio<=1 or not 0<=improvement<1:
         raise ValueError("INVALID_MONITOR_THRESHOLDS")
     models=sorted(streams)
-    history=deque(maxlen=2*window_dates)
-    pending=deque()
+    window=MaturedDateWindow(window_dates,minimum_label_fraction=minimum_label_fraction)
     audit=[]
     total={m:0 for m in models}
     hits={m:0 for m in models}
@@ -41,22 +40,25 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
         maturity="MONITOR_LABEL_MATURITY")
 
     def admit(day):
-        while pending and pending[0]["maturity"]<day:
-            item=pending.popleft()
-            if item["count"]:
-                history.append(item)
+        for item in window.advance(day):
+            # Assess coverage on the admitted calibration population only;
+            # a partial day cannot count as a fully covered cross-section.
+            if item["eligible"]:
                 for model in models:
                     if item["intervals"][model] is not None:
-                        total[model]+=item["count"]
+                        total[model]+=item["observed_count"]
                         hits[model]+=item["hits"][model]
-                        assessed_dates[model]+=1
-                        covered_dates[model]+=int(item["hits"][model]==item["count"])
+                        if item["observed_count"]==item["forecast_count"]:
+                            assessed_dates[model]+=1
+                            covered_dates[model]+=int(item["hits"][model]==item["forecast_count"])
 
     for day,group in groupby(aligned,key=lambda rows:rows[0]["date"]):
         admit(day)
-        past=list(history)
-        recent=past[-window_dates:]
-        older=past[:-window_dates]
+        past=list(window.history)
+        recent_blocks=past[-window_dates:]
+        older_blocks=past[:-window_dates]
+        recent=[r for r in recent_blocks if r["eligible"]]
+        older=[r for r in older_blocks if r["eligible"]]
         intervals={}
         diagnostics={}
         for model in models:
@@ -77,13 +79,18 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
             if diagnostics[best]["recent_mae"]<base*(1-improvement) and diagnostics[best]["drift_alert"] is not True:
                 champion=best
         audit.append(dict(date=day,matured_calibration_dates=len(recent),
+                          matured_date_slots=len(recent_blocks),
+                          incomplete_matured_dates=len(recent_blocks)-len(recent),
                           champion=champion,models=diagnostics))
-        losses={m:[] for m in models}
+        losses={m:0. for m in models}
+        maxima={m:0. for m in models}
         matches={m:0 for m in models}
         maturity=None
         count=0
+        forecast_count=0
         for bundle in group:
             row=bundle[0]
+            forecast_count+=1
             end=row["label_end_date"]
             maturity=end if maturity is None else max(end,maturity)
             if row["actual"] is None:
@@ -91,14 +98,14 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
             count+=1
             for model,forecast in zip(models,bundle):
                 error=abs(forecast["prediction"]-row["actual"])
-                losses[model].append(error)
+                losses[model]+=error
+                maxima[model]=max(maxima[model],error)
                 if intervals[model] is not None and error<=intervals[model]:
                     matches[model]+=1
-        if pending and maturity<pending[-1]["maturity"]:
-            raise ValueError("MONITOR_MATURITY_ORDER")
-        pending.append(dict(maturity=maturity,count=count,intervals=intervals,hits=matches,
-            mae={m:fmean(losses[m]) for m in models} if count else {},
-            max_error={m:max(losses[m]) for m in models} if count else {}))
+        window.append(maturity=maturity,forecast_count=forecast_count,observed_count=count,
+                      intervals=intervals,hits=matches,
+                      mae={m:losses[m]/count for m in models} if count else {},
+                      max_error=maxima if count else {})
     if not audit:
         raise ValueError("EMPTY_MONITOR_PREDICTIONS")
     latest=audit[-1]
@@ -125,4 +132,6 @@ def monitor_predictions(streams,*,window_dates=30,minimum_dates=10,coverage=.9,
                     for m in models},
                 interval_method="rolling_matured_daily_max_absolute_residual",
                 interval_coverage_guaranteed=False,automatic_promotion_enabled=False,
-                pending_unmatured_dates=len(pending),**FLAGS)
+                minimum_label_fraction=window.minimum_label_fraction,
+                coverage_population="matured_eligible_dates; full cross-section coverage requires all labels",
+                pending_unmatured_dates=len(window.pending),**FLAGS)

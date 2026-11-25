@@ -111,3 +111,50 @@ def aligned_forecasts(streams, names, *, mismatch, order, label_mismatch, maturi
                 raise ValueError(label_mismatch)
             finite(row["prediction"],"prediction")
         yield rows
+
+
+class MaturedDateWindow:
+    """Shared bounded chronology for calibration and adaptive weighting.
+
+    Each forecast day occupies a slot when its last label strictly precedes
+    the next forecast date. Missing outcomes age out older evidence rather
+    than keeping an indefinitely stale window alive. Fraction is assessed
+    only at maturity; no future label completeness influences current weights.
+    """
+    def __init__(self,window_dates,*,minimum_label_fraction=1.,max_pending_dates=512):
+        from collections import deque
+        if type(window_dates) is not int or not 1<=window_dates<=252:
+            raise ValueError("INVALID_MATURED_DATE_WINDOW")
+        fraction=finite(minimum_label_fraction,"minimum_label_fraction")
+        if not 0<fraction<=1:
+            raise ValueError("INVALID_MINIMUM_LABEL_FRACTION")
+        if type(max_pending_dates) is not int or not 1<=max_pending_dates<=4096:
+            raise ValueError("INVALID_PENDING_DATE_BUDGET")
+        self.minimum_label_fraction=fraction
+        self.max_pending_dates=max_pending_dates
+        self.history=deque(maxlen=2*window_dates)
+        self.pending=deque()
+        self.last_day=None
+
+    def advance(self,day):
+        if self.last_day is not None and day<=self.last_day:
+            raise ValueError("MATURED_WINDOW_DATE_ORDER")
+        self.last_day=day
+        while self.pending and self.pending[0]["maturity"]<day:
+            item=self.pending.popleft()
+            item["eligible"]=(item["observed_count"]>0 and
+                item["observed_count"]/item["forecast_count"]>=self.minimum_label_fraction)
+            self.history.append(item)
+            yield item
+
+    def append(self,*,maturity,forecast_count,observed_count,**values):
+        if (self.last_day is None or maturity<=self.last_day or
+                type(forecast_count) is not int or type(observed_count) is not int or
+                not 0<=observed_count<=forecast_count or not forecast_count):
+            raise ValueError("INVALID_MATURED_DATE_BLOCK")
+        if self.pending and maturity<self.pending[-1]["maturity"]:
+            raise ValueError("NONMONOTONIC_LABEL_MATURITY")
+        if len(self.pending)>=self.max_pending_dates:
+            raise ValueError("PENDING_MATURITY_DATE_BUDGET")
+        self.pending.append(dict(date=self.last_day,maturity=maturity,
+            forecast_count=forecast_count,observed_count=observed_count,**values))

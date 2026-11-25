@@ -1,14 +1,13 @@
 """Adaptive synthetic ensemble with bounded daily working memory."""
 from __future__ import annotations
-from collections import deque
 from itertools import groupby
 from math import exp
 from statistics import fmean
 from atlaspm.engine.contracts import finite
-from atlaspm.research.training_predictions import aligned_forecasts
+from atlaspm.research.training_predictions import aligned_forecasts, MaturedDateWindow
 
 
-def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01, regimes=None, reference_model=None, drift_ratio=None, minimum_improvement=0.):
+def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=.01, regimes=None, reference_model=None, drift_ratio=None, minimum_improvement=0., minimum_label_fraction=1.):
     """Input streams must be ordered by (date, security_id); yield daily rows."""
     if type(window_dates) is not int or type(minimum_dates) is not int or not 1<=minimum_dates<=window_dates:
         raise ValueError("INVALID_ENSEMBLE_WINDOW")
@@ -30,22 +29,22 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
         order="DUPLICATE_OR_UNSORTED_FORECAST",
         label_mismatch="INCONSISTENT_ENSEMBLE_LABEL",
         maturity="INVALID_LABEL_MATURITY")
-    pending=deque()
-    matured=deque(maxlen=2*window_dates if drift_ratio is not None else window_dates)
-    conditioned={}
+    window=MaturedDateWindow(window_dates,minimum_label_fraction=minimum_label_fraction)
     seen=False
     for day,group in groupby(aligned,key=lambda rows:rows[0]["date"]):
         seen=True
-        while pending and pending[0][0]<day:
-            _,state,errors=pending.popleft()
-            if errors is not None:
-                matured.append(errors)
-                if regimes is not None and state!="warmup":
-                    conditioned.setdefault(state,deque(maxlen=window_dates)).append(errors)
+        for _ in window.advance(day):
+            pass
         state=regimes[day] if regimes is not None else None
-        local=conditioned.get(state,())
-        recent=list(matured)[-window_dates:]
-        older=list(matured)[:-window_dates]
+        past=list(window.history)
+        recent_blocks=past[-window_dates:]
+        older_blocks=past[:-window_dates]
+        recent=[b["errors"] for b in recent_blocks if b["eligible"]]
+        older=[b["errors"] for b in older_blocks if b["eligible"]]
+        # Do not resurrect old regime-specific evidence from outside the
+        # current rolling date window merely because the regime recurs.
+        local=[b["errors"] for b in recent_blocks if b["eligible"]
+               and regimes is not None and state!="warmup" and b["regime"]==state]
         selected=local if len(local)>=minimum_dates else recent
         quarantined=[]
         if len(selected)>=minimum_dates:
@@ -68,20 +67,24 @@ def iter_ensemble(predictions, *, window_dates=20, minimum_dates=5, temperature=
         else:
             weights={n:1/len(names) for n in names}
         output=[]
-        errors={n:[] for n in names}
+        errors={n:0. for n in names}
+        observed=0
         maturity=day
         for rows in group:
             base=rows[0]
             output.append({**base,"prediction":sum(weights[n]*row["prediction"] for n,row in zip(names,rows))})
             maturity=max(maturity,base["label_end_date"])
             if base["actual"] is not None:
+                observed+=1
                 for n,row in zip(names,rows):
-                    errors[n].append(abs(row["prediction"]-row["actual"]))
-        if pending and maturity<pending[-1][0]:
-            raise ValueError("NONMONOTONIC_LABEL_MATURITY")
+                    errors[n]+=abs(row["prediction"]-row["actual"])
         # Only scalar daily loss summaries are queued until label maturity.
-        pending.append((maturity,state,{n:fmean(v) for n,v in errors.items()} if errors[names[0]] else None))
-        audit=dict(date=day,matured_dates=len(recent),weights=weights)
+        window.append(maturity=maturity,forecast_count=len(output),observed_count=observed,
+                      regime=state,errors={n:v/observed for n,v in errors.items()} if observed else {})
+        audit=dict(date=day,matured_dates=len(recent),weights=weights,
+                   matured_date_slots=len(recent_blocks),
+                   incomplete_matured_dates=len(recent_blocks)-len(recent),
+                   minimum_label_fraction=window.minimum_label_fraction)
         if reference_model is not None:
             audit.update(reference_model=reference_model,quarantined=quarantined,
                          fallback_to_reference=weights[reference_model]==1.)
