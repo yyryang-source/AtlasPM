@@ -378,8 +378,7 @@ def reconcile(transport, journal: PaperJournal, batch_id: str, account: str) -> 
     latest, _ = _broker_observations(batch, after, trades, account)
     if sorted(observations, key=lambda item: item["client_id"]) != sorted(latest, key=lambda item: item["client_id"]):
         raise ValueError("Broker orders changed during reconciliation; poll again")
-    journal.apply(batch_id, observations, fills)
-    reconciled_batch = journal.get(batch_id)
+    reconciled_batch = journal.apply(batch_id, observations, fills, expected_batch=batch)
     result = _reconcile_account(reconciled_batch, snapshot)
     result["observed_working_client_ids"] = [item["client_id"] for item in latest
                                              if item["state"] in {"working", "partial"}]
