@@ -110,3 +110,31 @@ class JointSpecialistTests(unittest.TestCase):
                     self.assertEqual(event_queue.drain(as_of=STAMP,local_bindings=bindings())["local_research_calls"],0)
             finally:
                 os.chdir(prior)
+
+
+    def test_actual_bond_reader_does_not_credit_missing_requested_subject(self):
+        from contextlib import closing
+        from atlaspm.data import market_db
+        with TemporaryDirectory() as tmp:
+            prior=Path.cwd()
+            os.chdir(tmp)
+            try:
+                with closing(market_db.connect(market_db.DB_PATH)) as con,con:
+                    con.execute("INSERT INTO bonds VALUES (?,?,?,?,?,?,?,?)",
+                        ("999999990","treasury","fixture","note",4.0,"2019-01-01","2025-01-01","fixture"))
+                    con.execute("INSERT INTO bond_quotes VALUES (?,?,?,?,?,?)",
+                        ("999999990","2020-01-09",99.,100.,4.1,"fixture"))
+                task={"route":"bond_local","params":{"start":"2020-01-01","end":"2020-01-09",
+                      "symbols":["999999990","999999991"]}}
+                out=intel.local_specialist_tasks([task],as_of=STAMP)["tasks"][0]
+                self.assertEqual(out["status"],"LOCAL_REVIEW_COMPLETED")
+                self.assertEqual(out["report"]["subject_row_counts"],{"999999990":1})
+                present=intel.specialist_decision_receipt(task,out,security_id="ISIN:US9999999900",
+                          identity={"provider_id":"999999990","asset_type":"bond"},as_of=STAMP)
+                absent=intel.specialist_decision_receipt(task,out,security_id="ISIN:US9999999910",
+                          identity={"provider_id":"999999991","asset_type":"bond"},as_of=STAMP)
+                self.assertEqual(present["category"],"bond")
+                self.assertEqual(present["action"],"NO_TRADE")
+                self.assertEqual(absent["status"],"BLOCKED_NO_MATCHING_SPECIALIST_OUTPUT")
+            finally:
+                os.chdir(prior)
