@@ -402,6 +402,32 @@ class ContinuousTests(unittest.TestCase):
                                      dict(limits,max_factor_stress_loss_fraction=.001))
         self.assertEqual(blocked["status"],"BLOCKED_CONTINUOUS_SOLVE")
         self.assertEqual(blocked["legs"],[])
+        # Loose financing limits permit the existing solution; a strict
+        # collateral ceiling is infeasible with the bounded repayment leg.
+        financing={"max_debt_to_nlv":.5,"max_annual_interest_to_nlv":.1,
+                   "collateral_haircut":.1,"max_debt_to_stressed_collateral":1.,
+                   "annual_rate_additive":.02}
+        financed=optimize_multiasset(ledger,context,scenario_market,
+                    dict(limits,financing_budget=financing))
+        self.assertEqual(financed["status"],"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT",financed)
+        review=financed["financing_budget_review"]
+        self.assertAlmostEqual(review["stressed_existing_collateral_credit"],90000*.94*.9)
+        self.assertAlmostEqual(review["stressed_annual_interest"],review["remaining_principal"]*.06)
+        self.assertAlmostEqual(review["starting_principal"]-review["principal_repayment"],
+                               review["remaining_principal"])
+        self.assertGreaterEqual(review["settled_cash_after_reserved_obligations"],
+                                review["minimum_cash_reserve"]-1e-4)
+        self.assertEqual(review["existing_accrued_interest_cash_reserve"],150.)
+        self.assertEqual(review["new_collateral_credit_assumed"],0.)
+        self.assertTrue(review["independent_local_accounting_matched"])
+        self.assertFalse(review["broker_collateral_verified"])
+        denied=optimize_multiasset(ledger,context,scenario_market,
+                    dict(limits,financing_budget=dict(financing,max_debt_to_stressed_collateral=.01)))
+        self.assertEqual(denied["status"],"BLOCKED_CONTINUOUS_SOLVE")
+        self.assertEqual(denied["legs"],[])
+        with self.assertRaisesRegex(ValueError,"FINANCING_BUDGET_RANGE"):
+            optimize_multiasset(ledger,context,scenario_market,
+                    dict(limits,financing_budget=dict(financing,collateral_haircut=1.1)))
         del scenario_market["inputs"][symbols[1]]["convexity"]
         with self.assertRaises(ValueError):
             optimize_multiasset(ledger,context,scenario_market,

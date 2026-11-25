@@ -351,6 +351,36 @@ def _factor_stress_rows(instruments, market, limits, policy_cap):
     return rows,cap
 
 
+def _financing_budget(account, market, limits, treasury_shock):
+    """Optional hypothetical debt budget, separate from broker margin.
+
+    Only existing reported Treasury credit is considered. Purchases cannot
+    increase this fixed stress-adjusted ceiling; neither the credit nor
+    unsettled receivables are ever spendable cash.
+    """
+    if "financing_budget" not in limits:
+        return None
+    raw=limits["financing_budget"]
+    if not isinstance(raw,dict) or set(raw)!={"max_debt_to_nlv",
+            "max_annual_interest_to_nlv","collateral_haircut",
+            "max_debt_to_stressed_collateral","annual_rate_additive"}:
+        raise ValueError("MULTIASSET_FINANCING_BUDGET_SCHEMA")
+    values={k:finite(v,k,minimum=0) for k,v in raw.items()}
+    apr=finite(market["annual_financing_rate"],"annual_financing_rate",minimum=0)+values["annual_rate_additive"]
+    shock=finite(treasury_shock,"treasury_shock",minimum=0)
+    if (values["max_debt_to_nlv"]>4 or any(values[k]>1 for k in (
+            "max_annual_interest_to_nlv","collateral_haircut","max_debt_to_stressed_collateral"))
+            or apr>1 or shock>1):
+        raise ValueError("MULTIASSET_FINANCING_BUDGET_RANGE")
+    credit=0.
+    for p in account["positions"]:
+        if p["type"]=="treasury" and p["collateral_status"]=="ELIGIBLE":
+            reported=finite(p["broker_recognized_collateral_value"],"reported_credit",minimum=0)
+            credit+=min(reported,p["market_value"])*(1-shock)*(1-values["collateral_haircut"])
+    return {**values,"stressed_annual_rate":apr,"stressed_existing_credit":credit,
+            "existing_accrued_interest":account["accrued_financing_interest"]}
+
+
 def optimize_multiasset(ledger, context, market, limits):
     """Joint constrained research solve over supported exact-leg instruments.
 
@@ -390,6 +420,8 @@ def optimize_multiasset(ledger, context, market, limits):
     cash=account["settled_cash"]
     debt=account["margin_debt"]
     payable=account["unsettled_payable"]
+    financing_budget=_financing_budget(account,market,limits,
+                      context["stress_assumptions"]["treasury_decline_fraction"])
     positions=account["positions"]
     new_puts=market.get("new_puts",[])
     if not isinstance(new_puts,list) or not 1<=len(positions)+len(new_puts)<=16:
@@ -499,6 +531,20 @@ def optimize_multiasset(ledger, context, market, limits):
         values.extend(risk_caps*net-risk_matrix@q)
         if factor_rows:
             values.extend(factor_cap*net-factor_stress(x))
+        if financing_budget is not None:
+            b=financing_budget
+            remaining=debt/nlv-x[-1]
+            annual_interest=remaining*b["stressed_annual_rate"]
+            # Principal repayment changes assets and liabilities equally.
+            # Accrued interest is already a liability in NLV; reserving cash
+            # for payment is not a second subtraction from equity.
+            values.extend((
+                b["max_debt_to_nlv"]*net-remaining,
+                b["max_annual_interest_to_nlv"]*net-annual_interest,
+                b["max_debt_to_stressed_collateral"]*b["stressed_existing_credit"]/nlv-remaining,
+                available(x)-payable/nlv-reserve*net
+                    -b["existing_accrued_interest"]/nlv-annual_interest*horizon/365,
+            ))
         # All puts on the same underlying compete for the same share backing.
         # Do not let multiple individually covered legs reuse those shares.
         for j,indices in put_groups.items():
@@ -574,6 +620,28 @@ def optimize_multiasset(ledger, context, market, limits):
                 "loss_budget_fraction":float(stressed[i]/net),
                 "within_limit":bool(stressed[i]<=factor_cap*net+1e-9)}
                 for i,s in enumerate(factor_rows)]}
+    if financing_budget is not None:
+        b=financing_budget
+        net=(1-fee(x))*nlv
+        remaining=debt-repayment
+        annual_interest=remaining*b["stressed_annual_rate"]
+        base["financing_budget_review"]={
+            "classification":"SYNTHETIC_ASSUMPTIONS_ONLY",
+            "post_fee_nlv":net,"starting_principal":debt,"principal_repayment":repayment,
+            "remaining_principal":remaining,"remaining_debt_to_nlv":remaining/net,
+            "stressed_annual_interest":annual_interest,
+            "stressed_annual_interest_to_nlv":annual_interest/net,
+            "stressed_horizon_interest":annual_interest*horizon/365,
+            "existing_accrued_interest_cash_reserve":b["existing_accrued_interest"],
+            "unsettled_payable_cash_reserve":payable,
+            "minimum_cash_reserve":reserve*net,
+            "stressed_existing_collateral_credit":b["stressed_existing_credit"],
+            "maximum_debt_against_stressed_credit":b["max_debt_to_stressed_collateral"]*b["stressed_existing_credit"],
+            "settled_cash_after_reserved_obligations":available(x)*nlv-payable
+                -b["existing_accrued_interest"]-annual_interest*horizon/365,
+            "new_collateral_credit_assumed":0.,
+            "collateral_counted_as_cash":False,
+            "broker_financing_verified":False,"broker_collateral_verified":False}
     if not legs:
         return {**base,"status":"NO_CHANGE"}
     plan=deepcopy(context)
@@ -589,4 +657,19 @@ def optimize_multiasset(ledger, context, market, limits):
         gate=propose_multi_asset_batch(ledger,plan)
     except (ValueError,TypeError,KeyError,ArithmeticError):
         return {**flags,"status":"BLOCKED_INDEPENDENT_PREFLIGHT","legs":[]}
+    if financing_budget is not None:
+        # Compare independently calculated exact-leg accounting with the
+        # optimizer's discrete amounts before returning any draft.
+        actual=gate.get("pro_forma_unexecuted",{})
+        review=base["financing_budget_review"]
+        try:
+            matched=(actual.get("self_financing_identity_verified") is True
+                     and abs(finite(actual.get("net_liquidation"),"preflight_nlv")-review["post_fee_nlv"])<=.01
+                     and abs(finite(actual.get("settled_cash"),"preflight_cash")-base["settled_cash_after"])<=.01
+                     and abs(finite(actual.get("margin_debt"),"preflight_debt")-review["remaining_principal"])<=.01)
+        except (ValueError,TypeError):
+            matched=False
+        if not matched:
+            return {**flags,"status":"BLOCKED_FINANCING_ACCOUNTING_MISMATCH","legs":[]}
+        review["independent_local_accounting_matched"]=True
     return {**base,"status":"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT","draft_plan":plan,"independent_preflight":gate}
