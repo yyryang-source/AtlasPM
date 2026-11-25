@@ -289,7 +289,9 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
     import hashlib
     import struct
     from math import isfinite
-    from atlaspm.research.training_memory import FoldArrays
+    from atlaspm.research.training_memory import (
+        FoldArrays, standardize_training_features, apply_feature_standardization,
+    )
     from atlaspm.data.market_db import private_path
     import numpy as np
 
@@ -312,6 +314,7 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
     if bytes_required>2*1024**3:
         raise ValueError("FOLD_MATRIX_BYTE_LIMIT")
     result={}
+    mean=scale=None
     with FoldArrays(matrix["array_budget_mib"],root) as arrays:
         for split,n,lo,hi in (("train",expected_train,f["train_start_index"],f["train_end_index"]),
                               ("test",expected_test,f["test_start_index"],f["test_end_index"])):
@@ -345,6 +348,19 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
                 raise ValueError("FOLD_MATRIX_ROW_COUNT_CHANGED")
             result[split]={"x_shape":[n,len(feature_names)],"y_shape":[n],
                            "ordered_rows_sha256":digest.hexdigest()}
+            if split=="train":
+                mean,scale=standardize_training_features(x)
+            elif mean is not None:
+                apply_feature_standardization(x,mean,scale)
+            if mean is not None:
+                normalized=hashlib.sha256()
+                for start in range(0,n,2048):
+                    block=x[start:start+2048]
+                    if not np.isfinite(block).all():
+                        raise ValueError("FOLD_MATRIX_NONFINITE_STANDARDIZATION")
+                    normalized.update(block.astype("<f8",copy=False).tobytes(order="C"))
+                result[split]["standardized_features_sha256"]=normalized.hexdigest()
+                del block
             del x,y
         result["array_bytes_allocated"]=arrays.resident+arrays.spilled
         result["array_bytes_spilled"]=arrays.spilled
@@ -354,6 +370,12 @@ def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
             "array_bytes_allocated":result["array_bytes_allocated"],
             "array_bytes_spilled":result["array_bytes_spilled"],
             "array_budget_mib":matrix["array_budget_mib"],
+            "standardization":{"status":"TRAIN_ONLY_STANDARDIZATION_COMPLETED" if expected_train and expected_test
+                               else "INCOMPLETE_FOLD",
+                               "training_rows_used":expected_train,
+                               "validation_rows_used_for_fit":0,"target_values_used_for_fit":0,
+                               "parameter_sha256":dataset._digest([mean.tolist(),scale.tolist()]) if mean is not None else None,
+                               "shared_with_tabular_trainer":True},
             "retrospective_subset_only":True,"prediction_universe_defined":False,
             "feature_history_identity_verified":False,
             "feature_history_subset_required":matrix.get("require_feature_history",False),

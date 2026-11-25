@@ -57,3 +57,45 @@ class FoldArrays(AbstractContextManager):
         if self.temp is not None:
             self.temp.cleanup()
         return False
+
+
+def standardize_training_features(x):
+    """Fit only training features; transform in-place with bounded scratch.
+
+    Constant columns use unit scale, matching the existing tabular trainer.
+    The returned arrays have one element per feature, not per observation.
+    """
+    import numpy as np
+    if x.ndim!=2 or not len(x) or not x.shape[1] or x.dtype!=np.dtype("float64"):
+        raise ValueError("INVALID_TRAINING_FEATURE_MATRIX")
+    mean=x.mean(axis=0)
+    if not np.isfinite(mean).all():
+        raise ValueError("NONFINITE_TRAINING_FEATURE_MEAN")
+    x-=mean
+    squared=np.zeros(x.shape[1],dtype=np.float64)
+    for start in range(0,len(x),4096):
+        block=x[start:start+4096]
+        if not np.isfinite(block).all():
+            raise ValueError("NONFINITE_CENTERED_TRAINING_FEATURES")
+        squared+=np.einsum("ij,ij->j",block,block)
+    scale=np.sqrt(squared/len(x))
+    if not np.isfinite(scale).all():
+        raise ValueError("NONFINITE_TRAINING_FEATURE_SCALE")
+    scale=np.where(scale>1e-12,scale,1.)
+    x/=scale
+    return mean,scale
+
+
+def apply_feature_standardization(x,mean,scale):
+    """Never fit validation/test statistics; use the training parameters."""
+    import numpy as np
+    if (x.ndim!=2 or x.dtype!=np.dtype("float64") or mean.shape!=(x.shape[1],)
+            or scale.shape!=mean.shape or not np.isfinite(mean).all()
+            or not np.isfinite(scale).all() or (scale<=0).any()):
+        raise ValueError("INVALID_FEATURE_STANDARDIZATION")
+    for start in range(0,len(x),4096):
+        block=x[start:start+4096]
+        block-=mean
+        block/=scale
+        if not np.isfinite(block).all():
+            raise ValueError("NONFINITE_STANDARDIZED_FEATURES")

@@ -415,3 +415,22 @@ stricter subset. Existing Python diagnostic callers may still request
 the older forward-path-only matrix; neither subset authorizes training.
 Feature values are not independently recomputed or adjusted, and no
 source completeness or point-in-time certification is implied.
+
+
+Fold matrix review now uses the same in-place train-only feature
+standardization as the tabular model engine. Validation features reuse
+training mean and scale; targets do not participate. Only normalized
+feature and parameter digests are reported, and arrays are discarded.
+The training permission gate and all real estimator fitting remain blocked.
+
+For a bounded numerical check of existing strict factor partitions:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.data.unified_pipeline factor-recompute --start-month YYYY-MM --end-month YYYY-MM
+~~~
+
+This recalculates factor values from existing daily projections, checks
+keys, nulls and numeric tolerances (1e-10 times max(1, absolute values)),
+and reports mismatched rows. Up to three target months per call. It does
+not replace files or re-aggregate daily projections from raw bars. This is
+same-algorithm reproducibility, not independent data or formula validation.

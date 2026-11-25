@@ -11,7 +11,9 @@ from atlaspm.research.training_dataset import build_panel, iter_purged_folds, se
 from atlaspm.engine.contracts import finite
 from atlaspm.research.training_models import MODELS, versions, fit_predict, validate_parameters
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
-from atlaspm.research.training_memory import FoldArrays
+from atlaspm.research.training_memory import (
+    FoldArrays, standardize_training_features, apply_feature_standardization,
+)
 from atlaspm.research.training_compact import IndexedRows, feature_workspace
 
 
@@ -253,22 +255,13 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 intercept=float(y.mean())
                 if tabular_required:
                     x=arrays.rows(train_rows,(len(train_rows),len(panel["feature_names"])),lambda r:r["x"])
-                    mean=x.mean(axis=0)
-                    x-=mean
-                    squared=np.zeros(x.shape[1],dtype=np.float64)
-                    for start in range(0,len(x),4096):
-                        block=x[start:start+4096]
-                        squared+=np.einsum("ij,ij->j",block,block)
-                    scale=np.sqrt(squared/len(x))
-                    scale=np.where(scale>1e-12,scale,1.)
-                    x/=scale
+                    mean,scale=standardize_training_features(x)
                     z=x
                     if ridge_required:
                         coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
             if tabular_required:
                 test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
-                test-=mean
-                test/=scale
+                apply_feature_standardization(test,mean,scale)
                 if ridge_required:
                     ridge=test@coef+intercept
             sequence_train=sequence_test=None

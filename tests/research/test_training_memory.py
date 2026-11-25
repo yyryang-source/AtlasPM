@@ -23,6 +23,20 @@ class CompactTests(unittest.TestCase):
 
 @unittest.skipUnless(find_spec("numpy"),"numpy required")
 class MemoryTests(unittest.TestCase):
+    def test_shared_standardization_never_uses_validation_distribution(self):
+        import numpy as np
+        from atlaspm.research.training_memory import (
+            standardize_training_features, apply_feature_standardization,
+        )
+        x=np.array([[1.,7.],[3.,7.]])
+        t=np.array([[100.,10.]])
+        mean,scale=standardize_training_features(x)
+        apply_feature_standardization(t,mean,scale)
+        np.testing.assert_allclose(mean,[2.,7.])
+        np.testing.assert_allclose(scale,[1.,1.])
+        np.testing.assert_allclose(x,[[-1.,0.],[1.,0.]])
+        np.testing.assert_allclose(t,[[98.,3.]])
+
     def test_budget_refuses_unconfigured_spill(self):
         with FoldArrays(1) as arrays:
             with self.assertRaisesRegex(ValueError,"ARRAY_BUDGET_EXCEEDED"):

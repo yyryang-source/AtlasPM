@@ -186,7 +186,7 @@ def factor_preflight(start_month, end_month, *, memory="256MB", threads=1):
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "maintain", "factor-preflight"))
+    parser.add_argument("action", choices=("plan", "maintain", "factor-preflight", "factor-recompute"))
     parser.add_argument("--start-month", required=True)
     parser.add_argument("--end-month", required=True)
     parser.add_argument("--execute", action="store_true", help="Explicit local derived-data maintenance")
@@ -198,6 +198,13 @@ def main():
     options = dict(memory=args.memory, threads=args.threads)
     if args.action == "factor-preflight":
         report = factor_preflight(args.start_month, args.end_month, **options)
+    elif args.action == "factor-recompute":
+        months=_month_list(args.start_month,args.end_month)
+        if len(months)>3:
+            parser.error("factor-recompute checks at most 3 target months per call")
+        rows=[factor_db.reconcile_values(row["month"],**options) for row in months]
+        report=_report(mode="factor_recompute",months=rows,
+                       all_requested_months_processed=all(r["status"]=="FACTOR_VALUES_RECONCILED" for r in rows))
     else:
         report = maintain(args.start_month, args.end_month, execute=args.execute, **options)
     print(json.dumps(report, indent=2))

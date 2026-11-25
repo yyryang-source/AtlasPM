@@ -355,6 +355,78 @@ def _factor_sql(paths: list[Path], month: str, *, strict_calendar=False) -> str:
     """
 
 
+def reconcile_values(month: str, *, memory="256MB", threads=1) -> dict:
+    """Recompute one strict factor month from its existing daily history.
+
+    This is a same-algorithm numerical check, not independent vendor
+    verification. No replacement files, no model fitting or network access.
+    """
+    dest=_path(month,"hf","rth","factors")
+    daily=_path(month,"hf","rth","daily")
+    meta=_read_meta(dest.with_suffix(".json"))
+    if not dest.is_file() or not daily.is_file() or not meta:
+        raise ValueError("FACTOR_RECOMPUTE_INPUT_MISSING")
+    if (meta.get("window_policy")!=STRICT_WINDOW_POLICY or meta.get("version")!=VERSION
+            or (meta.get("month"),meta.get("source"),meta.get("session"))!=(month,"hf","rth")):
+        raise ValueError("FACTOR_RECOMPUTE_STRICT_POLICY_REQUIRED")
+    first=_month_first(month)
+    history=sorted(p for p in daily.parent.parent.parent.glob("year=*/month=*/*.parquet")
+                   if 0<=_month_diff(first,_month_first(p.stem[-7:]))<=LOOKBACK_MONTHS)
+    if daily not in history or _fingerprint(history)!=meta.get("history_fingerprint"):
+        raise ValueError("FACTOR_RECOMPUTE_STALE_HISTORY")
+    calendar,calendar_sha=_strict_calendar(history)
+    if calendar_sha!=meta.get("window_calendar_sha256"):
+        raise ValueError("FACTOR_RECOMPUTE_STALE_CALENDAR")
+    # Validate existing source lineage before recomputation; no inference
+    # from an orphan daily file. Fingerprint all inputs before and after.
+    inputs=[dest,dest.with_suffix(".json")]
+    for p in history:
+        bars=hf_output_path(p.stem[-7:])
+        dm=p.with_suffix(".json")
+        dmeta=_read_meta(dm)
+        if not bars.is_file() or not dmeta or dmeta.get("input_fingerprint")!=_fingerprint([bars]):
+            raise ValueError("FACTOR_RECOMPUTE_STALE_DAILY_PROJECTION")
+        inputs.extend((p,dm,bars))
+    before=_fingerprint(inputs)
+    con=_db(memory,threads)
+    try:
+        _install_strict_calendar(con,calendar)
+        src=_files_sql(history)
+        if con.execute(f"""SELECT 1 FROM {src} GROUP BY symbol,trade_date
+                           HAVING count(*)>1 LIMIT 1""").fetchone():
+            raise ValueError("FACTOR_RECOMPUTE_DUPLICATE_DAILY_KEY")
+        stored=_files_sql([dest])
+        if con.execute(f"""SELECT 1 FROM {stored} GROUP BY symbol,trade_date
+                           HAVING count(*)>1 LIMIT 1""").fetchone():
+            raise ValueError("FACTOR_RECOMPUTE_DUPLICATE_STORED_KEY")
+        numeric=("close","volume_shares",*FEATURES)
+        exact=("observed_5m_bars","observed_1m_bars","last_observed_bar_ms")
+        comparisons=[f"""(a.{col} IS NULL)<>(b.{col} IS NULL) OR
+            (a.{col} IS NOT NULL AND b.{col} IS NOT NULL AND
+             (NOT isfinite(a.{col}) OR NOT isfinite(b.{col}) OR
+              abs(a.{col}-b.{col})>1e-10*greatest(1.,abs(a.{col}),abs(b.{col}))))"""
+                     for col in numeric]
+        comparisons.extend(f"a.{col} IS DISTINCT FROM b.{col}" for col in exact)
+        sql=_factor_sql(history,month,strict_calendar=True)
+        counts=con.execute(f"""WITH computed AS ({sql}), stored AS (SELECT * FROM {stored})
+            SELECT count(*) FILTER (WHERE a.symbol IS NOT NULL AND b.symbol IS NOT NULL),
+                   count(*) FILTER (WHERE a.symbol IS NULL OR b.symbol IS NULL),
+                   count(*) FILTER (WHERE a.symbol IS NOT NULL AND b.symbol IS NOT NULL
+                       AND ({" OR ".join(comparisons)}))
+            FROM computed a FULL OUTER JOIN stored b
+                ON a.symbol=b.symbol AND a.trade_date=b.trade_date""").fetchone()
+    finally:
+        con.close()
+    if _fingerprint(inputs)!=before:
+        raise ValueError("FACTOR_RECOMPUTE_INPUT_CHANGED")
+    matched,missing,different=map(int,counts)
+    return {"month":month,"status":"FACTOR_VALUES_RECONCILED" if matched and not missing and not different
+            else "FACTOR_VALUES_MISMATCH","matched_keys":matched,"unmatched_keys":missing,
+            "value_mismatch_rows":different,"same_algorithm_recompute":True,
+            "independent_source_verified":False,"daily_projection_recomputed":False,
+            "approved_for_model_training":False,"approved_for_backtest":False,"live_execution_enabled":False}
+
+
 def catalog() -> dict:
     return {"schema": VERSION, "frequency": "1d", "factors": [
         {"name": name, "family": family, "definition": meaning,

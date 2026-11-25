@@ -138,6 +138,31 @@ class FactorDuckDBTests(FactorContractTests):
         self.assertTrue(all(x is not None for x in out[1][1:]))
         self.assertTrue(all(x is None for x in out[2][1:]))
 
+    def test_strict_factor_recompute_detects_changed_values(self):
+        from unittest.mock import patch
+        from contextlib import closing
+        month="2026-02"
+        self._write_month(month)
+        calendar=[]
+        for i,day in enumerate(self._month_trading_days(month)):
+            stamp=int(datetime(day.year,day.month,day.day,16,0,
+                               tzinfo=ZoneInfo("America/New_York")).timestamp()*1000)
+            calendar.append((day.isoformat(),i,stamp))
+        with patch.object(factor_db,"_strict_calendar",return_value=(calendar,"a"*64)):
+            factor_db.build(month,memory="256MB",threads=1,strict_calendar=True)
+            self.assertEqual(factor_db.reconcile_values(month)["status"],"FACTOR_VALUES_RECONCILED")
+            p=factor_db._path(month,"hf","rth","factors")
+            temp=p.with_suffix(".new.parquet")
+            with closing(duckdb.connect()) as con:
+                con.execute(f"""COPY (SELECT * REPLACE (CASE WHEN ret_1d IS NULL THEN NULL
+                    ELSE ret_1d+.01 END AS ret_1d) FROM {factor_db._files_sql([p])})
+                    TO {factor_db._quoted(temp)} (FORMAT PARQUET)""")
+            os.replace(temp,p)
+            result=factor_db.reconcile_values(month)
+        self.assertEqual(result["status"],"FACTOR_VALUES_MISMATCH")
+        self.assertGreater(result["value_mismatch_rows"],0)
+        self.assertFalse(result["approved_for_model_training"])
+
     def test_factor_audit_rejects_null_close_but_allows_missing_warmup(self):
         self._write_month("2026-01")
         factor_db.build("2026-01", memory="256MB", threads=1)
