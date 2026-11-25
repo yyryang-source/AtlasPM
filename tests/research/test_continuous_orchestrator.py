@@ -335,6 +335,42 @@ class ContinuousTests(unittest.TestCase):
             rank_synthetic_baskets(ledger,[plan,other],rows=rows,as_of=stamp,weights={"m1":2,"m2":1},
                 horizon_days=1,annual_financing_rate=.06,risk_penalty=0)
 
+    @unittest.skipUnless(importlib.util.find_spec("scipy"),"portfolio extra required")
+    def test_joint_optimizer_constructs_discrete_legs_and_never_fabricates_preview(self):
+        import json
+        from atlaspm.engine.allocation import optimize_multiasset
+        root=Path(__file__).resolve().parents[2]/"examples"
+        ledger=json.loads((root/"institutional_batch_ledger.json").read_text())
+        context=json.loads((root/"institutional_batch_plan.json").read_text())
+        stamp=ledger["valuation_at"]
+        put={"type":"option","identifier":"QQQ-2027-01-15-P-280","underlying":"QQQ",
+             "expiration_date":"2027-01-15","right":"put","strike":280,"contracts":1,
+             "multiplier":100,"mark_premium":5,"mark_source":"synthetic","mark_age_seconds":15}
+        symbols=["QQQ","91282CDE0",put["identifier"]]
+        inputs={i:{"observed_at":stamp,"cost_bps":0,"max_trade_notional":10000} for i in symbols}
+        inputs[symbols[0]]["expected_return"]=-.2
+        inputs[symbols[1]].update(expected_return=.06,credit_class="US_TREASURY",face_increment=100)
+        inputs[symbols[2]].update(expected_return=.3,delta=-.2,gamma=.002,vega_per_vol_point=.1,
+                                  trading_permission=True)
+        market={"as_of":stamp,"horizon_days":10,"symbols":symbols,"inputs":inputs,"new_puts":[put],
+                "covariance":[[.01,0,0],[0,.001,0],[0,0,.04]],"cash_return":0,"annual_financing_rate":.04}
+        limits={"min_cash_fraction":.01,"risk_aversion":1,"max_turnover":.3,"max_volatility":.2,
+                "max_dv01_per_nlv":.001,"max_abs_delta_per_nlv":1,"max_gamma_per_nlv":1,
+                "max_vega_per_nlv":1,"max_option_weight":.02}
+        out=optimize_multiasset(ledger,context,market,limits)
+        self.assertEqual(out["status"],"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT",out)
+        actions={leg["action"] for leg in out["legs"]}
+        self.assertTrue({"SELL_EQUITY","BUY_TREASURY","BUY_PUT"}<=actions,actions)
+        self.assertLess(out["discrete_weights"]["QQQ"],200*300/123950)
+        self.assertGreaterEqual(out["settled_cash_after"],.01*123950+300-1e-5)
+        self.assertNotIn("basket_preview",out["draft_plan"])
+        self.assertEqual(out["independent_preflight"]["decision"],"BLOCK")
+        self.assertTrue(out["independent_preflight"]["pro_forma_unexecuted"]["self_financing_identity_verified"])
+        self.assertFalse(out["trade_authorized"])
+        market["symbols"]=symbols[::-1]
+        with self.assertRaisesRegex(ValueError,"IDENTITY_OR_COVARIANCE_ORDER"):
+            optimize_multiasset(ledger,context,market,limits)
+
     def test_process_death_after_commit_leaves_recoverable_queue(self):
         import subprocess,sys
         row=fixture()["sessions"][0]["events"][0]
