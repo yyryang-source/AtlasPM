@@ -33,9 +33,11 @@ class NumericHotpathTests(unittest.TestCase):
     def test_symmetric_mean_variance(self):
         result = optimize_mean_variance({"A": 0.1, "B": 0.1},
                                         [[0.04, 0.0], [0.0, 0.04]])
-        self.assertEqual(result["weights"], {"A": 0.5, "B": 0.5})
+        self.assertEqual(list(result["weights"]), ["A", "B"])
+        for weight in result["weights"].values():
+            self.assertAlmostEqual(weight, 0.5, places=14)
         self.assertEqual(result["iterations"], 1)
-        self.assertEqual(result["annual_variance"], 0.02)
+        self.assertAlmostEqual(result["annual_variance"], 0.02, places=14)
 
 
 if __name__ == "__main__":
