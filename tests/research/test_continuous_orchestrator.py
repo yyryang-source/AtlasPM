@@ -431,6 +431,20 @@ class ContinuousTests(unittest.TestCase):
         saved=next(iter(event_queue._read_state(event_queue.PATH).values()))["report"]["local_specialist_receipts"]
         self.assertEqual(saved[0]["report_sha256"],out["report_sha256"])
         self.assertNotIn("report",saved[0])
+        self.assertEqual(saved[0]["decision_receipt"]["status"],"BLOCKED_EXPLICIT_INSTRUMENT_ASSOCIATION_REQUIRED")
+        from atlaspm.research.intelligence import specialist_decision_receipt
+        # Exercise actual screener output from the existing fixture; the typed
+        # identity is only an operator association, never verified real data.
+        identity={"provider_id":"AAA","asset_type":"stock"}
+        receipt=specialist_decision_receipt(task,out,security_id="CIK:0000000001",
+                                            identity=identity,as_of=now)
+        self.assertEqual(receipt["status"],"DESCRIPTIVE_CONTRACT_DECISION_REVIEWED")
+        self.assertEqual(receipt["action"],"NO_TRADE")
+        self.assertFalse(receipt["numeric_eligible"])
+        self.assertFalse(receipt["identity_independently_verified"])
+        mismatch=specialist_decision_receipt(task,out,security_id="CIK:0000000001",
+                        identity={**identity,"provider_id":"OTHER"},as_of=now)
+        self.assertEqual(mismatch["status"],"BLOCKED_NO_MATCHING_SPECIALIST_OUTPUT")
         self.assertEqual(event_queue.drain(as_of=now,local_bindings=bindings)["local_research_calls"],0)
         task["params"]["end"]="2020-01-10"
         self.assertTrue(local_specialist_tasks([task],as_of=now)["tasks"][0]["status"].startswith("BLOCKED"))
