@@ -281,7 +281,7 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review","multiasset-optimize"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
@@ -289,6 +289,22 @@ def main():
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.action=="multiasset-optimize":
+        from pathlib import Path
+        from atlaspm.data.market_db import private_path
+        from atlaspm.engine.allocation import optimize_multiasset
+        if not args.file:
+            parser.error("multiasset-optimize requires --file")
+        with private_path(Path(args.file),exists=True).open("rb") as handle:
+            raw=handle.read(2*1024*1024+1)
+        if len(raw)>2*1024*1024:
+            raise ValueError("MULTIASSET_INPUT_LIMIT")
+        data=json.loads(raw)
+        if set(data)!={"ledger","context","market","limits"}:
+            raise ValueError("MULTIASSET_OPTIMIZATION_CONTRACT")
+        out=optimize_multiasset(**data)
+        print(json.dumps(out,indent=2,allow_nan=False))
+        return 0 if out["status"]=="NO_CHANGE" else 1
     if args.action=="model-review":
         from pathlib import Path
         from atlaspm.data.market_db import private_path
