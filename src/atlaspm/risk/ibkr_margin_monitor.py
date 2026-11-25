@@ -346,6 +346,100 @@ def normalize_ibkr_margin_summary(
     }
 
 
+def review_reported_positions(capture, margin, *, now):
+    """Bounded position-level observation, never an exit order or cost basis proof.
+
+    Only long USD STK positions with internally consistent broker-reported
+    mark, quantity and market value are eligible for illustrative price/cost
+    comparisons. Other instruments, missing marks and missing costs are
+    unknown, not zero. No elapsed holding period is inferred.
+    """
+    from collections import Counter
+    from atlaspm.engine.contracts import finite, timestamp
+    from atlaspm.execution.ibkr_mapping import _market_value
+
+    if (capture.get("source") != "local_authenticated_ibkr_gateway"
+            or capture.get("paper_identity_verified") is not True
+            or capture.get("gateway_tls_certificate_validated") is not True
+            or capture.get("session_reported_authenticated") is not True
+            or capture.get("broker_order_submission_enabled") is not False
+            or capture.get("live_execution_enabled") is not False):
+        raise ValueError("PAPER_POSITION_MONITOR_IDENTITY_REQUIRED")
+    if (margin.get("account_id") != capture.get("account_id")
+            or margin.get("source") != capture.get("source")
+            or margin.get("ready_for_institutional_risk_gate") is not False):
+        raise ValueError("POSITION_MONITOR_MARGIN_CONTEXT_MISMATCH")
+    age = (now-timestamp(capture["captured_at_utc"],"captured_at")).total_seconds()
+    if not 0 <= age <= 120:
+        raise ValueError("POSITION_MONITOR_CAPTURE_STALE")
+    rows = capture["raw"]["positions"]
+    if (not isinstance(rows,list) or len(rows)>1000
+            or type(capture.get("position_count")) is not int or len(rows)!=capture["position_count"]):
+        raise ValueError("POSITION_MONITOR_SCOPE")
+    nlv = finite(margin["margin_summary_usd_claim"]["total_nlv"],"reported NLV",minimum=.01)
+    alerts = Counter()
+    unknown = Counter()
+    seen = set()
+    compared = 0
+    marked = 0
+    nonzero = 0
+    for row in rows:
+        cid = row.get("conid")
+        if type(cid) is not int or cid<=0 or cid in seen or row.get("currency")!="USD":
+            raise ValueError("POSITION_MONITOR_POSITION_IDENTITY")
+        seen.add(cid)
+        qty = finite(row.get("position"),"position quantity")
+        if qty==0:
+            if _market_value(row,cid) not in (None,0):
+                raise ValueError("POSITION_MONITOR_ZERO_QUANTITY_VALUE_CONFLICT")
+            continue
+        nonzero += 1
+        value = _market_value(row,cid)
+        if value is None:
+            unknown["MISSING_MARKET_VALUE"] += 1
+        else:
+            if qty*value<0:
+                raise ValueError("POSITION_MONITOR_VALUE_SIGN")
+            marked += 1
+            if abs(value)/nlv >= .25:
+                alerts["REPORTED_CONCENTRATION_REVIEW"] += 1
+        if row.get("assetClass",row.get("secType"))!="STK" or qty<=0:
+            unknown["UNSUPPORTED_POSITION_COST_OR_UNITS"] += 1
+            continue
+        if value is None or row.get("mktPrice") is None or row.get("avgCost") is None:
+            unknown["PRICE_OR_COST_MISSING"] += 1
+            continue
+        try:
+            price = finite(row["mktPrice"],"reported mark",minimum=.000001)
+            cost = finite(row["avgCost"],"reported average cost",minimum=.000001)
+        except ValueError:
+            unknown["PRICE_OR_COST_INVALID"] += 1
+            continue
+        if abs(price*qty-value)>max(.01,abs(value)*.001):
+            unknown["MARK_QUANTITY_VALUE_MISMATCH"] += 1
+            continue
+        compared += 1
+        # Illustrative fixed thresholds, not a trading mandate. Broker
+        # reported cost may include adjustments or fees; no actual return
+        # label, tax lot or field-level quote freshness is inferred.
+        change = price/cost-1
+        if change <= -.10:
+            alerts["OBSERVED_LOSS_THRESHOLD_REVIEW"] += 1
+        elif change >= .20:
+            alerts["OBSERVED_GAIN_THRESHOLD_REVIEW"] += 1
+    return {"status":"PAPER_POSITION_MONITOR_COMPLETED","position_count":len(rows),
+            "nonzero_position_count":nonzero,"positions_with_reported_values":marked,
+            "price_cost_comparison_count":compared,"alert_counts":dict(alerts),
+            "unknown_counts":dict(unknown),"thresholds_are_diagnostic":True,
+            "diagnostic_loss_fraction":.10,"diagnostic_gain_fraction":.20,
+            "diagnostic_concentration_fraction":.25,
+            "reported_cost_basis_independently_verified":False,
+            "holding_period_verified":False,"execution_marks_verified":False,
+            "margin_data_blocked":margin["monitor_state"]=="BLOCKED_DATA",
+            "exit_review_requested":bool(alerts),"exit_orders_generated":0,
+            "trade_authorized":False,"live_execution_enabled":False}
+
+
 def collect_ibkr_margin_monitor(
     transport: Any, *, account_id: str, fixture_mode: bool = False,
     max_field_age_seconds: int = 600, min_buffer_ratio: float = 0.15,

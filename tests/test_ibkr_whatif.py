@@ -263,3 +263,70 @@ class ProfileRecoveryReviewTests(unittest.TestCase):
         self.assertEqual(result["unmatched_working_order_count"],1)
         self.assertIn("UNMATCHED_WORKING_BROKER_ORDERS",result["block_reasons"])
         self.assertFalse(result["trade_authorized"])
+
+
+class RuntimeReviewTests(unittest.TestCase):
+    def test_reported_position_diagnostics_are_not_exit_orders(self):
+        from atlaspm.risk.ibkr_margin_monitor import review_reported_positions
+        now=datetime.now(timezone.utc)
+        capture={"source":"local_authenticated_ibkr_gateway","account_id":"DUR123",
+                 "paper_identity_verified":True,"gateway_tls_certificate_validated":True,
+                 "session_reported_authenticated":True,"broker_order_submission_enabled":False,
+                 "live_execution_enabled":False,"captured_at_utc":now.isoformat(),"position_count":3,
+                 "raw":{"positions":[
+                     {"conid":1,"assetClass":"STK","currency":"USD","position":10,"mktPrice":80,"avgCost":100,"mktValue":800},
+                     {"conid":2,"assetClass":"STK","currency":"USD","position":1,"mktPrice":130,"avgCost":100,"mktValue":130},
+                     {"conid":3,"assetClass":"OPT","currency":"USD","position":1,"mktValue":None}]}}
+        # Missing market value means absent field, not an explicit numeric null.
+        del capture["raw"]["positions"][2]["mktValue"]
+        margin={"source":capture["source"],"account_id":"DUR123",
+                "ready_for_institutional_risk_gate":False,"monitor_state":"BLOCKED_DATA",
+                "margin_summary_usd_claim":{"total_nlv":1000}}
+        result=review_reported_positions(capture,margin,now=now)
+        self.assertEqual(result["price_cost_comparison_count"],2)
+        self.assertEqual(result["alert_counts"]["OBSERVED_LOSS_THRESHOLD_REVIEW"],1)
+        self.assertEqual(result["alert_counts"]["OBSERVED_GAIN_THRESHOLD_REVIEW"],1)
+        self.assertEqual(result["alert_counts"]["REPORTED_CONCENTRATION_REVIEW"],1)
+        self.assertEqual(result["unknown_counts"]["MISSING_MARKET_VALUE"],1)
+        self.assertEqual(result["exit_orders_generated"],0)
+        self.assertFalse(result["trade_authorized"])
+
+    def test_runtime_closed_market_uses_only_account_path_and_stop(self):
+        from atlaspm.framework.orchestrator import paper_runtime_cycle
+        plan={"assets":{"AAA":"stock"},"available_lines":1,"selection":"reviewed_rotation",
+              "move_threshold":.02,"enqueue_events":False}
+        review={"status":"PAPER_PREFLIGHT_CHECK_COMPLETED",
+                "position_monitor":{"status":"PAPER_POSITION_MONITOR_COMPLETED"},
+                "recovery_review":{"status":"PAPER_RECOVERY_REVIEW_COMPLETED"}}
+        with patch("atlaspm.framework.orchestrator._runtime_paused",return_value=False), \
+             patch("atlaspm.framework.orchestrator.market_phase",return_value="closed"), \
+             patch("atlaspm.framework.orchestrator.market_research_cycle") as market, \
+             patch("atlaspm.execution.ibkr_whatif.profile_preview_check",return_value=review) as account:
+            result=paper_runtime_cycle(plan,state={})
+        self.assertEqual(result["status"],"PAPER_RUNTIME_CYCLE_COMPLETED")
+        self.assertEqual(result["mode"],"ACCOUNT_ONLY")
+        market.assert_not_called()
+        account.assert_called_once_with(runtime_review=True)
+        with patch("atlaspm.framework.orchestrator._runtime_paused",return_value=True), \
+             patch("atlaspm.execution.ibkr_whatif.profile_preview_check") as account:
+            self.assertEqual(paper_runtime_cycle(plan,state={})["status"],"PAUSED")
+        account.assert_not_called()
+
+    def test_runtime_regular_session_requires_all_reviews(self):
+        from atlaspm.framework.orchestrator import paper_runtime_cycle
+        plan={"assets":{"AAA":"stock"},"available_lines":1,"selection":"reviewed_rotation",
+              "move_threshold":.02,"enqueue_events":False}
+        probe={"portfolio_review":{"status":"PAPER_PORTFOLIO_REVIEW_COMPLETED"},
+               "runtime_review":{"status":"PAPER_RUNTIME_SNAPSHOT_REVIEWED",
+                    "position_monitor":{"status":"PAPER_POSITION_MONITOR_COMPLETED"},
+                    "recovery_review":{"status":"PAPER_RECOVERY_REVIEW_COMPLETED"}}}
+        result={"status":"MARKET_RESEARCH_CYCLE_COMPLETED","probe":probe}
+        with patch("atlaspm.framework.orchestrator._runtime_paused",return_value=False), \
+             patch("atlaspm.framework.orchestrator.market_phase",return_value="market"), \
+             patch("atlaspm.framework.orchestrator.market_research_cycle",return_value=result) as market, \
+             patch("atlaspm.execution.ibkr_whatif.profile_preview_check") as account:
+            self.assertEqual(paper_runtime_cycle(plan,state={})["status"],"PAPER_RUNTIME_CYCLE_COMPLETED")
+            self.assertTrue(market.call_args.kwargs["runtime_review"])
+            account.assert_not_called()
+            probe["runtime_review"]["position_monitor"]["status"]="PAPER_POSITION_MONITOR_BLOCKED"
+            self.assertEqual(paper_runtime_cycle(plan,state={})["status"],"PAPER_RUNTIME_CYCLE_BLOCKED")

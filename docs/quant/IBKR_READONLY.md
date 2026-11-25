@@ -304,3 +304,28 @@ The review neither changes order state nor submits/cancels/resends orders.
 It does not certify cash reconciliation for STKNOPT or promote observed
 fills to model-training data. Existing manual reconciliation retains its
 cash-account contract; actual order and fill acceptance still need testing.
+
+
+### Unified foreground Paper monitoring (V8/V9 foundation)
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.framework.orchestrator paper-runtime --file local_data/ibkr_market_plan.json --cycles 2 --interval 65 --dedicated-session
+~~~
+
+Explicitly confirm exclusive ownership of the local Gateway session. During
+NYSE regular hours the existing market research cycle adds portfolio,
+complete live-order, recovery and position reviews in the same session.
+Outside regular hours it runs account-only diagnostics without subscribing
+to market data. One bounded foreground process, no service or automatic
+login, no new persistence of licensed prices. Operator stop/takeover is
+checked before and after each cycle and during the interval. Known margin
+blocks remain visible; invalid snapshots or unresolved transport failures
+stop the worker. Do not delete reservation markers or retry an uncertain
+release. Resume only after operator review.
+
+The position monitor counts observed concentration (25% reported NLV),
+reported price/average-cost loss (10%) and gain (20%) thresholds, solely
+as illustrative review alerts. It does not infer cost or mark when missing,
+does not assume option/bond units, does not infer holding age, and does
+not generate exit orders. Actual reconciled outcome and approved forecast
+records remain prerequisites for model drift evaluation or retraining.

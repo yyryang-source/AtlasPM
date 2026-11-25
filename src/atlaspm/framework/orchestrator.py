@@ -124,7 +124,8 @@ def validate_market_plan(plan):
     return {**plan, "assets": dict(assets)}
 
 
-def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_review=False):
+def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_review=False,
+                          runtime_review=False):
     """One explicit network-enabled Paper research cycle, outside offline tick.
 
     State is bounded process-local metadata only. The existing probe owns
@@ -137,6 +138,8 @@ def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_revie
     from atlaspm.research.intelligence import local_specialist_tasks
 
     plan = validate_market_plan(plan)
+    if type(runtime_review) is not bool or (runtime_review and not portfolio_review):
+        raise ValueError("INVALID_RUNTIME_REVIEW_FLAG")
     if type(portfolio_review) is not bool:
         raise ValueError("INVALID_PORTFOLIO_REVIEW_FLAG")
     local_rights("ibkr", retention=plan["enqueue_events"])
@@ -182,7 +185,8 @@ def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_revie
                              dedicated_session=True, polls=2, include_history=True,
                              research_assets={s: assets[s] for s in chosen},
                              research_seen=seen, event_threshold=plan["move_threshold"],
-                             **({"portfolio_review":True} if portfolio_review else {}))
+                             **({"portfolio_review":True} if portfolio_review else {}),
+                             **({"runtime_review":True} if runtime_review else {}))
     # The probe does not persist restricted market data. Event retention is a
     # separately opted-in path through the existing bounded queue.
     candidates = probe.pop("research_event_candidates", [])
@@ -206,6 +210,64 @@ def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_revie
             "event_candidate_count": len(candidates), "events_added": added,
             "event_review": review, "event_retention_enabled": plan["enqueue_events"],
             "trade_authorized": False, "portfolio_mark_eligible": False}
+
+
+def _runtime_paused(path):
+    control = event_queue._read_state(path).get(event_queue.CONTROL_KEY,{})
+    return bool(control.get("stopped") or control.get("manual_takeover"))
+
+
+def paper_runtime_cycle(plan, *, state, path=event_queue.PATH):
+    """Bounded foreground monitoring, not an order or training scheduler.
+
+    During regular trading hours reuse the same market probe and authenticated
+    account context. Outside hours use account-only checks, no quote requests.
+    Known risk blocks remain observable; structural failures stop the worker.
+    """
+    from atlaspm.execution.ibkr_whatif import profile_preview_check
+    plan = validate_market_plan(plan)
+    if _runtime_paused(path):
+        return {**FLAGS,"status":"PAUSED","trade_authorized":False}
+    phase = market_phase(datetime.now(UTC).isoformat())
+    if phase=="market":
+        result = market_research_cycle(plan,state=state,path=path,portfolio_review=True,runtime_review=True)
+        if result["status"]!="MARKET_RESEARCH_CYCLE_COMPLETED":
+            return result
+        probe = result["probe"]
+        runtime = probe.get("runtime_review",{})
+        portfolio_ok = probe.get("portfolio_review",{}).get("status")=="PAPER_PORTFOLIO_REVIEW_COMPLETED"
+        mode = "MARKET_AND_ACCOUNT"
+    else:
+        if _runtime_paused(path):
+            return {**FLAGS,"status":"PAUSED","trade_authorized":False}
+        runtime = profile_preview_check(runtime_review=True)
+        result = None
+        portfolio_ok = True
+        mode = "ACCOUNT_ONLY"
+    if _runtime_paused(path):
+        return {**FLAGS,"status":"PAUSED_AFTER_REVIEW","trade_authorized":False}
+    ok = (portfolio_ok
+          and runtime.get("status") in {"PAPER_RUNTIME_SNAPSHOT_REVIEWED","PAPER_PREFLIGHT_CHECK_COMPLETED"}
+          and runtime.get("position_monitor",{}).get("status")=="PAPER_POSITION_MONITOR_COMPLETED"
+          and runtime.get("recovery_review",{}).get("status")=="PAPER_RECOVERY_REVIEW_COMPLETED")
+    return {**FLAGS,"status":"PAPER_RUNTIME_CYCLE_COMPLETED" if ok else "PAPER_RUNTIME_CYCLE_BLOCKED",
+            "phase":phase,"mode":mode,"runtime_review":runtime,
+            **({"market_research":result} if result is not None else {}),
+            "trade_authorized":False,"training_started":False,
+            "automatic_broker_orders_enabled":False}
+
+
+def _runtime_interval(seconds, *, path=event_queue.PATH):
+    """Check local operator control during sleep, not only at the next tick."""
+    import time
+    deadline = time.monotonic()+seconds
+    while True:
+        if _runtime_paused(path):
+            return False
+        left = deadline-time.monotonic()
+        if left<=0:
+            return True
+        time.sleep(min(1.,left))
 
 
 def learning_review(streams, *, as_of_date, window_dates=30, minimum_dates=10):
@@ -391,18 +453,53 @@ def offline_release(*, checkpoint="local_data/runs/offline_rc.continuous.json"):
 def main():
     import argparse,json,time
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review","multiasset-optimize","model-review-request","model-review-decision","model-review-status","market-research"))
+    parser.add_argument("action",choices=("status","run","stop","takeover","resume","offline","research","model-review","multiasset-optimize","model-review-request","model-review-decision","model-review-status","market-research","paper-runtime"))
     parser.add_argument("--cycles",type=int,default=1)
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
     parser.add_argument("--file",help="Local research task JSON under local_data")
     parser.add_argument("--portfolio-review",action="store_true",
                         help="market-research: read-only actual account/decision integration")
+    parser.add_argument("--dedicated-session",action="store_true",
+                        help="Confirm exclusive local session ownership for paper-runtime")
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
     if args.portfolio_review and args.action!="market-research":
         parser.error("--portfolio-review requires market-research")
+    if args.dedicated_session and args.action!="paper-runtime":
+        parser.error("--dedicated-session is scoped to paper-runtime")
+    if args.action=="paper-runtime":
+        from pathlib import Path
+        from atlaspm.data.market_db import private_path
+        from atlaspm.execution.ibkr_whatif import ProfileCheckError
+        from atlaspm.execution.ibkr_gateway import GatewayHTTPError
+        if not args.file or not args.dedicated_session or args.interval<65 or args.cycles>20:
+            parser.error("paper-runtime requires --file, --dedicated-session, 1..20 cycles, 65..300 second interval")
+        with private_path(Path(args.file),exists=True).open("rb") as handle:
+            raw=handle.read(16385)
+        if len(raw)>16384:
+            raise ValueError("MARKET_PLAN_FILE_LIMIT")
+        plan=validate_market_plan(json.loads(raw))
+        state={}
+        try:
+            for i in range(args.cycles):
+                result=paper_runtime_cycle(plan,state=state)
+                print(json.dumps({"cycle":i+1,**result},allow_nan=False),flush=True)
+                if result["status"]!="PAPER_RUNTIME_CYCLE_COMPLETED":
+                    return 0 if result["status"].startswith("PAUSED") else 1
+                if i+1<args.cycles and not _runtime_interval(args.interval):
+                    print(json.dumps({**FLAGS,"status":"PAUSED"}),flush=True)
+                    return 0
+        except KeyboardInterrupt:
+            print(json.dumps({**FLAGS,"status":"STOPPED_BY_OPERATOR"}),flush=True)
+        except (OSError,ValueError,TypeError,KeyError,OverflowError) as exc:
+            reason=(f"HTTP_{exc.status}" if isinstance(exc,GatewayHTTPError) else
+                    exc.reason if isinstance(exc,ProfileCheckError) else type(exc).__name__)
+            print(json.dumps({**FLAGS,"status":"PAPER_RUNTIME_BLOCKED","reason":reason,
+                              **({"stage":exc.stage} if isinstance(exc,ProfileCheckError) else {})}),flush=True)
+            return 1
+        return 0
     if args.action=="market-research":
         from pathlib import Path
         from atlaspm.data.market_db import private_path

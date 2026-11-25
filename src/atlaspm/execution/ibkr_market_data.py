@@ -317,7 +317,8 @@ PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
 
 def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                      include_history=False, output=None, research_assets=None,
-                     research_seen=None, event_threshold=None, portfolio_review=False):
+                     research_seen=None, event_threshold=None, portfolio_review=False,
+                     runtime_review=False):
     """Short, local Paper-only probe. No data retention without separate rights."""
     local_rights("ibkr", retention=output is not None)
     if type(polls) is not int or not 2 <= polls <= 3:
@@ -326,6 +327,8 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
             or not isinstance(symbols, (list, tuple)) or not 1 <= len(symbols) <= min(5, available_lines)
             or dedicated_session is not True):
         raise ValueError("Confirm dedicated session and available lines; symbol probe cap 5")
+    if type(runtime_review) is not bool or (runtime_review and (not portfolio_review or output is not None)):
+        raise ValueError("Runtime review requires in-memory portfolio review")
     if type(portfolio_review) is not bool or (portfolio_review and research_assets is None):
         raise ValueError("Portfolio review requires research asset scope")
     if type(include_history) is not bool:
@@ -472,6 +475,18 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                 result["portfolio_review"] = {**_FLAGS, "status":"PAPER_PORTFOLIO_REVIEW_BLOCKED",
                                               "decision":"NO_TRADE", "reason":"ACCOUNT_OR_RESEARCH_VALIDATION_FAILED",
                                               "trade_authorized":False, "optimizer_invoked":False, "order_count":0}
+        if runtime_review:
+            from atlaspm.execution.ibkr_whatif import review_runtime_snapshot, ProfileCheckError
+            try:
+                result["runtime_review"] = review_runtime_snapshot(transport,capture,summary)
+            except ProfileCheckError as exc:
+                result["runtime_review"] = {**_FLAGS,"status":"PAPER_RUNTIME_SNAPSHOT_BLOCKED",
+                                            "stage":exc.stage,"reason":exc.reason,
+                                            "trade_authorized":False}
+            except (ValueError,TypeError,KeyError,OverflowError,OSError):
+                result["runtime_review"] = {**_FLAGS,"status":"PAPER_RUNTIME_SNAPSHOT_BLOCKED",
+                                            "reason":"ACCOUNT_OR_ORDER_EVIDENCE_UNVERIFIED",
+                                            "trade_authorized":False}
         if output is not None:
             _write_sync_json(Path("local_data/ibkr_paper_market_probe.json"), {
                 **result, "latest_snapshot": last, "history": histories,

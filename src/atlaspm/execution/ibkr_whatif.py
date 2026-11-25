@@ -384,8 +384,68 @@ def _profile_ticket(account_id, identity, limit_price, shares):
             "quantity":shares,"price":float(price),"cOID":"ATL-WHATIF-"+nonce,"outsideRTH":False}
 
 
+def _profile_recovery_diagnostics(transport, account_id, orders):
+    """Reuse the existing journal; no new file or state transition."""
+    from atlaspm.execution.paper_order_journal import PaperJournal
+    from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+    from atlaspm.research.financial_events import FLAGS
+    import sqlite3
+    try:
+        db = require_private_output(Path("local_data/rebalance/workbench.sqlite3"))
+        if any(p.is_symlink() for p in (Path("local_data"),Path("local_data/rebalance"),
+                                         Path("local_data/rebalance/workbench.sqlite3"))):
+            raise ValueError("RECOVERY_PRIVATE_PATH_REQUIRED")
+        return _profile_stage("ORDER_RECOVERY", review_profile_recovery,
+                              transport, PaperJournal(db), account_id, orders)
+    except (ProfileCheckError, sqlite3.Error, ValueError, OSError):
+        return {**FLAGS,"status":"PAPER_RECOVERY_REVIEW_BLOCKED",
+                "reason":"JOURNAL_OR_BROKER_EVIDENCE_UNVERIFIED",
+                "block_reasons":["ORDER_RECOVERY_EVIDENCE_UNVERIFIED"],"journal_updated":False,
+                "auto_resend_enabled":False,"trade_authorized":False}
+
+
+def _profile_position_diagnostics(capture, margin):
+    from atlaspm.risk.ibkr_margin_monitor import review_reported_positions
+    try:
+        return review_reported_positions(capture,margin,now=datetime.now(timezone.utc))
+    except (ValueError,TypeError,KeyError,OverflowError):
+        return {"status":"PAPER_POSITION_MONITOR_BLOCKED",
+                "reason":"POSITION_CONTEXT_OR_FRESHNESS_UNVERIFIED",
+                "exit_orders_generated":0,"trade_authorized":False}
+
+
+def _profile_feedback_status(recovery):
+    # Do not feed candidate broker fills into synthetic training feedback.
+    return {"status":"RECONCILED_OUTCOMES_AND_APPROVED_FORECASTS_REQUIRED",
+            "new_broker_fill_candidates":recovery.get("new_broker_fill_candidates"),
+            "actual_return_labels_created":0,"model_drift_evaluated":False,
+            "training_started":False,"model_promoted":False}
+
+
+def review_runtime_snapshot(transport, capture, summary):
+    """Same-session market worker account/position/recovery review."""
+    from atlaspm.research.financial_events import FLAGS
+    account_id = capture["account_id"]
+    session = _profile_stage("SELECTED_ACCOUNT_READ",transport.get,"/iserver/accounts")
+    _profile_selected_account(session,account_id)
+    orders = _complete_profile_orders(transport,account_id)
+    risk = _profile_stage("RISK_RECONCILIATION",paper_profile_preflight,
+                          capture,summary,session,orders,now=datetime.now(timezone.utc))
+    _profile_stage("HEARTBEAT",transport.keepalive)
+    recovery = _profile_recovery_diagnostics(transport,account_id,orders)
+    position = _profile_position_diagnostics(capture,risk["margin"])
+    return {**FLAGS,"status":"PAPER_RUNTIME_SNAPSHOT_REVIEWED",
+            "capture_age_seconds":risk["capture_age_seconds"],
+            "active_order_count":risk["active_order_count"],
+            "margin_monitor_state":risk["margin"]["monitor_state"],
+            "block_reasons":sorted(set(risk["reasons"]+recovery["block_reasons"])),
+            "position_monitor":position,"recovery_review":recovery,
+            "feedback_status":_profile_feedback_status(recovery),
+            "trade_authorized":False,"submitted":False}
+
+
 def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_preview=False,
-                          recovery_review=False):
+                          recovery_review=False, runtime_review=False):
     """Saved-profile risk diagnostics; optional isolated exact-ticket What-If.
 
     No market subscriptions in check-only mode. An explicit ticket, current
@@ -402,7 +462,8 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
     from atlaspm.framework.orchestrator import market_phase
     import sys
 
-    if type(recovery_review) is not bool or (recovery_review and symbol is not None):
+    if (type(runtime_review) is not bool or type(recovery_review) is not bool
+            or ((recovery_review or runtime_review) and symbol is not None)):
         raise ValueError("RECOVERY_REVIEW_CHECK_ONLY")
     if type(allow_preview) is not bool or (symbol is None) != (limit_price is None):
         raise ValueError("PREVIEW_REQUIRES_EXPLICIT_SYMBOL_AND_LIMIT")
@@ -449,24 +510,13 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
                   "financing_verified":False,"collateral_verified":False,
                   "order_specific_risk_approved":False,"submitted":False,
                   "trade_authorized":False,"ready_for_institutional_risk_gate":False}
-        if recovery_review:
-            from atlaspm.execution.paper_order_journal import PaperJournal
-            from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
-            import sqlite3
-            try:
-                db = require_private_output(Path("local_data/rebalance/workbench.sqlite3"))
-                # Resolve only after rejecting a symlinked source path.
-                if Path("local_data").is_symlink() or Path("local_data/rebalance").is_symlink() or Path("local_data/rebalance/workbench.sqlite3").is_symlink():
-                    raise ValueError("RECOVERY_PRIVATE_PATH_REQUIRED")
-                recovery = _profile_stage("ORDER_RECOVERY", review_profile_recovery,
-                                          transport, PaperJournal(db), account_id, orders)
-                report["recovery_review"] = recovery
-                reasons.extend(r for r in recovery["block_reasons"] if r not in reasons)
-            except (ProfileCheckError, sqlite3.Error, ValueError, OSError):
-                report["recovery_review"] = {**FLAGS,"status":"PAPER_RECOVERY_REVIEW_BLOCKED",
-                    "reason":"JOURNAL_OR_BROKER_EVIDENCE_UNVERIFIED","journal_updated":False,
-                    "auto_resend_enabled":False,"trade_authorized":False}
-                reasons.append("ORDER_RECOVERY_EVIDENCE_UNVERIFIED")
+        if recovery_review or runtime_review:
+            recovery = _profile_recovery_diagnostics(transport, account_id, orders)
+            report["recovery_review"] = recovery
+            reasons.extend(r for r in recovery["block_reasons"] if r not in reasons)
+        if runtime_review:
+            report["position_monitor"] = _profile_position_diagnostics(capture, risk["margin"])
+            report["feedback_status"] = _profile_feedback_status(report["recovery_review"])
         if symbol is None or reasons:
             return report
         if market_phase(datetime.now(timezone.utc).isoformat()) != "market":
