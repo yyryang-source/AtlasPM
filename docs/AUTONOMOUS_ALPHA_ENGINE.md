@@ -180,3 +180,22 @@ baseline fits count toward the resource budget. Default behavior is unchanged.
 The hedge scenario module has a read-only CLI using local_data inputs:
 `python -m atlaspm.strategies.options.hedge_scenarios --contracts ... --quotes ... --settlements ... --plan ...`.
 The plan is the explicit JSON keyword arguments of compare_expiry_hedges.
+
+## Event-scoped joint specialist dossier
+
+The existing financial event queue now aggregates executed local specialist
+reports by explicit typed security association and asset type. An optional
+identity.security_id in a local binding maps a provider event subject such
+as ticker:AAA to an operator-declared CIK/conid/ISIN or other supported typed
+identity; existing typed subjects cannot be redirected, synthetic and real
+scopes cannot mix, and conflicting associations are rejected. The existing
+provider_id remains the exact native subject for each specialist. SEC, bond
+and factor local readers now record per-subject row counts, so unrelated
+rows cannot create coverage for a missing subject. A completed report's
+hash must match before the contract adapter accepts it. Existing contract
+and decision engines are reused; no qualitative report becomes alpha.
+The persisted dossier contains only task/research/decision digests, explicit
+15-category descriptive coverage, and NO_TRADE. It is a current-event
+review, not independently verified identity, cross-event current coverage,
+or a production forecast. Orchestrator status counts stored dossiers, not
+fresh certified research. The existing four local calls per tick cap remains.

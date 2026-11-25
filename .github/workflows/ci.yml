@@ -190,7 +190,7 @@ jobs:
       - name: Check installed dependencies
         run: python -m pip check
       - name: Run complete test suite with all optional dependencies
-        run: python scripts/maintenance/verify_release.py --minimum-passed 1278 --integrated
+        run: python scripts/maintenance/verify_release.py --minimum-passed 1283 --integrated
 
   ruff:
     name: Ruff source checks

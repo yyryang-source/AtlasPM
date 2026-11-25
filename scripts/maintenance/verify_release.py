@@ -20,7 +20,7 @@ from audit_source import audit
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--minimum-passed",type=int,default=1278)
+    parser.add_argument("--minimum-passed",type=int,default=1283)
     parser.add_argument("--allow-skips",action="store_true")
     parser.add_argument("--integrated",action="store_true",help="Also execute the isolated offline system fixture")
     args=parser.parse_args()
