@@ -194,14 +194,24 @@ def _review_identity(value):
     return value
 
 
-def request_review(path, *, version, requester, purpose, predecessor=None):
+def request_review(path, *, version, requester, purpose, risk_policy, predecessor=None):
     """Create a review-only request from existing immutable registry evidence.
 
     Rollback/revalidation always targets a NEW version with a different data
     fingerprint; that is necessary but not sufficient for independent data
     certification. No active model pointer or execution authority is created.
     """
+    from atlaspm.execution.institutional_gate import _policy_values
+    from atlaspm.engine.contracts import finite
     requester=_review_identity(requester)
+    if not isinstance(risk_policy,dict) or set(risk_policy)!={
+            "max_data_age_seconds","max_gross_leverage","max_stress_loss_fraction",
+            "min_excess_liquidity_fraction","max_single_order_fraction","max_option_premium_fraction",
+            "watch_drawdown_fraction","reduce_drawdown_fraction","critical_drawdown_fraction",
+            "max_limit_mark_deviation_bps"}:
+        raise ValueError("ALPHA_REVIEW_RISK_POLICY_REQUIRED")
+    _policy_values(risk_policy)
+    finite(risk_policy["max_limit_mark_deviation_bps"],"max_limit_mark_deviation_bps",minimum=0)
     if purpose not in {"promotion","rollback","revalidation"}:
         raise ValueError("ALPHA_REVIEW_PURPOSE")
     life=history(path,version)
@@ -225,6 +235,7 @@ def request_review(path, *, version, requester, purpose, predecessor=None):
              "registry_run_id":ev["run_id"],"validation_report_sha256":ev["report_sha256"],
              "dataset_sha256":report["dataset_sha256"],"strategy_id":report["strategy_id"],
              "evaluation_policy_sha256":digest(report["config"]),
+             "risk_policy":risk_policy,"risk_policy_sha256":digest(risk_policy),
              "lifecycle_event_sha256":life["events"][-1]["event_sha"]}
     request_id=digest(binding)
     with closing(_connect(path)) as con,con:
