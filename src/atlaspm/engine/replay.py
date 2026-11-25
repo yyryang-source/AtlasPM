@@ -37,6 +37,14 @@ def replay(payload):
             raise ValueError("SYNTHETIC_MARGIN_REQUIRES_ZERO_RESERVE_AND_RANK_WEIGHTS")
         if payload.get("risk_policy") is None:
             raise ValueError("SYNTHETIC_MARGIN_REQUIRES_RISK_POLICY")
+    reduction=payload.get("deleverage_policy")
+    reduction_target=None
+    if reduction is not None:
+        if not margin or not isinstance(reduction,dict) or set(reduction)!={"target_gross"}:
+            raise ValueError("DELEVERAGE_REQUIRES_SYNTHETIC_MARGIN")
+        reduction_target=finite(reduction["target_gross"],"deleverage_target_gross",minimum=0)
+    reducing=False
+    reduction_audit=[]
     lifecycle=payload.get("position_lifecycle")
     position_scope=False
     trailing=None
@@ -83,6 +91,9 @@ def replay(payload):
             raise ValueError("INVALID_REPLAY_RISK_LIMIT")
         if margin and margin.target_gross>gross_limit:
             raise ValueError("MARGIN_TARGET_EXCEEDS_RISK_CAP")
+        if reduction_target is not None and (reduction_target>=min(gross_limit,margin.target_gross)
+                or reduction_target*shock>stress_limit):
+            raise ValueError("DELEVERAGE_TARGET_MUST_REDUCE_RISK")
     sessions = payload["sessions"]
     if not isinstance(sessions, list) or len(sessions) < 2:
         raise ValueError("REQUIRES_TWO_SESSIONS")
@@ -154,10 +165,15 @@ def replay(payload):
             if 1-opening_equity/peak>drawdown_limit:
                 breaches.append("REPLAY_DRAWDOWN_LIMIT")
             if breaches:
-                halted=True
+                recoverable={"REPLAY_GROSS_LIMIT","REPLAY_STRESS_LIMIT"}
+                if reduction_target is not None and set(breaches)<=recoverable and not halted:
+                    reducing=True
+                else:
+                    halted=True
                 risk_events.append({"date":str(day),"timestamp":row["open_at"],
                     "kind":"SYNTHETIC_OPEN_MARGIN_RISK_CHECK","breaches":breaches,
-                    "halt_latched":True,"remaining_positions":dict(holdings)})
+                    "halt_latched":halted,"remaining_positions":dict(holdings),
+                    **({"deleverage_latched":reducing} if reduction_target is not None else {})})
             if halted:
                 targets=(str(prior_day),prior_close,{}) if holdings else None
         # Opt-in continuous cash lifecycle: recheck gap risk before any
@@ -179,6 +195,14 @@ def replay(payload):
                 if target_gross>gross_limit or target_gross*shock>stress_limit:
                     targets=None
                     lifecycle_audit.append({"date":str(day),"kind":"TARGET_RISK_BLOCK"})
+        reduction_only=reducing and not halted
+        reduction_desired=None
+        if reduction_only:
+            from atlaspm.engine.replay_funding import reduction_quantities
+            k=slip+fee+(.05 if policy is not None else 0.)
+            reduction_desired=reduction_quantities(holdings,op,equity=opening_equity,
+                                target_gross=reduction_target,adverse_cost_ratio=k)
+            targets=(str(prior_day),prior_close,{}) if holdings else None
         exit_only=position_scope and not halted and bool(set(position_exits)&set(holdings))
         if exit_only:
             targets=(str(prior_day),prior_close,{})
@@ -188,6 +212,8 @@ def replay(payload):
             if not signal_close < opening or not set(weights) <= set(op):
                 raise ValueError("TARGET_NOT_AVAILABLE_OR_MISSING_EXECUTION_MARK")
             desired = {s: floor(opening_equity*w/op[s]) for s,w in weights.items()}
+            if reduction_only:
+                desired=reduction_desired
             if exit_only:
                 # An exit is not a rebalance: preserve other quantities.
                 desired={s:q for s,q in holdings.items() if s not in position_exits}
@@ -253,6 +279,12 @@ def replay(payload):
             after = cash+sum(v for _,v in pending)+marked_gross(op)-liability()
             if cash < -1e-8 or not isclose(after, opening_equity-cost_today, abs_tol=1e-7):
                 raise ValueError("LEDGER_RECONCILIATION_FAILED")
+        if reduction_only:
+            after=opening_equity-cost_today
+            reduction_audit.append({"date":str(day),"opening_gross":sum(q*op[s] for s,q in prior_holdings.items()),
+                "target_gross":reduction_target,"post_fill_gross_to_equity":marked_gross(op)/after,
+                "target_met":marked_gross(op)<=reduction_target*after+1e-8,
+                "remaining_positions":dict(holdings),"settled_repayment_only":True})
         targets = None
         overnight = sum(q*(op[s]-prior_prices[s]) for s,q in prior_holdings.items()) if i else 0.
         intraday = sum(q*(cl[s]-op[s]) for s,q in holdings.items())
@@ -319,13 +351,20 @@ def replay(payload):
                             breaches.append(reason+":"+symbol)
                         lifecycle_audit.append(event)
                 # Account-wide breaches still dominate all local exits.
-            halted=halted or bool(breaches)
+            if breaches:
+                recoverable={"POST_FILL_GROSS_LEVERAGE_EXCEEDS_BUDGET","POST_FILL_STRESS_LOSS_EXCEEDS_BUDGET"}
+                if reduction_target is not None and set(breaches)<=recoverable and not halted:
+                    reducing=True
+                else:
+                    halted=True
             risk_events.append({"date":str(day),"timestamp":row["close_at"],
                 "kind":"SYNTHETIC_CLOSE_RISK_CHECK","breaches":breaches,
                 "halt_latched":halted,"gross_to_equity":snapshot["gross_to_net_liquidation"],
                 "stress_loss_fraction":snapshot["conservative_stress_loss_fraction"],
                 "drawdown":equity/peak-1,"remaining_positions":dict(holdings),
-                "next_open_action":"SELL_ONLY" if halted and holdings else "NO_NEW_RISK" if halted else "NORMAL"})
+                "next_open_action":"SELL_ONLY" if halted and holdings else "NO_NEW_RISK" if halted else
+                    "DELEVERAGE_ONLY" if reducing else "NORMAL",
+                **({"deleverage_latched":reducing} if reduction_target is not None else {})})
             if halted and holdings:
                 # No new buys after a breach. Retry any residual shares next
                 # open under the existing execution/participation constraints.
@@ -333,7 +372,7 @@ def replay(payload):
         pending_position_exit=position_scope and bool(set(position_exits)&set(holdings))
         if pending_position_exit and not halted:
             targets=(str(day),closing,{})
-        if (not halted and not pending_position_exit and i % cadence == 0
+        if (not halted and not reducing and not pending_position_exit and i % cadence == 0
                 and not (missing_policy=="hold" and row.get("signals")==[])):
             candidates = (observed_candidates if observed_candidates is not None else
                           validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400))
@@ -371,6 +410,10 @@ def replay(payload):
                 **({"position_exit_latches":position_exits,
                     "remaining_position_exits":{s:q for s,q in holdings.items() if s in position_exits},
                     "position_reentry_enabled":False} if position_scope else {}),
+                **({"deleverage_latched":reducing,"deleverage_audit":reduction_audit,
+                    "automatic_rerisk_enabled":False,"broker_margin_verified":False,
+                    "remaining_deleverage_positions":dict(holdings) if reducing and not halted else {}}
+                   if reduction_target is not None else {}),
                 **(margin.totals() if margin else {}))
 
 

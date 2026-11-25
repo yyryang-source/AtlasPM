@@ -54,6 +54,50 @@ class MarginReplayTests(unittest.TestCase):
         self.assertAlmostEqual(out["curve"][-1]["equity"]-1000,
             sum(x["overnight_pnl"]+x["intraday_pnl"]-x["trade_cost"]-x["financing_interest_today"] for x in out["curve"]))
 
+    def test_deleverage_reduces_without_full_liquidation(self):
+        p=fixture()
+        p["rebalance_sessions"]=1
+        p["risk_policy"].update(max_gross_leverage=1.6,max_drawdown=.5)
+        p["deleverage_policy"]={"target_gross":1.2}
+        for row in p["sessions"][2:]:
+            row["open"]["A"]=row["close"]["A"]=80
+        out=replay(p)
+        self.assertTrue(out["deleverage_latched"])
+        self.assertFalse(out["risk_halt_latched"])
+        self.assertEqual(out["curve"][2]["holdings"],{"A":10})
+        self.assertTrue(out["deleverage_audit"][0]["target_met"])
+        self.assertEqual(out["curve"][2]["principal"],500.)
+        self.assertLess(out["curve"][3]["principal"],500.)
+        self.assertFalse(any(t["side"]=="BUY" and t["date"]>="2020-01-06" for t in out["trades"]))
+        self.assertFalse(out["automatic_rerisk_enabled"])
+        self.assertFalse(out["broker_order_submission_enabled"])
+        self.assertTrue(verify_audit_chain(out["risk_audit"],out["risk_audit_root"]))
+
+    def test_deleverage_retries_and_severe_risk_overrides(self):
+        p=fixture()
+        p["risk_policy"].update(max_gross_leverage=1.6,max_drawdown=.5)
+        p["deleverage_policy"]={"target_gross":1.2}
+        p["execution_policy"]={"max_participation":.1,"impact_bps_at_full_participation":0}
+        for row in p["sessions"]:
+            row["volume"]={"A":200}
+        p["sessions"][1]["volume"]["A"]=10
+        for row in p["sessions"][2:]:
+            row["open"]["A"]=row["close"]["A"]=80
+        out=replay(p)
+        self.assertEqual(out["curve"][2]["holdings"],{"A":14})
+        self.assertFalse(out["deleverage_audit"][0]["target_met"])
+        self.assertTrue(out["deleverage_audit"][1]["target_met"])
+        self.assertFalse(out["risk_halt_latched"])
+        # A drawdown breach still requires the legacy sell-only flatten.
+        p["risk_policy"]["max_drawdown"]=.25
+        severe=replay(p)
+        self.assertTrue(severe["risk_halt_latched"])
+        self.assertEqual(severe["curve"][-1]["holdings"],{})
+        self.assertFalse(severe["live_execution_enabled"])
+        short=deepcopy(p)
+        short["sessions"]=short["sessions"][:3]
+        self.assertEqual(severe["curve"][:3],replay(short)["curve"])
+
     def test_cash_default_unchanged(self):
         p=fixture()
         del p["margin_policy"]

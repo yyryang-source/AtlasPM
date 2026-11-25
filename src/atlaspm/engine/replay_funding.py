@@ -109,3 +109,24 @@ class MarginFunding:
         return {"margin_debt":self.principal,"accrued_financing_interest":self.accrued,
                 "financing_interest_total":self.interest_total,"borrowed_total":self.borrowed_total,
                 "principal_repaid_total":self.repaid_total,"interest_paid_total":self.interest_paid_total}
+
+
+def reduction_quantities(holdings, marks, *, equity, target_gross, adverse_cost_ratio):
+    """Proportional sell-only target, rounded toward fewer retained shares.
+
+    A sale of reference notional S costs at most k*S; solve
+    gross-S <= target*(equity-k*S). Settlement changes neither marked
+    equity nor this exposure bound. Partial fills require a fresh check.
+    """
+    from math import floor
+    equity=finite(equity,"reduction_equity",minimum=.000001)
+    target=finite(target_gross,"reduction_target",minimum=0)
+    k=finite(adverse_cost_ratio,"reduction_cost",minimum=0)
+    if target>4 or k>=1 or target*k>=1:
+        raise ValueError("INVALID_REDUCTION_COST_OR_TARGET")
+    gross=sum(q*marks[s] for s,q in holdings.items())
+    if gross<=target*equity or gross==0:
+        return dict(holdings)
+    sale=min(gross,(gross-target*equity)/(1-target*k))
+    fraction=max(0.,1-sale/gross)
+    return {s:floor(q*fraction) for s,q in holdings.items()}
