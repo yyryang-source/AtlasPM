@@ -522,6 +522,7 @@ def _local_data_review(route, args, cutoff):
     receipts=[]
     prices={}
     sources={}
+    fundamentals={}
     with closing(batches) as stream:
         for batch in stream:
             count+=len(batch.rows)
@@ -536,6 +537,14 @@ def _local_data_review(route, args, cutoff):
                         raise ValueError("MIXED_LOCAL_PRICE_SOURCE")
                     sources[sym]=source
                     prices.setdefault(sym,{})[date.fromisoformat(str(when))]=float(price)
+            elif route=="fundamental_local":
+                from atlaspm.strategies.equity.stock_screener import FUNDAMENTAL_COLUMNS
+                for row in batch.rows:
+                    entry=dict(zip(batch.columns,row))
+                    sym=entry["symbol"]
+                    values={k:entry[k] for k in FUNDAMENTAL_COLUMNS[2:]}
+                    values["as_of_date"]=date.fromisoformat(entry["as_of_date"])
+                    fundamentals.setdefault(sym,[]).append(values)
     if not count:
         raise ValueError("NO_LOCAL_RESEARCH_EVIDENCE")
     report={"rows_read":count,"evidence_batch_hashes":receipts,"source_date_cutoff":day.isoformat(),
@@ -545,6 +554,28 @@ def _local_data_review(route, args, cutoff):
     if route=="technical_local":
         from atlaspm.strategies.equity.stock_screener import screen_stocks_from_prices
         report["technical_screen"]=screen_stocks_from_prices(prices,end.isoformat(),top=len(symbols))
+        if not report["technical_screen"]["eligible_count"]:
+            raise ValueError("NO_ELIGIBLE_TECHNICAL_RESEARCH")
+    elif route=="fundamental_local":
+        from atlaspm.strategies.equity.stock_screener import screen_stocks_from_prices
+        with closing(iter_batches("equity_daily",**params)) as stream:
+            for batch in stream:
+                count+=len(batch.rows)
+                if count>4096:
+                    raise ValueError("LOCAL_RESEARCH_ROW_BUDGET")
+                receipts.append(digest([batch.dataset,batch.columns,batch.origin,
+                    batch.source_version_hint,[[str(v) for v in row] for row in batch.rows]]))
+                for sym,when,price,source in batch.rows:
+                    if sym in sources and sources[sym]!=source:
+                        raise ValueError("MIXED_LOCAL_PRICE_SOURCE")
+                    sources[sym]=source
+                    prices.setdefault(sym,{})[date.fromisoformat(str(when))]=float(price)
+        report["rows_read"]=count
+        report["fundamental_screen"]=screen_stocks_from_prices(prices,end.isoformat(),
+            fundamental_history=fundamentals,top=len(symbols))
+        if not report["fundamental_screen"]["eligible_count"]:
+            raise ValueError("NO_ELIGIBLE_FUNDAMENTAL_RESEARCH")
+    report["signal_block_reason"]="UNCERTIFIED_IDENTITY_DATA_AND_RETURN_CALIBRATION"
     return report
 
 
@@ -568,6 +599,7 @@ def local_specialist_tasks(tasks, *, as_of):
         "events":{"events"},
         "technical_local":{"start","end","symbols"},
         "fundamental_local":{"start","end","symbols","path"},
+        "options_local":{"path","sha256","retrieved_at","ticker"},
         "sec_local":{"start","end","symbols"},
         "bond_local":{"start","end","symbols"},
         "factor_local":{"start","end","symbols","dataset"}}
@@ -600,6 +632,24 @@ def local_specialist_tasks(tasks, *, as_of):
             elif route=="credit_history":
                 from atlaspm.research.credit_intelligence import rating_history
                 report=rating_history(as_of=cutoff,**args)
+            elif route=="options_local":
+                from atlaspm.data.provider_policy import local_rights
+                from atlaspm.data.api_gateway import Response
+                from atlaspm.research.options_intelligence import analyze_alerts
+                local_rights("unusual_whales",retention=True)
+                stamp=_timestamp(args["retrieved_at"])
+                if stamp>_timestamp(cutoff):
+                    raise ValueError("OPTIONS_LOCAL_LOOKAHEAD")
+                with private_path(Path(args["path"]),exists=True).open("rb") as handle:
+                    body=handle.read(2*1024*1024+1)
+                if len(body)>2*1024*1024 or sha256(body).hexdigest()!=args["sha256"]:
+                    raise ValueError("OPTIONS_LOCAL_EVIDENCE_MISMATCH")
+                report=analyze_alerts(Response("unusual_whales",args["sha256"],stamp.isoformat(),body),
+                                      as_of=cutoff)
+                if not report["alerts"] or any(a["ticker"]!=args["ticker"] for a in report["alerts"]):
+                    raise ValueError("OPTIONS_LOCAL_SUBJECT_MISMATCH_OR_EMPTY")
+                report["numeric_eligible"]=False
+                report["signal_block_reason"]="OPTION_FLOW_NOT_CALIBRATED_RETURN_FORECAST"
             elif route=="factor_admission":
                 from atlaspm.research.training_admission import audit_factor_months
                 if not isinstance(args["months"],list) or len(args["months"])>3:
@@ -640,6 +690,7 @@ def validate_local_bindings(bindings):
         "credit_outlook":{"credit_history"},
         "credit_watch":{"credit_history"},
         "bond_trade":{"bond_local"},
+        "options_flow":{"options_local"},
         "index_change":{"factor_local","artifact_decision"},
     }
     if not isinstance(bindings,list) or len(bindings)>16:
