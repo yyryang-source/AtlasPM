@@ -32,14 +32,28 @@ def market_observation(identity, history, quote, *, asset_type, as_of):
     report = broker_market_research(identity, history, quote, asset_type=asset_type, as_of=as_of)
     if report["status"] != "DESCRIPTIVE_RESEARCH_COMPLETED":
         return 0
+    from atlaspm.research.alpha_technical import metrics
+    from atlaspm.research.financial_events import _time
+    received_ms = int(_time(history["retrieved_at_utc"]).timestamp()*1000)
+    bars = []
+    for bar in history["rows"][:-1]:
+        if bar["t"] + 300000 > received_ms:
+            continue
+        if bars and bar["t"] - bars[-1]["t"] != 300000:
+            bars.clear()
+        bars.append(bar)
+    technical = metrics(bars)
     # Only descriptive values; no account, orders, execution price or inferred volume.
     evidence = {"kind": "market_and_technical", "symbol": report["symbol"],
-                "metrics": report["metrics"], "closed_bars": report["contiguous_closed_bar_candidates"],
+                "metrics": report["metrics"], "technical": technical,
+                "bar_interval": "5min", "last_closed_bar_ms": bars[-1]["t"], "closed_bars": report["contiguous_closed_bar_candidates"],
                 "snapshot_availability": report["snapshot_availability"],
                 "history_sha256": history["source_sha256"],
-                "history_units_verified": False, "execution_price_eligible": False}
+                "history_units_verified": False, "execution_price_eligible": False,
+                "quote": {k: quote.get(k) for k in ("availability", "age_seconds", "values", "spread", "fresh_realtime_book_candidate")}}
     return ingest(provider="ibkr", text=json.dumps(evidence, sort_keys=True, allow_nan=False),
-                  symbols=[report["symbol"]], received_at=as_of, ttl=300)
+                  symbols=[report["symbol"]], received_at=as_of, ttl=300,
+                  source_revision=_digest(evidence))
 
 
 def institutional_once(*, subject, symbol, as_of):
