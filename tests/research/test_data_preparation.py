@@ -77,3 +77,35 @@ class DataPreparationTests(unittest.TestCase):
                     self.assertFalse(Path("local_data/training/v6/.prepare.lock").exists())
             finally:
                 os.chdir(before)
+
+    def test_held_or_unavailable_lock_blocks_without_maintenance(self):
+        before=Path.cwd()
+        with tempfile.TemporaryDirectory() as folder:
+            try:
+                os.chdir(folder)
+                lock=Path("local_data/training/v6/.prepare.lock")
+                lock.parent.mkdir(parents=True)
+                lock.write_text("another task",encoding="utf-8")
+                with patch.object(admission,"_archive_inventory",return_value=[_row("2000-01")]), \
+                     patch("atlaspm.research.real_dataset_v6._calendar",return_value=[]), \
+                     patch("atlaspm.research.real_dataset_v6._folds",return_value=[{}]), \
+                     patch("atlaspm.data.unified_pipeline.maintain") as maintain:
+                    plan=admission.prepare_real_research("2000-01","2000-07")
+                    self.assertEqual(plan["status"],"DATA_PREPARATION_PLAN_READY")
+                    result=admission.prepare_real_research("2000-01","2000-07",execute=True)
+                    self.assertEqual(result["status"],"DATA_PREPARATION_LOCK_BLOCKED")
+                    self.assertEqual(result["blockers"],["PREPARATION_LOCK_ALREADY_HELD"])
+                    self.assertEqual(lock.read_text(encoding="utf-8"),"another task")
+                    self.assertFalse(result["maintenance_started"])
+                    self.assertFalse(result["approved_for_model_training"])
+                    lock.unlink()
+                    with patch("os.open",side_effect=PermissionError("denied")):
+                        result=admission.prepare_real_research("2000-01","2000-07",execute=True)
+                    self.assertEqual(result["status"],"DATA_PREPARATION_LOCK_BLOCKED")
+                    self.assertEqual(result["blockers"],["PREPARATION_LOCK_UNAVAILABLE"])
+                    self.assertEqual(result["error_type"],"PermissionError")
+                    self.assertFalse(result["maintenance_started"])
+                    self.assertFalse(lock.exists())
+                    maintain.assert_not_called()
+            finally:
+                os.chdir(before)
