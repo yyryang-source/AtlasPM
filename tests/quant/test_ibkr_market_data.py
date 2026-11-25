@@ -236,3 +236,65 @@ class MarketPoolTests(unittest.TestCase):
         self.assertIsNone(result["directional_signal"])
         with self.assertRaises(ValueError):
             normalize({**event,"provider":"sec"}, received_at=now)
+
+
+    def test_paper_portfolio_review_keeps_held_positions_and_no_trade(self):
+        from atlaspm.engine.autonomous_decision import review_paper_portfolio, redacted_paper_portfolio_review
+        from atlaspm.research.intelligence import broker_market_research
+        identity, history, quote, cutoff = self.research_fixture()
+        item = broker_market_research(identity, history, quote, asset_type="stock", as_of=cutoff)
+        capture = {"source":"local_authenticated_ibkr_gateway","paper_identity_verified":True,
+                   "gateway_tls_certificate_validated":True,"session_reported_authenticated":True,
+                   "live_execution_enabled":False,"broker_order_submission_enabled":False,
+                   "account_id":"DUR123","captured_at_utc":cutoff,"position_count":2,
+                   "raw":{"selected_account":{"accountId":"DUR123","type":"DEMO","currency":"USD","brokerageAccess":True},
+                          "auth_status":{"authenticated":True,"connected":True,"competing":False},
+                          "USD_ledger":{"USD":{"settledcash":900,"netliquidationvalue":1000}},
+                          "positions":[{"conid":10,"position":1,"currency":"USD","assetClass":"STK","mktValue":70},
+                                       {"conid":12,"position":2,"currency":"USD","assetClass":"STK","mktValue":30}]}}
+        margin = {"margin_summary_usd_claim":{"total_nlv":1002,"available_funds":900},
+                  "monitor_state":"BLOCKED_DATA","data_integrity_block_reasons":["FOREIGN_NLV_UNEXPLAINED"],
+                  "risk_alerts":[],"account_nlv_reconciliation":{"state":"BASE_CURRENCY_SUM_AND_MARGIN_MATCH"}}
+        with patch("atlaspm.risk.ibkr_margin_monitor.normalize_ibkr_margin_summary",return_value=margin):
+            result = review_paper_portfolio(capture, {}, {"AAA":identity}, {"AAA":item}, as_of=cutoff)
+        self.assertEqual(result["decision"],"NO_TRADE")
+        self.assertEqual(result["unexplained_usd_cash_mark_gap"],0)
+        self.assertEqual(result["reported_gross_position_value_usd"],100)
+        self.assertEqual(result["positions"][1]["research_coverage"],"OUTSIDE_SELECTED_BATCH")
+        self.assertIn("FOREIGN_NLV_UNEXPLAINED",result["block_reasons"])
+        self.assertEqual(result["research_decision"]["candidates"][0]["action"],"NO_TRADE")
+        self.assertIsNone(result["target_weights"])
+        self.assertFalse(result["optimizer_invoked"])
+        self.assertEqual(result["orders"],[])
+        redacted = redacted_paper_portfolio_review(result)
+        self.assertEqual(redacted["position_count"],2)
+        self.assertNotIn("reported_account_nlv_usd",redacted)
+        self.assertNotIn("DUR123",json.dumps(redacted))
+        with self.assertRaisesRegex(ValueError,"AUTHENTICATED_PAPER_CAPTURE_REQUIRED"):
+            review_paper_portfolio({**capture,"paper_identity_verified":False}, {},
+                                   {"AAA":identity},{"AAA":item},as_of=cutoff)
+
+    def test_paper_portfolio_missing_marks_not_zero_or_target(self):
+        from atlaspm.engine.autonomous_decision import review_paper_portfolio, redacted_paper_portfolio_review
+        identity, _, _, cutoff = self.research_fixture()
+        capture = {"source":"local_authenticated_ibkr_gateway","paper_identity_verified":True,
+                   "gateway_tls_certificate_validated":True,"session_reported_authenticated":True,
+                   "live_execution_enabled":False,"broker_order_submission_enabled":False,
+                   "account_id":"DU123","captured_at_utc":cutoff,"position_count":1,
+                   "raw":{"selected_account":{"accountId":"DU123","type":"DEMO","currency":"USD","brokerageAccess":True},
+                          "auth_status":{"authenticated":True,"connected":True},
+                          "USD_ledger":{"USD":{"settledcash":900,"netliquidationvalue":1000}},
+                          "positions":[{"conid":10,"position":1,"currency":"USD","assetClass":"STK"}]}}
+        margin = {"margin_summary_usd_claim":{"total_nlv":1000,"available_funds":900},
+                  "monitor_state":"NORMAL","data_integrity_block_reasons":[],"risk_alerts":[],
+                  "account_nlv_reconciliation":{"state":"USD_ONLY"}}
+        with patch("atlaspm.risk.ibkr_margin_monitor.normalize_ibkr_margin_summary",return_value=margin):
+            result = review_paper_portfolio(capture, {}, {"AAA":identity},
+                     {"AAA":{"status":"UNCHANGED_OBSERVATION_SKIPPED","research_contract":None}}, as_of=cutoff)
+        self.assertIsNone(result["reported_gross_position_value_usd"])
+        self.assertIsNone(result["unexplained_usd_cash_mark_gap"])
+        self.assertIn("MISSING_BROKER_POSITION_VALUES",result["block_reasons"])
+        self.assertEqual(result["positions"][0]["research_coverage"],"NO_CURRENT_CONTRACT")
+        self.assertEqual(redacted_paper_portfolio_review(result)["usd_cash_mark_bridge_status"],"UNKNOWN")
+        self.assertIsNone(result["target_weights"])
+        self.assertEqual(result["orders"],[])

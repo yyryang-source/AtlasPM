@@ -317,7 +317,7 @@ PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
 
 def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                      include_history=False, output=None, research_assets=None,
-                     research_seen=None, event_threshold=None):
+                     research_seen=None, event_threshold=None, portfolio_review=False):
     """Short, local Paper-only probe. No data retention without separate rights."""
     local_rights("ibkr", retention=output is not None)
     if type(polls) is not int or not 2 <= polls <= 3:
@@ -326,6 +326,8 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
             or not isinstance(symbols, (list, tuple)) or not 1 <= len(symbols) <= min(5, available_lines)
             or dedicated_session is not True):
         raise ValueError("Confirm dedicated session and available lines; symbol probe cap 5")
+    if type(portfolio_review) is not bool or (portfolio_review and research_assets is None):
+        raise ValueError("Portfolio review requires research asset scope")
     if type(include_history) is not bool:
         raise ValueError("Invalid history flag")
     if research_assets is not None:
@@ -357,7 +359,12 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
         capture = collect_ibkr_readonly_account(transport, account_id=profile["account"], paper_only=True)
         if capture.get("paper_identity_verified") is not True:
             raise ValueError("Paper market session identity not verified")
-        del capture
+        if portfolio_review:
+            # Same authenticated session; no extra SSO or separate stale file.
+            from urllib.parse import quote
+            summary = transport.get(f"/portfolio/{quote(profile['account'], safe='')}/summary")
+        else:
+            del capture
         pool = MarketPool(transport, available_lines=available_lines,
                           dedicated_session=True, poll_interval=2)
         pool.connect()
@@ -455,6 +462,16 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
             result["unchanged_research_count"] = sum(row["status"] == "UNCHANGED_OBSERVATION_SKIPPED" for row in research.values())
             if event_threshold is not None:
                 result["research_event_candidates"] = candidates
+        if portfolio_review:
+            from atlaspm.engine.autonomous_decision import review_paper_portfolio, redacted_paper_portfolio_review
+            try:
+                reviewed = review_paper_portfolio(capture, summary, identities, research,
+                                                  as_of=datetime.now(UTC).isoformat())
+                result["portfolio_review"] = redacted_paper_portfolio_review(reviewed)
+            except (ValueError, TypeError, KeyError, OverflowError):
+                result["portfolio_review"] = {**_FLAGS, "status":"PAPER_PORTFOLIO_REVIEW_BLOCKED",
+                                              "decision":"NO_TRADE", "reason":"ACCOUNT_OR_RESEARCH_VALIDATION_FAILED",
+                                              "trade_authorized":False, "optimizer_invoked":False, "order_count":0}
         if output is not None:
             _write_sync_json(Path("local_data/ibkr_paper_market_probe.json"), {
                 **result, "latest_snapshot": last, "history": histories,

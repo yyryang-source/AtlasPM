@@ -38,6 +38,163 @@ def decide(rows, *, as_of, weights, horizon_days, cost_fraction, max_disagreemen
             "fusion":fusion,"trade_authorized":False}
 
 
+def review_paper_portfolio(capture, raw_summary, identities, research, *, as_of):
+    """Read-only actual-account context + existing decision engine.
+
+    Broker-reported marks are diagnostic observations, not independently
+    verified execution prices. Never adapt this account to a synthetic input.
+    All positions, including those outside the selected research batch, remain
+    in the exposure review. Missing data is never treated as a zero position.
+    """
+    import re
+    from datetime import UTC, datetime
+    from math import fsum, isfinite
+    from atlaspm.execution.ibkr_mapping import _market_value
+    from atlaspm.risk.ibkr_margin_monitor import normalize_ibkr_margin_summary
+
+    now = timestamp(as_of, "as_of").astimezone(UTC)
+    if now > datetime.now(UTC):
+        raise ValueError("FUTURE_PAPER_PORTFOLIO_REVIEW")
+    if (not isinstance(capture, dict)
+            or capture.get("source") != "local_authenticated_ibkr_gateway"
+            or any(capture.get(k) is not True for k in (
+                "paper_identity_verified", "gateway_tls_certificate_validated",
+                "session_reported_authenticated"))
+            or capture.get("live_execution_enabled") is not False
+            or capture.get("broker_order_submission_enabled") is not False):
+        raise ValueError("AUTHENTICATED_PAPER_CAPTURE_REQUIRED")
+    account_id = capture.get("account_id")
+    if not isinstance(account_id, str) or not re.fullmatch(r"DU(?:R)?[0-9]{1,20}", account_id):
+        raise ValueError("PAPER_ACCOUNT_IDENTITY_REQUIRED")
+    raw = capture["raw"]
+    account = raw["selected_account"]
+    auth = raw["auth_status"]
+    if (account.get("type") != "DEMO" or account.get("currency") != "USD"
+            or account.get("brokerageAccess") is not True
+            or account.get("accountId", account.get("id")) != account_id
+            or any(account[k] != account_id for k in ("id","accountId") if k in account)
+            or auth.get("authenticated") is not True or auth.get("connected") is not True
+            or auth.get("competing") is True):
+        raise ValueError("PAPER_ACCOUNT_CONTEXT_MISMATCH")
+    age = (now-timestamp(capture["captured_at_utc"], "captured_at")).total_seconds()
+    if not 0 <= age <= 120:
+        raise ValueError("PAPER_PORTFOLIO_CAPTURE_STALE")
+    if (not isinstance(identities, dict) or not 1 <= len(identities) <= 5
+            or not isinstance(research, dict) or set(identities) != set(research)):
+        raise ValueError("PAPER_RESEARCH_SCOPE")
+    by_id = {}
+    rows = []
+    coverage = {}
+    for symbol, identity in identities.items():
+        conid = identity.get("conid")
+        if (type(conid) is not int or not 1 <= conid <= 2**63-1
+                or conid in by_id or identity.get("symbol") != symbol
+                or identity.get("currency") != "USD" or identity.get("asset_class") != "STK"
+                or identity.get("broker_identity_checked") is not True):
+            raise ValueError("PAPER_RESEARCH_IDENTITY_MISMATCH")
+        by_id[conid] = symbol
+        item = research[symbol]
+        checked = item.get("research_contract")
+        if checked is not None:
+            body = checked["contract"]
+            validated = contract(body, as_of=as_of)
+            if (body["security_id"] != f"conid:{conid}" or body["asset_type"] not in {"stock","etf"}
+                    or body["synthetic_fixture"] is not False or body["kind"] != "objective"
+                    or body["source"] != "ibkr" or validated["numeric_eligible"]
+                    or validated["research_id"] != checked["research_id"]):
+                raise ValueError("PAPER_RESEARCH_CONTRACT_MISMATCH")
+            rows.append(body)
+        coverage[symbol] = "CURRENT_OBJECTIVE_RESEARCH" if checked else "NO_CURRENT_CONTRACT"
+    decision = decide(rows, as_of=as_of, weights={"ibkr_intraday_observation_v1":1},
+                      horizon_days=1, cost_fraction=0) if rows else None
+    # Zero cost here is not a trading cost assumption: all evidence is
+    # objective-only and there must never be a numeric/actionable candidate.
+    if decision and any(c["action"] != "NO_TRADE" or c["numeric_count"] != 0
+                        for c in decision["candidates"]):
+        raise ValueError("UNEXPECTED_PAPER_NUMERIC_DECISION")
+    margin = normalize_ibkr_margin_summary(raw_summary, capture, now_utc=now)
+    usd = raw["USD_ledger"]["USD"]
+    cash = finite(usd["settledcash"], "USD settled cash")
+    usd_nlv = finite(usd["netliquidationvalue"], "USD NLV", minimum=.01)
+    nlv = finite(margin["margin_summary_usd_claim"]["total_nlv"], "reported account NLV", minimum=.01)
+    positions = raw["positions"]
+    if (not isinstance(positions, list) or len(positions) > 1000
+            or type(capture.get("position_count")) is not int or len(positions) != capture["position_count"]):
+        raise ValueError("PAPER_POSITION_SCOPE")
+    exposure = []
+    held = set()
+    for row in positions:
+        cid = row.get("conid")
+        if type(cid) is not int or not 1 <= cid <= 2**63-1 or cid in held or row.get("currency") != "USD":
+            raise ValueError("PAPER_POSITION_IDENTITY_MISMATCH")
+        held.add(cid)
+        qty = finite(row.get("position"), "reported quantity")
+        value = _market_value(row, cid)
+        if value is not None and (qty*value < 0 or (qty == 0 and value != 0)):
+            raise ValueError("PAPER_POSITION_VALUE_SIGN")
+        kind = row.get("assetClass", row.get("secType", "UNKNOWN"))
+        selected = by_id.get(cid)
+        if selected is not None and kind != "STK":
+            raise ValueError("PAPER_HELD_RESEARCH_ASSET_MISMATCH")
+        exposure.append({"security_id":f"conid:{cid}", "broker_asset_class":kind,
+                         "reported_quantity":qty, "reported_market_value_usd":value,
+                         "reported_weight":value/nlv if value is not None else None,
+                         "research_coverage":coverage[selected] if selected is not None else "OUTSIDE_SELECTED_BATCH",
+                         "position_units_independently_verified":False, "target_weight":None})
+    complete = all(p["reported_market_value_usd"] is not None for p in exposure)
+    net = fsum(p["reported_market_value_usd"] for p in exposure) if complete else None
+    gross = fsum(abs(p["reported_market_value_usd"]) for p in exposure) if complete else None
+    bridge = usd_nlv-cash-net if complete else None
+    if any(v is not None and not isfinite(v) for v in (net,gross,bridge,cash/nlv)):
+        raise ValueError("PAPER_EXPOSURE_NONFINITE")
+    blockers = set(margin["data_integrity_block_reasons"])
+    blockers.update(margin["risk_alerts"])
+    blockers.update({"NO_APPROVED_RETURN_FORECAST", "SECURITY_MASTER_ADMISSION_REQUIRED",
+                     "EXECUTION_MARKS_UNVERIFIED", "FINANCING_DEBT_AND_COLLATERAL_UNVERIFIED",
+                     "INDEPENDENT_ORDER_RISK_APPROVAL_REQUIRED", "REAL_PORTFOLIO_OPTIMIZER_ADMISSION_REQUIRED"})
+    if not complete:
+        blockers.add("MISSING_BROKER_POSITION_VALUES")
+    if bridge is not None and abs(bridge) > .01:
+        blockers.add("USD_CASH_PLUS_MARKS_NLV_GAP_UNEXPLAINED")
+    if cash < 0:
+        blockers.add("NEGATIVE_SETTLED_CASH_REQUIRES_DEBT_REVIEW")
+    return {**FLAGS, "status":"PAPER_PORTFOLIO_REVIEW_COMPLETED",
+            "decision":"NO_TRADE", "as_of":as_of, "capture_age_seconds":age,
+            "reported_account_nlv_usd":nlv, "reported_usd_currency_nlv":usd_nlv,
+            "reported_settled_cash_usd":cash,
+            "reported_available_funds_usd":margin["margin_summary_usd_claim"]["available_funds"],
+            "reported_net_position_value_usd":net, "reported_gross_position_value_usd":gross,
+            "unexplained_usd_cash_mark_gap":bridge, "reported_cash_weight":cash/nlv,
+            "reported_gross_position_weight":gross/nlv if gross is not None else None,
+            "positions":exposure, "research_coverage":coverage, "research_decision":decision,
+            "margin_monitor_state":margin["monitor_state"],
+            "nlv_reconciliation_state":margin["account_nlv_reconciliation"]["state"],
+            "block_reasons":sorted(blockers), "optimizer_invoked":False,
+            "target_weights":None, "orders":[], "trade_authorized":False,
+            "portfolio_mark_eligible":False, "ready_for_institutional_risk_gate":False}
+
+
+def redacted_paper_portfolio_review(report):
+    """No balances, complete account IDs, quantities or licensed values on stdout."""
+    from collections import Counter
+    decision = report["research_decision"]
+    return {**FLAGS, "status":report["status"], "decision":report["decision"],
+            "capture_age_seconds":report["capture_age_seconds"],
+            "position_count":len(report["positions"]),
+            "positions_with_broker_values":sum(p["reported_market_value_usd"] is not None for p in report["positions"]),
+            "held_research_coverage":dict(Counter(p["research_coverage"] for p in report["positions"])),
+            "current_research_count":sum(v=="CURRENT_OBJECTIVE_RESEARCH" for v in report["research_coverage"].values()),
+            "decision_candidate_count":len(decision["candidates"]) if decision else 0,
+            "numeric_candidate_count":sum(c["numeric_count"] for c in decision["candidates"]) if decision else 0,
+            "usd_cash_mark_bridge_status":"UNKNOWN" if report["unexplained_usd_cash_mark_gap"] is None else
+                "MATCH" if abs(report["unexplained_usd_cash_mark_gap"]) <= .01 else "UNEXPLAINED",
+            "margin_monitor_state":report["margin_monitor_state"],
+            "nlv_reconciliation_state":report["nlv_reconciliation_state"],
+            "block_reasons":report["block_reasons"], "optimizer_invoked":False,
+            "target_weights":None, "order_count":0, "trade_authorized":False,
+            "portfolio_mark_eligible":False, "ready_for_institutional_risk_gate":False}
+
+
 def portfolio_cycle(payload, rows, *, weights, cost_fraction, liquidity, horizon_days=365):
     """All-or-nothing synthetic held-equity rebalance. HOLD/NO_TRADE never
     gets converted to a zero target, and no unsupported asset gets an order.

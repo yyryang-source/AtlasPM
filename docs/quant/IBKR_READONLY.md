@@ -222,3 +222,30 @@ capacity and operator controls. Actual instrument admission is still required
 for real event specialist dispatch. No automatic model training, backtest,
 portfolio marks, order execution or external AI. Operator stop/takeover is
 checked before and after each probe; Ctrl+C ends the foreground worker.
+
+
+### Actual Paper portfolio decision review (V4/V5 integration)
+
+Run the existing foreground research command with `--portfolio-review`.
+This explicitly adds one read-only account summary request per cycle using
+the already authenticated Paper session. Account and research are processed
+in memory; no additional raw account snapshot or licensed archive is written.
+Capture age is bounded to 120 seconds, the existing margin normalizer is
+reused, and the same conid associates held positions with research.
+All held positions remain in scope, even outside the current research batch.
+Broker-reported marked values and signed cash are diagnostic only; missing
+values make aggregate exposure unknown, not zero. The USD cash-plus-position
+bridge is an unexplained residual, never inferred financing principal.
+The existing autonomous decision engine consumes the objective contracts.
+No eligible numeric forecast means NO_TRADE; no target weights or orders
+are created and the synthetic optimizer is not invoked. Skipped duplicate
+research is explicitly NO_CURRENT_CONTRACT, not an exit signal.
+Only redacted review status/counts/blocks are returned to stdout.
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.framework.orchestrator market-research --file local_data/ibkr_market_plan.json --cycles 1 --interval 65 --portfolio-review
+~~~
+
+CNH, model admission, field-level quote freshness, historical identity,
+financing/collateral and order risk gates remain independent. This is a real
+account decision diagnostics bridge, not real optimization or execution.

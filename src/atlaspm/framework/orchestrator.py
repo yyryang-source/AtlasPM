@@ -124,7 +124,7 @@ def validate_market_plan(plan):
     return {**plan, "assets": dict(assets)}
 
 
-def market_research_cycle(plan, *, state, path=event_queue.PATH):
+def market_research_cycle(plan, *, state, path=event_queue.PATH, portfolio_review=False):
     """One explicit network-enabled Paper research cycle, outside offline tick.
 
     State is bounded process-local metadata only. The existing probe owns
@@ -137,6 +137,8 @@ def market_research_cycle(plan, *, state, path=event_queue.PATH):
     from atlaspm.research.intelligence import local_specialist_tasks
 
     plan = validate_market_plan(plan)
+    if type(portfolio_review) is not bool:
+        raise ValueError("INVALID_PORTFOLIO_REVIEW_FLAG")
     local_rights("ibkr", retention=plan["enqueue_events"])
     control = event_queue._read_state(path).get(event_queue.CONTROL_KEY, {})
     if control.get("stopped") or control.get("manual_takeover"):
@@ -179,7 +181,8 @@ def market_research_cycle(plan, *, state, path=event_queue.PATH):
     probe = run_symbol_probe(chosen, available_lines=plan["available_lines"],
                              dedicated_session=True, polls=2, include_history=True,
                              research_assets={s: assets[s] for s in chosen},
-                             research_seen=seen, event_threshold=plan["move_threshold"])
+                             research_seen=seen, event_threshold=plan["move_threshold"],
+                             **({"portfolio_review":True} if portfolio_review else {}))
     # The probe does not persist restricted market data. Event retention is a
     # separately opted-in path through the existing bounded queue.
     candidates = probe.pop("research_event_candidates", [])
@@ -393,9 +396,13 @@ def main():
     parser.add_argument("--interval",type=int,default=60)
     parser.add_argument("--checkpoint",default="local_data/runs/offline_rc.continuous.json")
     parser.add_argument("--file",help="Local research task JSON under local_data")
+    parser.add_argument("--portfolio-review",action="store_true",
+                        help="market-research: read-only actual account/decision integration")
     args=parser.parse_args()
     if not 1<=args.cycles<=100 or not 1<=args.interval<=300:
         parser.error("Invalid worker bounds")
+    if args.portfolio_review and args.action!="market-research":
+        parser.error("--portfolio-review requires market-research")
     if args.action=="market-research":
         from pathlib import Path
         from atlaspm.data.market_db import private_path
@@ -411,7 +418,7 @@ def main():
         state = {}
         try:
             for i in range(args.cycles):
-                result = market_research_cycle(plan, state=state)
+                result = market_research_cycle(plan, state=state, portfolio_review=args.portfolio_review)
                 print(json.dumps({"cycle": i+1, **result}, allow_nan=False), flush=True)
                 if result["status"] != "MARKET_RESEARCH_CYCLE_COMPLETED":
                     return 1 if result["status"].startswith("BLOCKED") else 0
