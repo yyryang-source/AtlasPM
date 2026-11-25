@@ -170,10 +170,13 @@ class AlphaTests(unittest.TestCase):
             db=Path(tmp)/"alpha.sqlite3"
             result=research(p,**options(p),models=["historical_mean"],cost_bps=0,registry_path=db)
             version=result["strategy_version"]
-            request=request_review(db,version=version,requester="researcher",purpose="promotion")
+            import json
+            policy=json.loads((Path(__file__).resolve().parents[2]/"examples"/"institutional_batch_plan.json").read_text(encoding="utf-8"))["policy"]
+            request=request_review(db,version=version,requester="researcher",purpose="promotion",risk_policy=policy)
+            self.assertEqual(request["binding"]["risk_policy"],policy)
             self.assertEqual(request["review_state"],"REQUEST")
             self.assertEqual(request["binding"]["dataset_sha256"],result["dataset_sha256"])
-            self.assertEqual(request_review(db,version=version,requester="researcher",purpose="promotion"),request)
+            self.assertEqual(request_review(db,version=version,requester="researcher",purpose="promotion",risk_policy=policy),request)
             key="ab"*32
             def review(reviewer,decision,reason,signature=None):
                 body={"request_id":request["request_id"],"reviewer":reviewer,
@@ -195,7 +198,7 @@ class AlphaTests(unittest.TestCase):
                     review("reviewer","APPROVE","duplicate")
                 self.assertEqual(review("reviewer","REVOKE","new concern")["review_state"],"REVOKE")
             with self.assertRaisesRegex(ValueError,"REQUIRES_NEW_VERSION"):
-                request_review(db,version=version,requester="researcher",purpose="rollback",predecessor=version)
+                request_review(db,version=version,requester="researcher",purpose="rollback",risk_policy=policy,predecessor=version)
             transition(db,version,"SUSPENDED","operator review")
             self.assertEqual(review_status(db,request["request_id"])["review_state"],"INVALIDATED")
 
