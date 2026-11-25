@@ -81,12 +81,22 @@ class MarginReplayTests(unittest.TestCase):
         for row in p["sessions"]:
             row["volume"]={"A":200}
         p["sessions"][1]["volume"]["A"]=10
+        # The conservative purchase budget opens 14 shares with $400 debt.
+        # At $80 the gross ratio is below 1.6; $75 crosses it without
+        # crossing the 50% drawdown limit. Prior volume allows one share out.
         for row in p["sessions"][2:]:
-            row["open"]["A"]=row["close"]["A"]=80
+            row["open"]["A"]=row["close"]["A"]=75
         out=replay(p)
-        self.assertEqual(out["curve"][2]["holdings"],{"A":14})
-        self.assertFalse(out["deleverage_audit"][0]["target_met"])
-        self.assertTrue(out["deleverage_audit"][1]["target_met"])
+        self.assertEqual(out["curve"][1]["holdings"],{"A":14})
+        self.assertEqual(out["curve"][2]["holdings"],{"A":13})
+        self.assertTrue(out["deleverage_latched"])
+        self.assertGreaterEqual(len(out["deleverage_audit"]),2)
+        first,second=out["deleverage_audit"][:2]
+        self.assertEqual(first["date"],"2020-01-06")
+        self.assertEqual(second["date"],"2020-01-07")
+        self.assertFalse(first["target_met"])
+        self.assertTrue(second["target_met"])
+        self.assertFalse(any(t["side"]=="BUY" and t["date"]>="2020-01-06" for t in out["trades"]))
         self.assertFalse(out["risk_halt_latched"])
         # A drawdown breach still requires the legacy sell-only flatten.
         p["risk_policy"]["max_drawdown"]=.25
