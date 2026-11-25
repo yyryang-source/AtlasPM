@@ -19,7 +19,13 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(a,register(path,{"seed":42},report))
             b=register(path,{"seed":43},report)
             self.assertNotEqual(a,b)
-            self.assertEqual(len(list_runs(path)),2)
+            from unittest.mock import patch
+            from atlaspm.research import training_registry
+            with patch.object(training_registry,"_connect",wraps=training_registry._connect) as connect:
+                listed=list_runs(path)
+                self.assertEqual(connect.call_count,1)
+            self.assertEqual({r["run_id"] for r in listed},{a,b})
+            self.assertTrue(all("report" not in r for r in listed))
             self.assertEqual(load(path,a)["report"],report)
 
     def test_permission_denied(self):
@@ -37,6 +43,8 @@ class RegistryTests(unittest.TestCase):
                 con.execute("UPDATE research_runs SET config_json=?",('{"changed":true}',))
             with self.assertRaisesRegex(ValueError,"REGISTRY_INTEGRITY_FAILURE"):
                 load(path,a)
+            with self.assertRaisesRegex(ValueError,"REGISTRY_INTEGRITY_FAILURE"):
+                list_runs(path)
 
 
 @unittest.skipUnless(find_spec("numpy"),"numpy extra required")

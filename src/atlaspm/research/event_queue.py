@@ -19,10 +19,10 @@ MAX_ITEMS=1000
 CONTROL_KEY="__system_control__"
 
 
-def _read_state(path):
+def _read_state_with_hash(path):
     p=private_path(Path(path))
     if not p.exists():
-        return {}
+        return {}, None
     with p.open("rb") as f:
         raw=f.read(MAX_BYTES+1)
     if len(raw)>MAX_BYTES:
@@ -33,7 +33,11 @@ def _read_state(path):
     items=state["items"]
     if not isinstance(items,dict) or len(items)>MAX_ITEMS:
         raise ValueError("EVENT_QUEUE_CAPACITY")
-    return items
+    return items, state["sha256"]
+
+
+def _read_state(path):
+    return _read_state_with_hash(path)[0]
 
 
 def _transaction(path, operation):
@@ -43,11 +47,18 @@ def _transaction(path, operation):
     fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
     os.close(fd)
     try:
-        items=_read_state(p)
+        items, previous_hash=_read_state_with_hash(p)
         result=operation(items)
-        body=json.dumps({"items":items,"sha256":digest(items)},sort_keys=True,
+        current_hash=digest(items)
+        if len(items)>MAX_ITEMS:
+            raise ValueError("EVENT_QUEUE_CAPACITY")
+        # Identical validated state is already durable; do not rewrite or fsync
+        # the queue for duplicate events, duplicate ticks or paused polling.
+        if previous_hash is not None and current_hash==previous_hash:
+            return result
+        body=json.dumps({"items":items,"sha256":current_hash},sort_keys=True,
                         ensure_ascii=False,allow_nan=False).encode()
-        if len(items)>MAX_ITEMS or len(body)>MAX_BYTES:
+        if len(body)>MAX_BYTES:
             raise ValueError("EVENT_QUEUE_CAPACITY")
         def durable_write(handle):
             handle.write(body)

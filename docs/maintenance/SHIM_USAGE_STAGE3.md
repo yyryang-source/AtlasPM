@@ -2,7 +2,7 @@
 
 **Retirement update:** The 39 candidates listed below are retired on the lifecycle cleanup branch after maintainer direction to remove unused code. Their canonical implementations are retained. The subsequent 47 commits were checked for newly added direct fully qualified references and `from atlaspm import` statements; no new use of these candidates was found. External callers and arbitrary dynamic imports cannot be proven absent. This is a breaking change for callers of these deprecated paths; use the canonical destination in `pyproject.toml`'s banned-api map. The remaining 59 shims retain warnings and identity checks. Full CI is required before merge.
 
-The original Stage 3 inventory follows for audit history. It was a **static import and known-string-reference inventory**, not a dead-code proof. All **98** shims remain supported and now warn with `DeprecationWarning(stacklevel=2)` when first imported. All **25** multi-hop shims point directly to their canonical module.
+The original Stage 3 inventory below is historical evidence, not the current supported API. It was a **static import and known-string-reference inventory**, not a dead-code proof. At that stage 98 shims were supported; 39 were subsequently retired as described above.
 
 After replacing 112 static imports in 58 test files (and 72 in the earlier source migration), direct `src/` and `tests/` import statements reference **zero** shims. Existing compatibility-identity tests intentionally exercise deprecated names through dynamic `importlib` calls, and some tests build names from component strings.
 
@@ -50,8 +50,8 @@ The following **39 retired paths** (original candidates) have no static imports 
 
 ## Still referenced intentionally
 
-The other **59** aliases appear as complete string references (e.g. in `tests/interfaces/test_domain_migration.py`) or are assembled dynamically by a known test. They are **not** candidates in this inventory. All 98 are still public compatibility paths regardless of the category above.
+The other **59** aliases appear as complete string references (e.g. in `tests/interfaces/test_domain_migration.py`) or are assembled dynamically by a known test. They are **not** retirement candidates in this inventory.
 
 ## Safety and verification
 
-At original Stage 3 no shim was deleted. The cleanup retires the listed 39 shims only; no canonical implementation, business logic or runtime permission / live-execution boolean changes. Ruff's `TID251` banned-api map blocks explicit legacy imports in normal source files when Ruff is run; it does not detect dynamic `importlib` strings. Stage 5 will wire permanent Ruff CI checks.
+The cleanup retired the listed 39 shims only; no canonical implementation, business logic or runtime permission / live-execution boolean changes. Ruff's `TID251` banned-api map blocks explicit legacy imports in normal source files when Ruff is run; it does not detect dynamic `importlib` strings.

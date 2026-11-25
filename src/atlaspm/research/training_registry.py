@@ -73,6 +73,12 @@ def load(path, run_id):
                            FROM research_runs WHERE run_id=?""",(run_id,)).fetchone()
     if row is None:
         raise ValueError("UNKNOWN_RUN_ID")
+    return _validated_run(run_id, row)
+
+
+def _validated_run(run_id, row):
+    if not isinstance(run_id,str) or not re.fullmatch(r"[0-9a-f]{64}",run_id):
+        raise ValueError("INVALID_RUN_ID")
     created,kind,config,report,sha=row
     config,report=json.loads(config),json.loads(report)
     validate_flags(report)
@@ -83,9 +89,16 @@ def load(path, run_id):
 
 
 def list_runs(path):
+    # Stream one consistent read snapshot instead of opening a connection
+    # and repeating schema checks for every stored report.
+    result=[]
     with closing(_connect(path)) as con:
-        ids=[r[0] for r in con.execute("SELECT run_id FROM research_runs ORDER BY created_at,run_id")]
-    return [{k:v for k,v in load(path,i).items() if k!="report"} for i in ids]
+        for row in con.execute("""SELECT run_id,created_at,kind,config_json,report_json,report_sha256
+                                  FROM research_runs ORDER BY created_at,run_id"""):
+            record=_validated_run(row[0],row[1:])
+            del record["report"]
+            result.append(record)
+    return result
 
 
 def local_path(path):

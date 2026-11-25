@@ -261,7 +261,12 @@ class ContinuousTests(unittest.TestCase):
         self.assertEqual(event_queue.PATH.read_bytes(),before)
         self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
         self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],1)
-        self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)
+        saved=event_queue.PATH.read_bytes()
+        with patch.object(event_queue,"_atomic_write",side_effect=AssertionError("unchanged state must not write")):
+            self.assertEqual(event_queue.enqueue([row])["added"],0)
+            self.assertEqual(event_queue.drain(as_of=row["received_at"])["completed"],0)
+        self.assertEqual(event_queue.PATH.read_bytes(),saved)
+        self.assertFalse(event_queue.PATH.with_suffix(".lock").exists())
 
 
     def test_multiasset_oms_persisted_partial_fill_resume_and_rollback_refusal(self):
