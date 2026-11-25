@@ -12,11 +12,17 @@ from hashlib import sha256
 import json
 from math import isfinite
 import re
+import sys
+from pathlib import Path
 from threading import Lock
 import time
 
 from atlaspm.data.provider_policy import local_rights
-from atlaspm.execution.ibkr_gateway import LocalGatewayTransport, DEFAULT_GATEWAY_URL
+from atlaspm.execution.ibkr_gateway import (
+    LocalGatewayTransport, DEFAULT_GATEWAY_URL, load_paper_profile,
+    collect_ibkr_readonly_account, _paper_sync_lock, _paper_sso_cooldown,
+    _write_sync_json, _sync_path, _PAPER_SSO_ATTEMPT,
+)
 
 FIELDS = {"31":"last", "84":"bid", "86":"ask", "85":"ask_size", "88":"bid_size",
           "7059":"last_size", "7762":"volume", "7308":"delta", "7309":"gamma",
@@ -50,6 +56,56 @@ def _conid(value):
     if type(value) is not int or not 1 <= value <= 2**63-1:
         raise ValueError("Expected verified positive conid")
     return value
+
+
+def resolve_us_equities(transport, symbols):
+    """Resolve unique US stock/ETF listing then verify its contract identity."""
+    local_rights("ibkr")
+    if (not isinstance(symbols, (list, tuple)) or not 1 <= len(symbols) <= 20
+            or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s)
+                   for s in symbols) or len(set(symbols)) != len(symbols)):
+        raise ValueError("Invalid bounded US equity symbols")
+    lookup = transport.market_stock_lookup(symbols)
+    if not isinstance(lookup, dict) or set(lookup) != set(symbols):
+        raise ValueError("Symbol lookup response mismatch")
+    result = {}
+    for symbol in symbols:
+        entries = lookup[symbol]
+        if not isinstance(entries, list) or len(entries) > 100:
+            raise ValueError("Invalid stock lookup entries")
+        candidates = set()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ValueError("Invalid stock lookup entry")
+            if entry.get("assetClass") != "STK":
+                continue
+            contracts = entry.get("contracts")
+            if not isinstance(contracts, list) or len(contracts) > 100:
+                raise ValueError("Invalid stock lookup contracts")
+            for contract in contracts:
+                if not isinstance(contract, dict) or type(contract.get("isUS")) is not bool:
+                    raise ValueError("Stock listing country unverified")
+                if contract["isUS"]:
+                    candidates.add(_conid(contract.get("conid")))
+        if len(candidates) != 1:
+            raise ValueError("US equity contract missing or ambiguous: " + symbol)
+        conid = next(iter(candidates))
+        info = transport.market_contract_info(conid)
+        if not isinstance(info, dict):
+            raise ValueError("Contract information missing")
+        for aliases, expected in (
+            (("con_id", "conid"), conid), (("symbol", "ticker"), symbol),
+            (("instrument_type", "secType"), "STK"), (("currency",), "USD"),
+        ):
+            values = [info[k] for k in aliases if k in info]
+            if not values or any(type(v) is not type(expected) or v != expected for v in values):
+                raise ValueError("Contract identity mismatch: " + symbol)
+        if conid in (row["conid"] for row in result.values()):
+            raise ValueError("Duplicate contract across symbols")
+        result[symbol] = {"symbol": symbol, "conid": conid, "currency": "USD",
+                          "asset_class": "STK", "broker_identity_checked": True,
+                          "security_master_identity_verified": False}
+    return result
 
 
 def normalize_snapshot(raw, wanted, *, received_at, max_age_seconds=15):
@@ -256,9 +312,95 @@ class MarketPool:
                     "unconfirmed_release_count":len(failures), **_FLAGS}
 
 
+PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
+
+
+def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
+                     include_history=False, output=None):
+    """Short, local Paper-only probe. No data retention without separate rights."""
+    local_rights("ibkr", retention=output is not None)
+    if type(polls) is not int or not 2 <= polls <= 3:
+        raise ValueError("Symbol probe requires 2..3 polls (first is preflight)")
+    if (type(available_lines) is not int or not 1 <= available_lines <= 100
+            or not isinstance(symbols, (list, tuple)) or not 1 <= len(symbols) <= min(5, available_lines)
+            or dedicated_session is not True):
+        raise ValueError("Confirm dedicated session and available lines; symbol probe cap 5")
+    if type(include_history) is not bool:
+        raise ValueError("Invalid history flag")
+    if output is not None:
+        # Fixed output avoids overwriting the profile, risk snapshot or journal.
+        output = _sync_path(Path("local_data/ibkr_paper_market_probe.json"))
+    with _paper_sync_lock():
+        marker = _sync_path(PAPER_MARKET_RESERVATION)
+        if marker.exists():
+            raise ValueError("Prior market reservations uncertain; operator reconciliation required")
+        profile = load_paper_profile()
+        transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
+        def progress(message):
+            print("[IBKR Market] " + message, file=sys.stderr, flush=True)
+        _paper_sso_cooldown(progress)
+        _write_sync_json(_PAPER_SSO_ATTEMPT, {"attempted_at_utc": datetime.now(UTC).isoformat()})
+        # Reuse independent SSO + DEMO checks. No order or margin authority.
+        capture = collect_ibkr_readonly_account(transport, account_id=profile["account"], paper_only=True)
+        if capture.get("paper_identity_verified") is not True:
+            raise ValueError("Paper market session identity not verified")
+        del capture
+        pool = MarketPool(transport, available_lines=available_lines,
+                          dedicated_session=True, poll_interval=2)
+        pool.connect()
+        identities = resolve_us_equities(transport, symbols)
+        ids = {row["conid"]: 1 for row in identities.values()}
+        pool.set_universe(ids)
+        # Persist intent before any allocation; a crash/failed release must not
+        # lead to new reservations on restart. Never unsubscribe-all.
+        _write_sync_json(PAPER_MARKET_RESERVATION, {"conids": sorted(ids),
+                         "state": "ALLOCATING_OR_ACTIVE", "created_at_utc": datetime.now(UTC).isoformat()})
+        reports = []
+        histories = {}
+        try:
+            for index in range(polls):
+                progress(f"Snapshot {index + 1}/{polls}")
+                reports.append(pool.poll())
+            if include_history:
+                for symbol, identity in identities.items():
+                    progress("History: " + symbol)
+                    histories[symbol] = pool.history(identity["conid"])
+            transport.keepalive()
+        finally:
+            release = pool.close()
+            if not release["released_all_owned"]:
+                raise ValueError("Market stream release uncertain; keep reservation marker for operator review")
+            marker.unlink()
+        last = reports[-1]
+        by_id = {row["conid"]: row for row in last["quotes"]}
+        result = {**_FLAGS, "status": "PAPER_MARKET_PROBE_COMPLETED",
+                  "paper_identity_verified": True, "release_confirmed": True,
+                  "rights_status": "operator_attested_not_independently_verified",
+                  "polls_completed": len(reports), "quote_count": len(by_id),
+                  "symbols": {symbol: {**identity,
+                      "availability": by_id[identity["conid"]]["availability"],
+                      "fresh_realtime_book_candidate": by_id[identity["conid"]]["fresh_realtime_book_candidate"],
+                      "history_row_count": len(histories.get(symbol, {}).get("rows", []))}
+                      for symbol, identity in identities.items()},
+                  "fresh_realtime_book_candidates": sum(q["fresh_realtime_book_candidate"] for q in by_id.values()),
+                  "history_requested": include_history,
+                  "history_units_verified": False}
+        if output is not None:
+            _write_sync_json(Path("local_data/ibkr_paper_market_probe.json"), {
+                **result, "latest_snapshot": last, "history": histories,
+                "captured_at_utc": datetime.now(UTC).isoformat(),
+            })
+            result["written"] = "local_data/ibkr_paper_market_probe.json"
+        return result
+
+
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("--conid", type=int, action="append", required=True)
+    instruments = parser.add_mutually_exclusive_group(required=True)
+    instruments.add_argument("--conid", type=int, action="append")
+    instruments.add_argument("--symbol", action="append", help="US equity symbol; uses saved Paper profile")
+    parser.add_argument("--history", action="store_true", help="Symbol probe: request 1d/5min history")
+    parser.add_argument("--save-local", action="store_true", help="Symbol probe: requires separate local retention rights")
     parser.add_argument("--available-lines", type=int, required=True)
     parser.add_argument("--dedicated-session", action="store_true")
     parser.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
@@ -267,6 +409,27 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.polls <= 3:
         parser.error("Smoke test allows 1..3 polls")
+    if args.symbol:
+        if args.ca_file or args.gateway_url != DEFAULT_GATEWAY_URL:
+            parser.error("Symbol mode uses the saved Paper profile, not URL/CA overrides")
+        try:
+            result = run_symbol_probe(args.symbol, available_lines=args.available_lines,
+                                      dedicated_session=args.dedicated_session, polls=args.polls,
+                                      include_history=args.history,
+                                      output=True if args.save_local else None)
+            print(json.dumps(result, indent=2))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            # Market rights and safe identity failures are actionable. Do not
+            # print raw broker payloads or private local account paths.
+            from atlaspm.execution.ibkr_gateway import GatewayHTTPError
+            if isinstance(exc, GatewayHTTPError):
+                parser.exit(1, f"IBKR market probe failed: HTTP_{exc.status} at {exc.endpoint}\n")
+            if isinstance(exc, ValueError) and re.fullmatch(r"[A-Za-z0-9 _.:;/-]{1,150}", str(exc)):
+                parser.exit(1, "IBKR market probe failed: " + str(exc) + "\n")
+            parser.exit(1, "IBKR market probe failed; verify local profile and session\n")
+        return
+    if args.history or args.save_local:
+        parser.error("--history and --save-local require --symbol")
     local_rights("ibkr")
     transport = LocalGatewayTransport(args.gateway_url, ca_file=args.ca_file)
     pool = MarketPool(transport, available_lines=args.available_lines,

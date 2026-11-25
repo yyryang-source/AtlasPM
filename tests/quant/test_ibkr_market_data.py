@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from atlaspm.execution.ibkr_gateway import LocalGatewayTransport
-from atlaspm.execution.ibkr_market_data import MarketPool, normalize_snapshot
+from atlaspm.execution.ibkr_market_data import MarketPool, normalize_snapshot, resolve_us_equities
 
 
 class Transport:
@@ -20,6 +20,15 @@ class Transport:
         if endpoint == "/iserver/auth/status":
             return {"authenticated":True,"connected":True,"competing":False}
         return {"accounts":["synthetic"]}
+
+    def market_stock_lookup(self, symbols):
+        return {s: [{"assetClass": "STK", "contracts": [
+            {"conid": i + 10, "isUS": True}, {"conid": i + 100, "isUS": False}]}]
+                for i, s in enumerate(symbols)}
+
+    def market_contract_info(self, conid):
+        return {"con_id": conid, "symbol": {10:"AAA", 11:"BBB"}[conid],
+                "instrument_type": "STK", "currency": "USD"}
 
     def market_snapshot(self, ids, fields):
         self.calls.append(("snapshot",tuple(ids)))
@@ -119,3 +128,35 @@ class MarketPoolTests(unittest.TestCase):
             transport.market_history(123,"1d","5min")
             self.assertIn("/iserver/marketdata/history?",send.call_args.args[0].full_url)
             self.assertEqual(send.call_count,3)
+
+
+    def test_symbol_mapping_checks_us_listing_and_contract_details(self):
+        result = resolve_us_equities(self.transport, ["AAA", "BBB"])
+        self.assertEqual(result["AAA"]["conid"], 10)
+        self.assertEqual(result["BBB"]["currency"], "USD")
+        self.assertFalse(result["AAA"]["security_master_identity_verified"])
+        with patch.object(self.transport, "market_contract_info", return_value={
+                "con_id": 10, "symbol": "AAA", "instrument_type": "STK", "currency": "CAD"}):
+            with self.assertRaisesRegex(ValueError, "Contract identity mismatch"):
+                resolve_us_equities(self.transport, ["AAA"])
+        with patch.object(self.transport, "market_stock_lookup", return_value={
+                "AAA": [{"assetClass":"STK", "contracts":[{"conid":10,"isUS":True},
+                                                         {"conid":11,"isUS":True}]}]}):
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                resolve_us_equities(self.transport, ["AAA"])
+        with self.assertRaises(ValueError):
+            resolve_us_equities(self.transport, ["AAA", "AAA"])
+
+    def test_symbol_lookup_routes_are_get_only_and_bounded(self):
+        transport = LocalGatewayTransport()
+        with patch.object(transport, "_send_json", return_value={}) as send:
+            transport.market_stock_lookup(["AAA", "BBB"])
+            request = send.call_args.args[0]
+            self.assertEqual(request.get_method(), "GET")
+            self.assertIn("/trsrv/stocks?symbols=AAA%2CBBB", request.full_url)
+            transport.market_contract_info(10)
+            self.assertTrue(send.call_args.args[0].full_url.endswith("/iserver/contract/10/info"))
+            for bad in (["AAA,BBB"], ["AAA","AAA"], ["../X"]):
+                with self.assertRaises(ValueError):
+                    transport.market_stock_lookup(bad)
+            self.assertEqual(send.call_count, 2)

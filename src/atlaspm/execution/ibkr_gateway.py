@@ -127,6 +127,21 @@ class LocalGatewayTransport:
             raise ValueError("PAPER_HEARTBEAT_NOT_READY")
         return True
 
+    def market_stock_lookup(self, symbols):
+        """Bounded documented symbol lookup, not a trading instruction."""
+        local_rights("ibkr")
+        if (not isinstance(symbols, (list, tuple)) or not 1 <= len(symbols) <= 20
+                or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", s)
+                       for s in symbols) or len(set(symbols)) != len(symbols)):
+            raise ValueError("Invalid bounded US equity symbols")
+        return self._request("/trsrv/stocks", params={"symbols": ",".join(symbols)})
+
+    def market_contract_info(self, conid):
+        local_rights("ibkr")
+        if type(conid) is not int or not 1 <= conid <= 2**63-1:
+            raise ValueError("Invalid market contract ID")
+        return self.get(f"/iserver/contract/{conid}/info")
+
     def market_snapshot(self, conids, fields):
         """Fixed L1 market-data route; never a regulatory fee-based snapshot."""
         local_rights("ibkr")
@@ -464,6 +479,14 @@ def configure_paper_sync(*, account, ca_file, url=DEFAULT_GATEWAY_URL):
             "broker_order_submission_enabled": False, "live_execution_enabled": False}
 
 
+def load_paper_profile():
+    with _sync_path(PAPER_PROFILE).open("rb") as handle:
+        raw = handle.read(16385)
+    if len(raw) > 16384:
+        raise ValueError("PAPER_PROFILE_SIZE_LIMIT")
+    return _validate_paper_profile(_json_no_nan(raw))
+
+
 def _paper_sso_cooldown(progress):
     """Conservative cross-process pacing for this worker's SSO calls."""
     path = _sync_path(_PAPER_SSO_ATTEMPT)
@@ -510,11 +533,7 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
             return value
         try:
             status("CONNECTING")
-            with _sync_path(PAPER_PROFILE).open("rb") as handle:
-                raw = handle.read(16385)
-            if len(raw) > 16384:
-                raise ValueError("PAPER_PROFILE_SIZE_LIMIT")
-            profile = _validate_paper_profile(_json_no_nan(raw))
+            profile = load_paper_profile()
             transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
             for index in range(cycles):
                 status("REFRESHING")

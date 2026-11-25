@@ -129,3 +129,34 @@ separately from foreign exposure risk. No reciprocal rate fitting.
 The sync console exposes redacted margin block reasons and currency diagnostics.
 Independent financing reconciliation and the institutional gate remain required.
 Provider reference: https://www.interactivebrokers.com/docs/web-api/v1/endpoints/portfolio/portfolio-ledger
+
+
+### Bounded USD equity market-data probe
+
+The existing market pool can now resolve a ticker using /trsrv/stocks and
+verify the unique US STK contract through /iserver/contract/{conid}/info
+(including USD currency, symbol and conid). This is broker identity evidence,
+not historical security-master admission. Only use the saved Paper profile
+with an authenticated dedicated session and confirmed available data lines.
+Stop other AtlasPM sync/market workers first. Confirm actual feed access and
+usage rights with IBKR before setting the rights reference. No automatic
+subscriptions or purchase of regulatory snapshots.
+
+~~~powershell
+# Only after verifying entitlement and rights, enter your own nonsecret reference.
+$env:ATLASPM_IBKR_MARKET_DATA_RIGHTS = Read-Host "Confirmed market data rights reference"
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_market_data --symbol AAPL --symbol QQQ --available-lines 2 --dedicated-session --polls 3 --history
+~~~
+
+First snapshot initiates the feed. Subsequent polls classify real-time,
+delayed, frozen and missing quotes without interpreting delayed data as live.
+Optional history is a bounded 1d/5min raw QC probe. Output is redacted
+metadata and counts; use --save-local only after separately confirming
+retention rights and setting ATLASPM_IBKR_MARKET_DATA_RIGHTS_RETENTION=1.
+The saved research-only file is local_data/ibkr_paper_market_probe.json.
+Neither data nor identities are admitted to training, formal backtests or
+orders. The reservation marker must remain on uncertain release or crash;
+review and reconcile the owned subscriptions before manually clearing it.
+This does not modify the existing DU-only order guard or the CNH risk block.
+See https://ibkrcampus.com/docs/web-api/trading/instrument-discovery/contract-i-ds
+and https://ibkrcampus.com/docs/web-api/v1/endpoints/contract/contract-information-by-contract-id .
