@@ -36,7 +36,8 @@ def main():
     structure=audit(root)
     ok=(result.wasSuccessful() and passed>=args.minimum_passed and not structure["errors"]
         and (args.allow_skips or not result.skipped)
-        and not result.expectedFailures and not result.unexpectedSuccesses)
+        and not result.expectedFailures and not result.unexpectedSuccesses
+        and not structure["duplicate_function_candidates"])
     report=dict(status="PASS" if ok else "FAIL",tests_run=result.testsRun,
                 passed=passed,failures=len(result.failures),errors=len(result.errors),
                 skipped=len(result.skipped),

@@ -40,6 +40,34 @@ class Delivery:
     shares: int = 0
 
 
+def expiry_delivery(key, contract, settlement, count, *, cash, underlying_shares):
+    """Canonical long-option expiry payoff; used by replay and the paper OMS.
+
+    No short assignment, early exercise or unconfirmed settlement is inferred.
+    Cash debit and share debit occur at exercise; delivery is received later.
+    """
+    count=_quantity(count,"held contracts")
+    spread=settlement.settlement_value-contract.strike
+    intrinsic=max(0.,spread if contract.right=="call" else -spread)*contract.multiplier
+    exercised=intrinsic>0 and intrinsic+1e-9>=contract.exercise_threshold_usd
+    cash_debit=0.; shares_debit=0; delivery=None
+    if exercised:
+        units=count*contract.multiplier
+        if contract.settlement_type=="cash":
+            delivery=Delivery(key,cash_usd=count*intrinsic)
+        elif contract.right=="put":
+            if underlying_shares<units:
+                raise ValueError(f"Insufficient stock for physical put delivery: {key}")
+            shares_debit=units
+            delivery=Delivery(key,cash_usd=units*contract.strike)
+        else:
+            cash_debit=units*contract.strike
+            if cash_debit>cash:
+                raise ValueError(f"Insufficient cash for physical call exercise: {key}")
+            delivery=Delivery(key,stock=contract.underlying,shares=units)
+    return intrinsic,exercised,cash_debit,shares_debit,delivery
+
+
 def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(plan, dict) or not isinstance(plan.get("orders"), list):
         raise ValueError("Option replay plan needs an orders list")
@@ -125,24 +153,12 @@ def replay_long_options(history: OptionHistory, plan: dict[str, Any]) -> dict[st
                 continue
             contract = history.contracts[key]
             settlement = history.settlements[key]
-            spread = settlement.settlement_value - contract.strike
-            intrinsic_usd = max(0.0, spread if contract.right == "call" else -spread) * contract.multiplier
-            exercised = intrinsic_usd > 0 and intrinsic_usd + 1e-9 >= contract.exercise_threshold_usd
-            if exercised:
-                units = count * contract.multiplier
-                if contract.settlement_type == "cash":
-                    delivery = Delivery(key, cash_usd=count * intrinsic_usd)
-                elif contract.right == "put":
-                    if shares[contract.underlying] < units:
-                        raise ValueError(f"Insufficient stock for physical put delivery: {key}")
-                    shares[contract.underlying] -= units
-                    delivery = Delivery(key, cash_usd=units * contract.strike)
-                else:
-                    strike_cost = units * contract.strike
-                    if strike_cost > cash:
-                        raise ValueError(f"Insufficient cash for physical call exercise: {key}")
-                    cash -= strike_cost
-                    delivery = Delivery(key, stock=contract.underlying, shares=units)
+            intrinsic_usd,exercised,cash_debit,shares_debit,delivery=expiry_delivery(
+                key,contract,settlement,count,cash=cash,underlying_shares=shares[contract.underlying])
+            cash-=cash_debit
+            if shares_debit:
+                shares[contract.underlying]-=shares_debit
+            if delivery is not None:
                 deliveries[settlement.cash_at].append(delivery)
             exercises.append({"at": at.isoformat(), "contract_id": key, "contracts": count,
                               "exercised": exercised, "settlement_type": contract.settlement_type,

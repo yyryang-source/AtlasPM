@@ -71,6 +71,86 @@ class PaperOMSTests(unittest.TestCase):
         self.assertTrue(settled["fill_records"]["SYN-FILL-SELL-1"]["settled"])
         self.assertTrue(settled["fill_records"]["SYN-FILL-SELL-2"]["settled"])
 
+    def test_unified_lifecycle_uses_existing_option_and_treasury_histories(self):
+        from datetime import date,timedelta
+        from hashlib import sha256
+        from tempfile import TemporaryDirectory
+        from atlaspm.execution.oms_controls import verify_audit_chain
+        local=Path("local_data")
+        local.mkdir(exist_ok=True)
+        with TemporaryDirectory(dir=local) as temp:
+            root=Path(temp)
+            def source(name,text):
+                path=root/name
+                path.write_text(text,encoding="utf-8")
+                return {"path":str(path),"sha256":sha256(path.read_bytes()).hexdigest()}
+            opt="QQQ-2027-01-15-P-280"
+            cusip="91282CDE0"
+            option_contract="contract_id,underlying,right,strike,last_trade_at,expiration_at,multiplier,exercise_style,settlement_type,exercise_threshold_usd\n"
+            self.journal["lifecycle_sources"]={
+                "option":{
+                    "contracts":source("options.csv",option_contract+opt+",QQQ,put,280,2027-01-15T20:59Z,2027-01-15T21:00Z,100,american,physical,1\n"),
+                    "quotes":source("option_quotes.csv","contract_id,quote_at,bid,ask,bid_size,ask_size\n"),
+                    "settlements":source("option_settlement.csv","contract_id,reference_at,available_at,cash_at,settlement_value\n"+
+                        opt+",2027-01-15T21:00Z,2027-01-15T21:02Z,2027-01-19T14:30Z,270\n")},
+                "treasury":{
+                    "contracts":source("treasury.csv","cusip,kind,dated_on,issued_on,maturity,annual_coupon_rate,face_increment_usd\n"+
+                        cusip+",note,2026-11-15,2026-11-16,2031-11-15,0.04,100\n"),
+                    "quotes":source("treasury_quotes.csv","cusip,observed_on,clean_close_per_100\n"+
+                        cusip+",2026-11-20,97.5\n"+cusip+",2027-05-14,97.5\n"+cusip+",2027-05-17,97.5\n")}}
+            schedule=[]
+            for year in range(2027,2032):
+                for month in (5,11):
+                    due=date(year,month,15)
+                    paid=due
+                    while paid.weekday()>=5:
+                        paid+=timedelta(days=1)
+                    schedule.append((due,paid))
+            self.journal["lifecycle_sources"]["treasury"]["payments"]=source("payments.csv",
+                "cusip,scheduled_on,paid_on\n"+"".join(f"{cusip},{due},{paid}\n" for due,paid in schedule))
+            for i in (1,2):
+                self.journal["events"].append({"sequence":13+i,"event_id":"SALE-"+str(i),
+                    "timestamp":f"2026-11-23T14:0{i}:00Z","type":"SETTLE_SALE","leg_id":"SELL-QQQ-10",
+                    "execution_id":"SYN-FILL-SELL-"+str(i)})
+            def add(kind,stamp,identifier):
+                row={"sequence":len(self.journal["events"])+1,"event_id":"LIFE-"+str(len(self.journal["events"])),
+                     "timestamp":stamp,"type":kind,"identifier":identifier}
+                self.journal["events"].append(row)
+                return row
+            add("OPTION_EXPIRY","2027-01-15T21:02:00Z",opt)
+            expired=self.replay()
+            self.assertEqual(expired["option_deliveries"][opt]["state"],"PENDING")
+            self.assertEqual(expired["account_replay"]["settled_cash"],6705)
+            self.assertEqual(expired["account_replay"]["unsettled_receivable"],28500)
+            add("OPTION_DELIVERY","2027-01-19T14:30:00Z",opt)
+            add("TREASURY_LIFECYCLE","2027-05-15T23:59:00Z",cusip)
+            coupon=self.replay()["account_replay"]
+            self.assertAlmostEqual(coupon["unsettled_receivable"],2700)
+            self.assertAlmostEqual(coupon["settled_cash"],34705)
+            add("TREASURY_LIFECYCLE","2027-05-17T23:59:00Z",cusip)
+            final_due,final_paid=schedule[-1]
+            add("TREASURY_LIFECYCLE",final_due.isoformat()+"T23:59:00Z",cusip)
+            if final_paid!=final_due:
+                final=add("TREASURY_LIFECYCLE",final_paid.isoformat()+"T23:59:00Z",cusip)
+            else:
+                final=self.journal["events"][-1]
+            result=self.replay()
+            account=result["account_replay"]
+            self.assertEqual(result["decision"],"PAPER_REPLAY_COMPLETED",result["post_fill_risk_breaches"])
+            self.assertAlmostEqual(account["settled_cash"],166705)
+            self.assertAlmostEqual(account["unsettled_receivable"],500)
+            self.assertEqual(account["broker_recognized_treasury_credit_report_only"],0)
+            self.assertEqual(account["released_treasury_collateral_report_only"],90000)
+            self.assertEqual([(p["identifier"],p["shares"]) for p in account["positions"]],[("QQQ",90)])
+            self.assertAlmostEqual(account["net_liquidation_reconciliation_gap"],0)
+            self.assertTrue(verify_audit_chain(result["audit_events"],result["audit_root_sha256"]))
+            self.journal["events"].append(copy.deepcopy(final))
+            self.assertEqual(self.replay()["account_replay"],account)
+            path=Path(self.journal["lifecycle_sources"]["option"]["contracts"]["path"])
+            path.write_text("tampered",encoding="utf-8")
+            with self.assertRaisesRegex(ValueError,"SOURCE_HASH_MISMATCH"):
+                self.replay()
+
     def test_same_event_id_duplicate_is_idempotent(self):
         self.journal["events"].append(copy.deepcopy(self.journal["events"][-1]))
         result = self.replay()

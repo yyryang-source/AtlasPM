@@ -131,6 +131,14 @@ class AlphaTests(unittest.TestCase):
             self.assertEqual(a["strategy_status"],"VALIDATED")
             version=a["strategy_version"]
             self.assertEqual(history(db,version)["state"],"VALIDATED")
+            from atlaspm.research.alpha_lifecycle import compare_versions
+            with self.assertRaisesRegex(ValueError,"DISTINCT_ALPHA"):
+                compare_versions(db,version,version)
+            challenger=research(p,**options(p),models=["historical_mean"],cost_bps=0,seed=43,registry_path=db)
+            comparison=compare_versions(db,version,challenger["strategy_version"])
+            self.assertTrue(comparison["comparable"])
+            self.assertFalse(comparison["automatic_promotion_enabled"])
+            self.assertFalse(comparison["holdout_reuse_for_model_selection_allowed"])
             self.assertEqual(load(db,a["registry_run_id"])["report"]["strategy_version"],version)
             with self.assertRaisesRegex(ValueError,"ALPHA_ONLY_DE_RISK"):
                 transition(db,version,"PAPER_ACTIVE","untrusted promotion")
@@ -147,6 +155,52 @@ class AlphaTests(unittest.TestCase):
             # Explicit deletion catches leaked SQLite handles on Windows.
             db.unlink()
             self.assertFalse(db.exists())
+
+    def test_independent_review_binding_and_revocation_remain_research_only(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from unittest.mock import patch
+        import hashlib,hmac,os
+        from atlaspm.research.alpha_lifecycle import request_review,decide_review,review_status,transition
+        from atlaspm.research.training_registry import canonical
+        root=Path("local_data")
+        root.mkdir(exist_ok=True)
+        p=fixture()
+        with TemporaryDirectory(dir=root) as tmp:
+            db=Path(tmp)/"alpha.sqlite3"
+            result=research(p,**options(p),models=["historical_mean"],cost_bps=0,registry_path=db)
+            version=result["strategy_version"]
+            import json
+            policy=json.loads((Path(__file__).resolve().parents[2]/"examples"/"institutional_batch_plan.json").read_text(encoding="utf-8"))["policy"]
+            request=request_review(db,version=version,requester="researcher",purpose="promotion",risk_policy=policy)
+            self.assertEqual(request["binding"]["risk_policy"],policy)
+            self.assertEqual(request["review_state"],"REQUEST")
+            self.assertEqual(request["binding"]["dataset_sha256"],result["dataset_sha256"])
+            self.assertEqual(request_review(db,version=version,requester="researcher",purpose="promotion",risk_policy=policy),request)
+            key="ab"*32
+            def review(reviewer,decision,reason,signature=None):
+                body={"request_id":request["request_id"],"reviewer":reviewer,
+                      "decision":decision,"reason":reason}
+                sig=hmac.new(bytes.fromhex(key),canonical(body).encode(),hashlib.sha256).hexdigest()
+                return decide_review(db,**body,signature=sig if signature is None else signature)
+            with patch.dict(os.environ,{"ATLASPM_GOVERNANCE_REVIEWER":"researcher","ATLASPM_GOVERNANCE_REVIEW_KEY":key}):
+                with self.assertRaisesRegex(ValueError,"SELF_APPROVAL"):
+                    review("researcher","APPROVE","reviewed")
+            with patch.dict(os.environ,{"ATLASPM_GOVERNANCE_REVIEWER":"reviewer","ATLASPM_GOVERNANCE_REVIEW_KEY":key}):
+                with self.assertRaisesRegex(ValueError,"SIGNATURE_INVALID"):
+                    review("reviewer","APPROVE","reviewed","0"*64)
+                approved=review("reviewer","APPROVE","reviewed")
+                self.assertEqual(approved["review_state"],"APPROVE")
+                self.assertFalse(approved["formal_approval_enabled"])
+                self.assertFalse(approved["operational_model_active"])
+                self.assertFalse(approved["paper_eligible"])
+                with self.assertRaisesRegex(ValueError,"REVIEW_TRANSITION"):
+                    review("reviewer","APPROVE","duplicate")
+                self.assertEqual(review("reviewer","REVOKE","new concern")["review_state"],"REVOKE")
+            with self.assertRaisesRegex(ValueError,"REQUIRES_NEW_VERSION"):
+                request_review(db,version=version,requester="researcher",purpose="rollback",risk_policy=policy,predecessor=version)
+            transition(db,version,"SUSPENDED","operator review")
+            self.assertEqual(review_status(db,request["request_id"])["review_state"],"INVALIDATED")
 
     def test_benchmark_reports_real_measurements(self):
         import json

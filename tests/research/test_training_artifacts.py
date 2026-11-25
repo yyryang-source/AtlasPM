@@ -33,6 +33,11 @@ class ArtifactTests(unittest.TestCase):
             n=record["sequence_length"]
             window={**self.payload,"sessions":self.payload["sessions"][i-n+1:i+1]}
             replay=predict_snapshot(record,window)
+            from atlaspm.research.intelligence import predict_local_artifact
+            routed=predict_local_artifact(self.path,key,window)
+            self.assertEqual(replay['predictions'],routed['predictions'])
+            self.assertEqual(routed['artifact_id'],key)
+            self.assertFalse(routed['approved_for_backtest'])
             expected={r["security_id"]:r["prediction"] for r in out["predictions"][name] if r["date"]==day}
             self.assertFalse(replay["live_execution_enabled"])
             self.assertFalse(record["model_registry_admission"])
@@ -48,6 +53,20 @@ class ArtifactTests(unittest.TestCase):
         out,store=self.verify_model(["ridge","historical_mean"],1)
         key=out["folds"][0]["model_artifact_ids"]["ridge"]
         record=store.load(key)
+        from datetime import date,timedelta
+        from atlaspm.research.intelligence import artifact_decision
+        day=record["test_start"]
+        session=next(s for s in self.payload["sessions"] if s["date"]==day)
+        window={**self.payload,"sessions":[session]}
+        expected=predict_snapshot(record,window)["predictions"][0]
+        dates=[(date.fromisoformat(day)+timedelta(days=i+1)).isoformat() for i in range(record["horizon"])]
+        decision=artifact_decision([{"artifact_db":self.path,"artifact_id":key,"payload":window}],
+            security_id=expected["security_id"],as_of=session["close_at"],future_session_dates=dates,
+            weights={key:1},cost_fraction=0)
+        self.assertEqual(decision["forecasts"][0]["prediction"],expected["prediction"])
+        self.assertFalse(decision["forecasts"][0]["numeric_eligible"])
+        self.assertEqual(decision["decision"]["candidates"][0]["action"],"NO_TRADE")
+        self.assertFalse(decision["trade_authorized"])
         with self.assertRaisesRegex(ValueError,"ARTIFACT_LOOKAHEAD"):
             predict_snapshot(record,{**self.payload,"sessions":self.payload["sessions"][:1]})
         with closing(sqlite3.connect(store.path)) as con,con:

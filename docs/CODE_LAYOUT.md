@@ -116,3 +116,8 @@ notional per ticket; USD 100,000 gross limit notional per batch (both
 sides summed). These are submitted limit notionals, not a guarantee
 of execution value. Reconciliation and cancellation remain available
 without the environment opt-in. Live-account order submission is disabled.
+
+
+### External API and research ingress (P0 candidate)
+
+`atlaspm.data.api_gateway` owns bounded external HTTPS JSON transport; `market_fetch` uses it for existing Treasury/Massive downloads. `sec_download` emits the existing companyfacts gzip format; `fred_observations` is an ephemeral date-vintage adapter, not another warehouse. `atlaspm.research.intelligence` owns evidence-only external LLM adapters and routes local numeric snapshot predictions through `training_artifacts`. IBKR retains its independent loopback/session transport and all order safety restrictions. See [UNIFIED_API_AI.md](UNIFIED_API_AI.md).

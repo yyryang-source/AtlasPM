@@ -8,6 +8,7 @@ Raw snapshots are private, not reconciled normalized broker permissions.
 from __future__ import annotations
 
 from atlaspm.engine.contracts import finite_number
+from atlaspm.data.provider_policy import local_rights
 
 import json
 import re
@@ -30,7 +31,7 @@ DEFAULT_GATEWAY_URL = "https://localhost:5000/v1/api"
 MAX_RESPONSE_BYTES = 3_000_000
 SLOW_GETS = frozenset({
     "/iserver/account/orders", "/iserver/account/trades", "/iserver/account/pnl/partitioned",
-    "/portfolio/accounts", "/portfolio/subaccounts",
+    "/portfolio/accounts", "/portfolio/subaccounts", "/iserver/marketdata/history",
 })
 
 
@@ -98,6 +99,39 @@ class LocalGatewayTransport:
 
     def get(self, endpoint: str) -> Any:
         return self._request(endpoint)
+
+    def market_snapshot(self, conids, fields):
+        """Fixed L1 market-data route; never a regulatory fee-based snapshot."""
+        local_rights("ibkr")
+        if (not isinstance(conids, (list, tuple)) or not 1 <= len(conids) <= 100
+                or any(type(c) is not int or not 1 <= c <= 2**63-1 for c in conids)
+                or len(set(conids)) != len(conids)):
+            raise ValueError("Invalid bounded contract IDs")
+        if (not isinstance(fields, (list, tuple)) or not 1 <= len(fields) <= 50
+                or any(not isinstance(f, str) or not re.fullmatch(r"[0-9]{1,5}", f) for f in fields)):
+            raise ValueError("Invalid bounded market fields")
+        return self._request("/iserver/marketdata/snapshot", params={
+            "conids": ",".join(map(str, conids)), "fields": ",".join(fields)})
+
+    def market_history(self, conid, period, bar):
+        """Explicit small recent-history request; no bulk archive download."""
+        local_rights("ibkr")
+        if type(conid) is not int or not 1 <= conid <= 2**63-1:
+            raise ValueError("Invalid history contract ID")
+        if (period, bar) not in (("1d","1min"), ("1d","5min"), ("1w","15min"),
+                                 ("1m","1h"), ("3m","1d"), ("1y","1d")):
+            raise ValueError("Unsupported bounded history interval")
+        return self._request("/iserver/marketdata/history", params={
+            "conid":str(conid), "period":period, "bar":bar, "outsideRth":"false"})
+
+    def market_unsubscribe(self, conid):
+        """Only an individually identified market stream, never an order."""
+        if type(conid) is not int or not 1 <= conid <= 2**63-1:
+            raise ValueError("Invalid market stream contract ID")
+        req = Request(self.base_url + "/iserver/marketdata/unsubscribe",
+                      headers={"Accept":"application/json", "Content-Type":"application/json"},
+                      method="POST", data=json.dumps({"conid": conid}).encode())
+        return self._send_json(req)
 
     def _request(
         self, endpoint: str, *, params: dict[str, str] | None = None,

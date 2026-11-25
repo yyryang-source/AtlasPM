@@ -271,12 +271,53 @@ def overview(pages: dict) -> None:
             for job in jobs[:5]
         ], hide_index=True)
     st.page_link(pages["jobs"])
+    st.subheader("自主系统控制（仅本地研究）")
+    from atlaspm.framework.orchestrator import status,set_control
+    try:
+        state=status()
+        st.json(state)
+        left,middle,right=st.columns(3)
+        action=("stop" if left.button("停止本地事件处理") else
+                "takeover" if middle.button("人工接管") else
+                "resume" if right.button("恢复本地事件处理") else None)
+        if action:
+            set_control(action)
+            st.rerun()
+    except (OSError,ValueError):
+        st.error("系统状态读取或控制失败；请检查本地锁及状态文件。")
+    st.caption("此控制不连接券商，不会撤销真实订单，也不会启动正式训练。")
+    st.code("python -m atlaspm.framework.orchestrator offline",language="powershell")
+    st.caption("离线验收入口串接合成事件、模型响应契约、模拟交易、退出及学习复核，不代表真实连接。")
 
 
 def all_jobs() -> None:
     st.title("研究任务")
     st.caption("运行参数、输入哈希、日志和报告保存在 local_data/runs/。")
     view_jobs()
+
+
+def api_management() -> None:
+    from atlaspm.monitoring.api_management import inventory, public_smoke, set_enabled
+    st.title("API 管理中心")
+    st.caption("仅本地进程状态；未验证的订阅、费用、权限和连接不会显示为已通过。")
+    rows=inventory()
+    st.dataframe(rows,hide_index=True)
+    provider=st.selectbox("供应商（仅当前工作台进程）",[row["provider"] for row in rows])
+    left,right=st.columns(2)
+    if left.button("启用研究接口"):
+        set_enabled(provider,True)
+        st.rerun()
+    if right.button("禁用研究接口"):
+        set_enabled(provider,False)
+        st.rerun()
+    st.info("通过本地环境变量或操作系统凭证启动器配置密钥。此页面不接收或显示密钥。")
+    if st.button("测试 Treasury 公开接口"):
+        try:
+            report=public_smoke()
+        except (ValueError,OSError):
+            st.error("公开接口检查失败；请检查本地连接及启用配置。")
+        else:
+            st.json(report)
 
 
 def main() -> None:
@@ -295,11 +336,12 @@ def main() -> None:
                          title="多资产对冲", url_path="hedge"),
         "rebalance": st.Page(rebalance_dashboard.render, title="调仓审核", url_path="rebalance"),
         "jobs": st.Page(all_jobs, title="研究任务", url_path="jobs"),
+        "api": st.Page(api_management, title="API 管理中心", url_path="api"),
     }
     page = st.navigation({
         "工作台": [pages["home"]],
         "研究": [pages[key] for key in ("screen", "backtest", "options", "treasury", "hedge")],
-        "本地运行": [pages["rebalance"], pages["jobs"]],
+        "本地运行": [pages["rebalance"], pages["jobs"], pages["api"]],
     })
     page.run()
 

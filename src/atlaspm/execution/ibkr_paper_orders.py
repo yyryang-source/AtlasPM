@@ -155,6 +155,7 @@ def submit(
         raise ValueError("A reviewed next-day plan for this Paper account is required")
     if journal.get(reviewed["id"]):
         raise ValueError("This Paper batch already exists. Use reconcile to recover order status.")
+    journal.require_running(reviewed["account_id_sha256"])
     _check_paper_batch(reviewed["broker_estimates"])
     reviewed_limits = {(row["symbol"], row["ticket"]["side"]): Decimal(str(row["ticket"]["price"]))
                        for row in reviewed["broker_estimates"]}
@@ -377,11 +378,11 @@ def reconcile(transport, journal: PaperJournal, batch_id: str, account: str) -> 
     latest, _ = _broker_observations(batch, after, trades, account)
     if sorted(observations, key=lambda item: item["client_id"]) != sorted(latest, key=lambda item: item["client_id"]):
         raise ValueError("Broker orders changed during reconciliation; poll again")
-    journal.apply(batch_id, observations, fills)
-    result = _reconcile_account(journal.get(batch_id), snapshot)
+    reconciled_batch = journal.apply(batch_id, observations, fills, expected_batch=batch)
+    result = _reconcile_account(reconciled_batch, snapshot)
     result["observed_working_client_ids"] = [item["client_id"] for item in latest
                                              if item["state"] in {"working", "partial"}]
-    return journal.save_reconciliation(batch_id, result)
+    return journal.save_reconciliation(batch_id, result, expected_batch=reconciled_batch)
 
 
 def cancel(transport, journal: PaperJournal, batch_id: str, account_id: str, client_id: str) -> dict:
@@ -404,8 +405,9 @@ def cancel(transport, journal: PaperJournal, batch_id: str, account_id: str, cli
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("submit", "reconcile", "cancel"))
-    parser.add_argument("--run", required=True, help="Reviewed next-day run identifier")
+    parser.add_argument("action", choices=("submit", "reconcile", "cancel", "stop", "resume"))
+    parser.add_argument("--run", help="Reviewed next-day run identifier")
+    parser.add_argument("--reason", help="Explicit operator reason for stop or resume")
     parser.add_argument("--account", required=True)
     parser.add_argument("--confirm-run", help="Enter the reviewed run ID again to transmit a Paper batch")
     parser.add_argument("--client-id", help="Journaled client ID of the Paper order to cancel")
@@ -420,10 +422,21 @@ def main() -> int:
         parser.error("--watch requires reconcile and a polling interval from 30 to 3600 seconds")
     if args.output and args.action != "reconcile":
         parser.error("--output is scoped to reconciliation reports")
+    if args.action in {"submit", "reconcile", "cancel"} and not args.run:
+        parser.error("--run is required for order operations")
     try:
         output = require_private_output(args.output) if args.output else None
         db = Path("local_data/rebalance/workbench.sqlite3")
         store, journal = RunStore(db), PaperJournal(db)
+        if args.action in {"stop", "resume"}:
+            if not PAPER_ACCOUNT_PATTERN.fullmatch(args.account):
+                raise ValueError("A DU account is required for Paper control")
+            if args.action == "resume" and args.confirm_run != args.account:
+                raise ValueError("Resume requires --confirm-run equal to the Paper account")
+            result = journal.control(hashlib.sha256(args.account.encode()).hexdigest(),
+                                     stopped=args.action == "stop", reason=args.reason)
+            print(_json(result))
+            return 0
         transport = PaperTransport(args.url, ca_file=args.ca_file)
         if args.action == "submit":
             if args.confirm_run != args.run:

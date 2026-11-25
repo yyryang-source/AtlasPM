@@ -1,0 +1,181 @@
+"""Bounded continuous synthetic research-to-replay, with resumable prefix receipts.
+
+Uses existing decision/fusion, historical replay, execution policy and risk
+controls. No broker, external AI, formal backtest or training permission.
+"""
+from __future__ import annotations
+from copy import deepcopy
+from pathlib import Path
+from atlaspm.engine.autonomous_decision import decide
+from atlaspm.engine.contracts import finite
+from atlaspm.engine.replay import replay
+from atlaspm.research.research_contract import contract
+from atlaspm.research.financial_events import FLAGS
+from atlaspm.research.training_registry import digest
+from atlaspm.research.event_queue import _transaction
+from atlaspm.engine.unified import SAFETY
+
+
+def continuous(payload, *, weights, horizon_days=1, cost_fraction=.01, checkpoint=None):
+    if (not isinstance(payload,dict) or payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True
+        or any(k in payload and payload[k] is not v for k,v in {**FLAGS,**SAFETY}.items())
+        or "margin_policy" in payload):
+        raise ValueError("CONTINUOUS_SYNTHETIC_CASH_ONLY")
+    sessions=payload["sessions"]
+    if not isinstance(sessions,list) or not 2<=len(sessions)<=60:
+        raise ValueError("CONTINUOUS_SESSION_BUDGET")
+    if not all(k in payload for k in ("risk_policy","position_lifecycle","execution_policy")):
+        raise ValueError("CONTINUOUS_RISK_AND_EXECUTION_REQUIRED")
+    if not isinstance(payload["execution_policy"],dict):
+        raise ValueError("CONTINUOUS_EXECUTION_POLICY_REQUIRED")
+    fee=finite(payload.get("fee_bps",5),"fee",minimum=0)
+    slip=finite(payload.get("slippage_bps",5),"slippage",minimum=0)
+    impact=finite(payload["execution_policy"].get("impact_bps_at_full_participation",50),"impact",minimum=0)
+    if finite(cost_fraction,"cost_fraction",minimum=0)<2*(fee+slip+impact)/10000:
+        raise ValueError("CONTINUOUS_COST_BUDGET_UNDERSTATED")
+    config={k:v for k,v in payload.items() if k!="sessions"}
+    policy_id=digest([config,weights,horizon_days,cost_fraction])
+    fingerprints=[digest(s) for s in sessions]
+    if len(set(fingerprints))!=len(fingerprints):
+        raise ValueError("DUPLICATE_CONTINUOUS_SESSION")
+    def compute():
+        adapted=deepcopy(config)
+        adapted["missing_signal_policy"]="hold"
+        adapted["sessions"]=[]
+        reports=[]
+        for session in sessions:
+            raw=deepcopy(session)
+            research=raw.pop("research")
+            events=raw.pop("events",[])
+            if "signals" in raw or raw["source"]!="synthetic":
+                raise ValueError("CONTINUOUS_REQUIRES_RESEARCH_NOT_CALLER_SIGNALS")
+            symbols=set(raw["close"])
+            if not 1<=len(symbols)<=20 or set(raw["open"])!=symbols:
+                raise ValueError("CONTINUOUS_UNIVERSE_LIMIT")
+            sectors=raw.pop("sectors")
+            if set(sectors)!=symbols:
+                raise ValueError("CONTINUOUS_SECTOR_COVERAGE")
+            cutoff=raw["close_at"]
+            raw["signals"]=[]
+            try:
+                if not isinstance(research,list) or not 1<=len(research)<=128:
+                    raise ValueError("MISSING_OR_OVERSIZED_RESEARCH")
+                if events:
+                    from atlaspm.research.intelligence import joint_local_review
+                    if not isinstance(events,list) or len(events)>256 or any(e.get("provider")!="synthetic" for e in events):
+                        raise ValueError("CONTINUOUS_SYNTHETIC_EVENTS_REQUIRED")
+                    for symbol in symbols:
+                        subset=[r for r in research if r["security_id"]=="SYN:"+symbol]
+                        joint=joint_local_review(security_id="SYN:"+symbol,asset_type="stock",as_of=cutoff,
+                                                 events=events,research_rows=subset,weights=weights)
+                        if joint["unmatched_evidence_rows"] or not joint["event_revisions"]:
+                            raise ValueError("CONTINUOUS_EVENT_EVIDENCE_MISMATCH")
+                result=decide(research,as_of=cutoff,weights=weights,horizon_days=horizon_days,cost_fraction=cost_fraction)
+                candidates=result["candidates"]
+                # All-or-nothing universe coverage; a missing/HOLD/SELL
+                # forecast cannot silently liquidate a held name.
+                if (len(candidates)!=len(symbols) or {g["security_id"] for g in candidates}!={"SYN:"+s for s in symbols}
+                    or any(g["action"]!="BUY" or g["asset_type"] not in {"stock","etf"} for g in candidates)):
+                    raise ValueError("NO_COMPLETE_POSITIVE_UNIVERSE")
+                checked=[contract(row,as_of=cutoff) for row in research]
+                for rank,g in enumerate(candidates,1):
+                    symbol=g["security_id"][4:]
+                    evidence=[v for v in checked if v["numeric_eligible"] and v["research_id"] in g["research_ids"]]
+                    if not evidence:
+                        raise ValueError("NO_VALID_RESEARCH_EVIDENCE")
+                    oldest=min(v["data_available_at"] for v in evidence)
+                    raw["signals"].append({"symbol":symbol,"security_id":g["security_id"],"sector":sectors[symbol],
+                        "model_version":digest(g),"identity_source":"synthetic","data_source":"synthetic",
+                        "data_quality":"synthetic_test_only","research_eligible":True,"model_approved_for_training":False,
+                        "generated_at":cutoff,"available_at":cutoff,"data_available_at":oldest,"expires_at":cutoff,
+                        "factor_score":g["robust_net_edge"],"model_rank":rank})
+                reports.append({"date":raw["date"],"status":"SYNTHETIC_RESEARCH_ACCEPTED","decision_sha256":digest(result)})
+            except (ValueError,KeyError,TypeError,OverflowError):
+                raw["signals"]=[]
+                reports.append({"date":raw["date"],"status":"NO_TRADE_RESEARCH_BLOCKED"})
+            adapted["sessions"].append(raw)
+        result=replay(adapted)
+        # No fabricated final flat or settlement; require actual ledger state.
+        final=result["curve"][-1]
+        return {**FLAGS,"mode":"synthetic","decision":"CONTINUOUS_REPLAY_REVIEWED",
+                "sessions":len(sessions),"research_reviews":reports,"simulation":result,
+                "flat_and_settled":not final["holdings"] and abs(final["unsettled_cash"])<.01,
+                "trained_model_used":False,"broker_side_effects":False}
+    if checkpoint is None:
+        return compute()
+    # Existing atomic state writer, not a second scheduler. Bounded full
+    # prefix recomputation on restart; no external execution or double fills.
+    if not str(checkpoint).endswith(".continuous.json"):
+        raise ValueError("CONTINUOUS_CHECKPOINT_SUFFIX_REQUIRED")
+    def commit(items):
+        if set(items)-{"continuous"}:
+            raise ValueError("CONTINUOUS_CHECKPOINT_KIND_MISMATCH")
+        old=items.get("continuous")
+        if old and (old["policy_sha256"]!=policy_id or fingerprints[:len(old["session_hashes"])]!=old["session_hashes"]):
+            raise ValueError("CONTINUOUS_CHECKPOINT_PREFIX_CONFLICT")
+        result=compute()
+        result_hash=digest(result)
+        if old and old["session_hashes"]==fingerprints and old["result_sha256"]!=result_hash:
+            raise ValueError("CONTINUOUS_REPLAY_NONDETERMINISTIC")
+        items["continuous"]={"policy_sha256":policy_id,"session_hashes":fingerprints,
+                             "result_sha256":result_hash,"flat_and_settled":result["flat_and_settled"]}
+        return {**result,"checkpoint_reused":bool(old and old["session_hashes"]==fingerprints),
+                "result_sha256":result_hash}
+    return _transaction(Path(checkpoint),commit)
+
+
+def fixture_research(symbol,stamp,values):
+    return [{"security_id":"SYN:"+symbol,"asset_type":"stock","category":"factor",
+             "kind":"quantitative_prediction","source":"synthetic","model_version":name,
+             "evidence":[{"sha256":digest([name,symbol,stamp]),"available_at":stamp,
+                          "received_at":stamp,"source":"synthetic","rights_status":"synthetic_test_only"}],
+             "generated_at":stamp,"expires_at":stamp,"horizon_days":1,
+             "expected_return":value,"uncertainty_radius":.01,"risk_factors":["fixture"],
+             "invalidation":["fixture expiry"],"synthetic_fixture":True}
+            for name,value in zip(("m1","m2"),values)]
+
+
+def synthetic_fixture():
+    sessions=[]
+    for day,op,cl in (("2020-01-02",100,100),("2020-01-03",100,100),
+                       ("2020-01-06",100,90),("2020-01-07",90,90),("2020-01-08",90,90)):
+        stamp=day+"T21:00:00Z"
+        rows=fixture_research("AAA",stamp,(.10,.11))+fixture_research("BBB",stamp,(.08,.09))
+        if day=="2020-01-06":
+            rows=[]  # risk exit must not depend on new research
+        from atlaspm.research.financial_events import normalize
+        events=[normalize({"provider":"synthetic","source_id":"SYN:"+x["model_version"]+":"+x["security_id"]+":"+day,
+                           "kind":"earnings_forecast" if x["model_version"]=="m1" else "volume_anomaly",
+                           "subjects":[x["security_id"]],"published_at":stamp,"first_available_at":stamp,
+                           "effective_at":None,"evidence_sha256":x["evidence"][0]["sha256"],
+                           "delivery":"file","expiry_seconds":86400},received_at=stamp) for x in rows]
+        sessions.append({"events":events,"date":day,"open_at":day+"T14:30:00Z","close_at":stamp,"source":"synthetic",
+                         "open":{"AAA":op,"BBB":100},"close":{"AAA":cl,"BBB":100},
+                         "volume":{"AAA":100000,"BBB":100000},"sectors":{"AAA":"tech","BBB":"health"},
+                         "research":rows})
+    return {"mode":"synthetic","synthetic_fixture":True,"initial_cash":10000,
+            "fee_bps":1,"slippage_bps":1,"cash_reserve":.2,"top_k":1,"rebalance_sessions":1,
+            "settlement_sessions":1,"risk_policy":{"max_drawdown":.25,"max_gross_leverage":1.,
+            "equity_shock":.2,"max_stress_loss_fraction":.25},
+            "execution_policy":{"max_participation":.01,"impact_bps_at_full_participation":10,"fill_fraction":1},
+            "position_lifecycle":{"stop_loss":.05,"take_profit":.3,"max_holding_sessions":20},
+            "sessions":sessions}
+
+
+
+def main():
+    import argparse,json
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--file",required=True,type=Path)
+    p.add_argument("--checkpoint")
+    args=p.parse_args()
+    if args.file.stat().st_size>2*1024*1024:
+        raise ValueError("CONTINUOUS_INPUT_LIMIT")
+    data=json.loads(args.file.read_text(encoding="utf-8"))
+    out=continuous(data["payload"],weights=data["weights"],checkpoint=args.checkpoint,
+                   horizon_days=data.get("horizon_days",1),cost_fraction=data.get("cost_fraction",.01))
+    print(json.dumps(out,indent=2,allow_nan=False))
+
+
+if __name__=="__main__":
+    main()

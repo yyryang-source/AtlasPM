@@ -293,6 +293,57 @@ class PaperLifecycleTests(unittest.TestCase):
         self.journal.claim(later_review, later_draft)
         self.assertEqual(len(self.gateway.calls), 1)
 
+    def test_restart_stop_and_unmatched_prior_batch_block_new_submission(self):
+        with patch("sys.argv", ["paper","stop","--account",self.account,"--reason","operator incident"]), \
+                patch("atlaspm.execution.ibkr_paper_orders.PaperJournal",return_value=self.journal), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(main(),0)
+        self.journal=PaperJournal(self.journal.path)
+        with self.assertRaisesRegex(ValueError,"stopped by operator"):
+            self.submit()
+        self.assertEqual(self.gateway.calls,[])
+        self.journal.control(self.account_hash,stopped=False,reason="initial review")
+        batch=self.submit()["batch"]
+        later=self.reviewed | {"id":"d"*64,"execution_session":"2026-11-24"}
+        fresh=deepcopy(self.fresh)
+        fresh["broker_estimates"][0]["ticket"]["cOID"]="ATL-"+"e"*40
+        with self.assertRaisesRegex(ValueError,"Resolve the ambiguous broker order"):
+            self.journal.claim(later,fresh)
+        self.journal.control(self.account_hash,stopped=True,reason="disconnect")
+        with self.assertRaisesRegex(ValueError,"Resolve the ambiguous broker order"):
+            self.journal.control(self.account_hash,stopped=False,reason="premature resume")
+        self.gateway.open_orders=[self.order(3,"Cancelled")]
+        self.gateway.trades=[self.fill(3,"0.25")]
+        self.assertEqual(self.sync()["status"],"mismatch")
+        with self.assertRaisesRegex(ValueError,"matched broker reconciliation"):
+            self.journal.control(self.account_hash,stopped=False,reason="premature resume")
+        self.snapshot.update(positions={"XYZ":6},total_cash=9700.05)
+        self.assertEqual(self.sync()["status"],"matched")
+        self.journal.control(self.account_hash,stopped=False,reason="reconciled")
+        self.journal.claim(later,fresh)
+        self.journal.control(self.account_hash,stopped=True,reason="stop before next leg")
+        with self.assertRaisesRegex(ValueError,"stopped by operator"):
+            self.journal.transition(fresh["broker_estimates"][0]["ticket"]["cOID"],"sending",
+                                    "intent",previous={"not_sent"})
+        self.assertEqual(self.journal.get(batch["id"])["reconciliation"]["status"],"matched")
+        self.assertEqual(len(self.gateway.calls),1)
+
+    def test_stale_reconciliation_cannot_overwrite_new_execution_state(self):
+        batch=self.submit()["batch"]
+        self.gateway.open_orders=[self.order(3,"Submitted")]
+        self.gateway.trades=[self.fill(3,"0.25")]
+        self.snapshot.update(positions={"XYZ":6},total_cash=9700.05)
+        self.assertEqual(self.sync()["status"],"pending")
+        prior=self.journal.get(batch["id"])
+        self.gateway.open_orders=[self.order(3,"Cancelled")]
+        self.assertEqual(self.sync()["status"],"matched")
+        with self.assertRaisesRegex(ValueError,"journal changed"):
+            self.journal.save_reconciliation(batch["id"],{
+                "status":"pending","observed_at":"2026-11-24T00:00:00Z"},expected_batch=prior)
+        with self.assertRaisesRegex(ValueError,"journal changed"):
+            self.journal.apply(batch["id"],[],[],expected_batch=prior)
+        self.assertEqual(self.journal.get(batch["id"])["reconciliation"]["status"],"matched")
+
     def test_review_changes_and_official_reject_shape(self):
         self.fresh["broker_estimates"][0]["ticket"]["price"] = 102.0
         self.assertEqual(self.submit()["status"], "review_required")

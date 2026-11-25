@@ -37,6 +37,17 @@ def replay(payload):
             raise ValueError("SYNTHETIC_MARGIN_REQUIRES_ZERO_RESERVE_AND_RANK_WEIGHTS")
         if payload.get("risk_policy") is None:
             raise ValueError("SYNTHETIC_MARGIN_REQUIRES_RISK_POLICY")
+    lifecycle=payload.get("position_lifecycle")
+    if lifecycle is not None:
+        if margin or not isinstance(lifecycle,dict) or set(lifecycle)!={"stop_loss","take_profit","max_holding_sessions"} or payload.get("risk_policy") is None:
+            raise ValueError("INVALID_CASH_POSITION_LIFECYCLE")
+        stop=finite(lifecycle["stop_loss"],"stop_loss",minimum=.000001)
+        profit=finite(lifecycle["take_profit"],"take_profit",minimum=.000001)
+        max_hold=lifecycle["max_holding_sessions"]
+        if stop>=1 or type(max_hold) is not int or not 1<=max_hold<=252:
+            raise ValueError("INVALID_POSITION_EXIT_POLICY")
+    entry_marks={}
+    lifecycle_audit=[]
     risk_policy=payload.get("risk_policy")
     risk_events=[]
     halted=False
@@ -128,6 +139,25 @@ def replay(payload):
                     "halt_latched":True,"remaining_positions":dict(holdings)})
             if halted:
                 targets=(str(prior_day),prior_close,{}) if holdings else None
+        # Opt-in continuous cash lifecycle: recheck gap risk before any
+        # new buy, rather than relying solely on the prior close.
+        if lifecycle is not None:
+            if opening_equity<=0:
+                raise ValueError("NONPOSITIVE_OPENING_EQUITY")
+            current_gross=marked_gross(op)/opening_equity
+            gap_breach=(current_gross>gross_limit+1e-8 or
+                        current_gross*shock>stress_limit+1e-8 or
+                        1-opening_equity/peak>drawdown_limit)
+            if gap_breach:
+                halted=True
+                lifecycle_audit.append({"date":str(day),"kind":"OPEN_RISK_HALT"})
+            if halted:
+                targets=(str(prior_day),prior_close,{}) if holdings else None
+            elif targets is not None:
+                target_gross=sum(targets[2].values())
+                if target_gross>gross_limit or target_gross*shock>stress_limit:
+                    targets=None
+                    lifecycle_audit.append({"date":str(day),"kind":"TARGET_RISK_BLOCK"})
         cost_today = 0.
         if targets is not None:
             signal_day, signal_close, weights = targets
@@ -148,6 +178,8 @@ def replay(payload):
                     notional = qty*op[s]
                     pending.append((i+lag, notional-cost))
                     holdings[s] -= qty
+                    if lifecycle is not None and not holdings[s]:
+                        entry_marks.pop(s,None)
                     cost_today += cost
                     trades.append(dict(date=str(day), signal_date=signal_day, symbol=s, side="SELL", shares=qty, reference_price=op[s], cost=cost))
             for s in sorted(desired):
@@ -168,6 +200,8 @@ def replay(payload):
                         unit = order["price"]*(1+fee)
                 if qty:
                     cash=margin.pay_purchase(cash,qty*unit) if margin else cash-qty*unit
+                    if lifecycle is not None and not holdings.get(s,0):
+                        entry_marks[s]=(i,op[s])
                     holdings[s] = holdings.get(s,0)+qty
                     cost = qty*(unit-op[s])
                     cost_today += cost
@@ -210,6 +244,18 @@ def replay(payload):
                 breaches.append("ASSUMED_MAINTENANCE_BREACH")
             if 1-equity/peak>drawdown_limit:
                 breaches.append("REPLAY_DRAWDOWN_LIMIT")
+            if lifecycle is not None:
+                for symbol,(start,mark) in entry_marks.items():
+                    if symbol not in holdings:
+                        continue
+                    change=cl[symbol]/mark-1
+                    reason=("POSITION_STOP" if change<=-stop else "POSITION_TAKE_PROFIT" if change>=profit else
+                            "POSITION_TIME_LIMIT" if i-start+1>=max_hold else None)
+                    if reason:
+                        breaches.append(reason+":"+symbol)
+                        lifecycle_audit.append({"date":str(day),"symbol":symbol,"kind":reason,
+                                                "reference_mark":mark,"mark_return":change})
+                # Conservative account-wide sell-only latch; no new alpha needed.
             halted=halted or bool(breaches)
             risk_events.append({"date":str(day),"timestamp":row["close_at"],
                 "kind":"SYNTHETIC_CLOSE_RISK_CHECK","breaches":breaches,
@@ -247,6 +293,7 @@ def replay(payload):
                 unexecuted_final_signal=targets is not None,
                 risk_halt_latched=halted,risk_audit=risk_chain,risk_audit_root=risk_root,
                 remaining_positions_after_halt=dict(holdings) if halted else {},
+                **({"position_lifecycle_audit":lifecycle_audit} if lifecycle is not None else {}),
                 **(margin.totals() if margin else {}))
 
 
