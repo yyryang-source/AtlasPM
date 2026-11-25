@@ -316,7 +316,7 @@ PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
 
 
 def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
-                     include_history=False, output=None):
+                     include_history=False, output=None, research_assets=None):
     """Short, local Paper-only probe. No data retention without separate rights."""
     local_rights("ibkr", retention=output is not None)
     if type(polls) is not int or not 2 <= polls <= 3:
@@ -327,6 +327,11 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
         raise ValueError("Confirm dedicated session and available lines; symbol probe cap 5")
     if type(include_history) is not bool:
         raise ValueError("Invalid history flag")
+    if research_assets is not None:
+        if (not include_history or not isinstance(research_assets, dict)
+                or set(research_assets) != set(symbols)
+                or any(v not in {"stock", "etf"} for v in research_assets.values())):
+            raise ValueError("Research requires history and a reviewed subtype for every symbol")
     if output is not None:
         # Fixed output avoids overwriting the profile, risk snapshot or journal.
         output = _sync_path(Path("local_data/ibkr_paper_market_probe.json"))
@@ -385,9 +390,37 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                   "fresh_realtime_book_candidates": sum(q["fresh_realtime_book_candidate"] for q in by_id.values()),
                   "history_requested": include_history,
                   "history_units_verified": False}
+        research = {}
+        if research_assets is not None:
+            from atlaspm.research.intelligence import broker_market_research
+            cutoff = datetime.now(UTC).isoformat()
+            for symbol, identity in identities.items():
+                try:
+                    research[symbol] = broker_market_research(
+                        identity, histories[symbol], by_id[identity["conid"]],
+                        asset_type=research_assets[symbol], as_of=cutoff)
+                except (ValueError, TypeError, KeyError, OverflowError):
+                    # No raw provider data or private identifiers in exceptions.
+                    research[symbol] = {**_FLAGS, "status": "RESEARCH_EVIDENCE_REJECTED",
+                                        "research_contract": None, "fusion": None,
+                                        "execution_price_eligible": False,
+                                        "portfolio_mark_eligible": False}
+            result["research"] = {}
+            for symbol, row in research.items():
+                checked = row["research_contract"]
+                fusion = row["fusion"]
+                result["research"][symbol] = {
+                    "status": row["status"], "usable_bar_count": row.get("contiguous_closed_bar_candidates"),
+                    "research_id": checked["research_id"] if checked else None,
+                    "numeric_eligible": checked["numeric_eligible"] if checked else False,
+                    "fusion_numeric_count": fusion["groups"][0]["numeric_count"] if fusion else 0,
+                    "portfolio_mark_eligible": False,
+                }
+            result["research_contract_count"] = sum(row["research_contract"] is not None for row in research.values())
         if output is not None:
             _write_sync_json(Path("local_data/ibkr_paper_market_probe.json"), {
                 **result, "latest_snapshot": last, "history": histories,
+                **({"research_details": research} if research_assets is not None else {}),
                 "captured_at_utc": datetime.now(UTC).isoformat(),
             })
             result["written"] = "local_data/ibkr_paper_market_probe.json"
@@ -400,6 +433,8 @@ def main():
     instruments.add_argument("--conid", type=int, action="append")
     instruments.add_argument("--symbol", action="append", help="US equity symbol; uses saved Paper profile")
     parser.add_argument("--history", action="store_true", help="Symbol probe: request 1d/5min history")
+    parser.add_argument("--research-asset", action="append", default=[],
+                        help="Reviewed SYMBOL=stock or SYMBOL=etf; requires --history for all symbols")
     parser.add_argument("--save-local", action="store_true", help="Symbol probe: requires separate local retention rights")
     parser.add_argument("--available-lines", type=int, required=True)
     parser.add_argument("--dedicated-session", action="store_true")
@@ -412,11 +447,20 @@ def main():
     if args.symbol:
         if args.ca_file or args.gateway_url != DEFAULT_GATEWAY_URL:
             parser.error("Symbol mode uses the saved Paper profile, not URL/CA overrides")
+        research_assets = None
+        if args.research_asset:
+            research_assets = {}
+            for entry in args.research_asset:
+                symbol, sep, kind = entry.partition("=")
+                if not sep or symbol in research_assets or kind not in {"stock", "etf"}:
+                    parser.error("Use unique --research-asset SYMBOL=stock or SYMBOL=etf")
+                research_assets[symbol] = kind
         try:
             result = run_symbol_probe(args.symbol, available_lines=args.available_lines,
                                       dedicated_session=args.dedicated_session, polls=args.polls,
                                       include_history=args.history,
-                                      output=True if args.save_local else None)
+                                      output=True if args.save_local else None,
+                                      research_assets=research_assets)
             print(json.dumps(result, indent=2))
         except (OSError, ValueError, TypeError, KeyError) as exc:
             # Market rights and safe identity failures are actionable. Do not
@@ -428,8 +472,8 @@ def main():
                 parser.exit(1, "IBKR market probe failed: " + str(exc) + "\n")
             parser.exit(1, "IBKR market probe failed; verify local profile and session\n")
         return
-    if args.history or args.save_local:
-        parser.error("--history and --save-local require --symbol")
+    if args.history or args.save_local or args.research_asset:
+        parser.error("--history, --save-local and --research-asset require --symbol")
     local_rights("ibkr")
     transport = LocalGatewayTransport(args.gateway_url, ca_file=args.ca_file)
     pool = MarketPool(transport, available_lines=args.available_lines,

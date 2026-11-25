@@ -160,3 +160,29 @@ review and reconcile the owned subscriptions before manually clearing it.
 This does not modify the existing DU-only order guard or the CNH risk block.
 See https://ibkrcampus.com/docs/web-api/trading/instrument-discovery/contract-i-ds
 and https://ibkrcampus.com/docs/web-api/v1/endpoints/contract/contract-information-by-contract-id .
+
+
+### Intraday research contract and fusion integration
+
+The existing symbol probe optionally produces descriptive technical research
+using observed, contiguous 5-minute close candidates. Supply a reviewed
+subtype for each symbol; IBKR STK alone cannot distinguish stocks and ETFs.
+No daily factor inference or annualization from a short intraday sample.
+The last returned bar is always discarded (IBKR may return partial bars);
+gaps reset the trailing sequence; at least 10 contiguous bars are required.
+Provider symbol, bar interval, regular-hours setting, receipt and identity
+must match. The Research Contract records original availability as unknown;
+Signal Fusion receives objective evidence, never an expected return.
+Delayed quotes and unverified field timestamps cannot become portfolio marks
+or execution prices. No volume event is generated while units are unverified.
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_market_data --symbol AAPL --symbol QQQ --available-lines 2 --dedicated-session --polls 3 --history --research-asset AAPL=stock --research-asset QQQ=etf
+~~~
+
+Without --save-local only safe research status/counts/IDs are printed.
+With explicitly confirmed retention rights, the same existing probe file
+includes descriptive metrics, contract and fusion receipts. No new database,
+event queue writes, model admission, trading permissions or external AI calls.
+Provider historical response reference:
+https://www.interactivebrokers.com/docs/web-api/api-reference/trading/trading-market-data/get-md-history

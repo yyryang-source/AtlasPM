@@ -160,3 +160,63 @@ class MarketPoolTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     transport.market_stock_lookup(bad)
             self.assertEqual(send.call_count, 2)
+
+
+    def research_fixture(self):
+        from datetime import timedelta
+        from atlaspm.execution.ibkr_market_data import _FLAGS
+        now = datetime.now(UTC) - timedelta(seconds=1)
+        stamp = int(now.timestamp()*1000) - 12*300000
+        identity = {"symbol":"AAA","conid":10,"currency":"USD","asset_class":"STK",
+                    "broker_identity_checked":True}
+        history = {**_FLAGS,"provider":"ibkr","model":"history_raw_qc_v1","conid":10,
+                   "period":"1d","bar":"5min","retrieved_at_utc":now.isoformat(),
+                   "source_sha256":"a"*64,"provider_metadata":{"symbol":"AAA",
+                   "barLength":300,"outsideRth":False},
+                   "rows":[{"t":stamp+i*300000,"o":100+i,"h":101+i,"l":99+i,
+                            "c":100+i,"v":100} for i in range(13)]}
+        quote = {"conid":10,"availability":"DELAYED"}
+        return identity, history, quote, now.isoformat()
+
+    def test_market_research_contract_fusion_and_no_price_admission(self):
+        from atlaspm.research.intelligence import broker_market_research
+        identity, history, quote, cutoff = self.research_fixture()
+        result = broker_market_research(identity, history, quote, asset_type="stock", as_of=cutoff)
+        self.assertEqual(result["status"], "DESCRIPTIVE_RESEARCH_COMPLETED")
+        self.assertEqual(result["contiguous_closed_bar_candidates"], 12)
+        self.assertAlmostEqual(result["metrics"]["observed_window_return"], .11)
+        self.assertFalse(result["research_contract"]["numeric_eligible"])
+        self.assertIsNone(result["research_contract"]["contract"]["evidence"][0]["available_at"])
+        self.assertEqual(result["fusion"]["groups"][0]["numeric_count"], 0)
+        self.assertFalse(result["fusion"]["groups"][0]["synthetic_decision_eligible"])
+        self.assertFalse(result["portfolio_mark_eligible"])
+        self.assertFalse(result["approved_for_model_training"])
+
+    def test_market_research_rejects_identity_future_and_bar_mismatch(self):
+        from atlaspm.research.intelligence import broker_market_research
+        identity, history, quote, cutoff = self.research_fixture()
+        with self.assertRaisesRegex(ValueError,"SCOPE_MISMATCH"):
+            broker_market_research(identity, history, {**quote,"conid":11},
+                                   asset_type="stock", as_of=cutoff)
+        history["rows"][-1]["t"] += 300000
+        with self.assertRaisesRegex(ValueError,"BAR_TIME"):
+            broker_market_research(identity, history, quote, asset_type="stock", as_of=cutoff)
+        history["rows"][-1]["t"] -= 300000
+        history["provider_metadata"]["symbol"] = "BBB"
+        with self.assertRaisesRegex(ValueError,"METADATA_MISMATCH"):
+            broker_market_research(identity, history, quote, asset_type="stock", as_of=cutoff)
+
+    def test_market_research_does_not_bridge_gap_or_short_history(self):
+        from atlaspm.research.intelligence import broker_market_research
+        identity, history, quote, cutoff = self.research_fixture()
+        del history["rows"][7]
+        result = broker_market_research(identity, history, quote, asset_type="etf", as_of=cutoff)
+        self.assertEqual(result["status"], "INSUFFICIENT_CONTIGUOUS_HISTORY")
+        self.assertIsNone(result["research_contract"])
+        self.assertIsNone(result["metrics"])
+
+    def test_market_research_requires_reviewed_subtype(self):
+        from atlaspm.research.intelligence import broker_market_research
+        identity, history, quote, cutoff = self.research_fixture()
+        with self.assertRaisesRegex(ValueError,"SUBTYPE_REQUIRED"):
+            broker_market_research(identity, history, quote, asset_type="STK", as_of=cutoff)

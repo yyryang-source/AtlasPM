@@ -899,6 +899,138 @@ def validate_local_bindings(bindings):
     return bindings
 
 
+def broker_market_research(identity, history, quote, *, asset_type, as_of):
+    """Convert bounded IBKR intraday observations to descriptive research.
+
+    The caller supplies the reviewed stock/ETF subtype: IBKR STK alone does not
+    distinguish them. This is neither historical identity admission nor alpha.
+    Never use an unfinished bar, assume continuity across sessions, annualize
+    a short sample, or promote an aggregate snapshot to an execution price.
+    """
+    from datetime import timedelta
+    from math import isfinite
+    from statistics import fmean, stdev
+    from atlaspm.data.provider_policy import local_rights
+    from atlaspm.execution.ibkr_market_data import _number, _conid
+    from atlaspm.research.financial_events import FLAGS, _time
+    from atlaspm.research.research_contract import contract
+    from atlaspm.research.signal_fusion import fuse
+    from atlaspm.research.training_registry import digest
+    from atlaspm.strategies.equity.stock_screener import _drawdown
+
+    local_rights("ibkr")
+    if asset_type not in {"stock", "etf"}:
+        raise ValueError("REVIEWED_EQUITY_SUBTYPE_REQUIRED")
+    if (not isinstance(identity, dict) or identity.get("currency") != "USD"
+            or identity.get("asset_class") != "STK"
+            or identity.get("broker_identity_checked") is not True):
+        raise ValueError("BROKER_EQUITY_IDENTITY_REQUIRED")
+    symbol = identity["symbol"]
+    cid = _conid(identity.get("conid"))
+    if not isinstance(symbol, str) or not re.fullmatch(r"[A-Z][A-Z0-9.]{0,9}", symbol):
+        raise ValueError("INVALID_RESEARCH_SYMBOL")
+    if (not isinstance(history, dict) or not isinstance(quote, dict)
+            or history.get("conid") != cid or quote.get("conid") != cid
+            or history.get("provider") != "ibkr"
+            or history.get("model") != "history_raw_qc_v1"
+            or history.get("bar") != "5min" or history.get("period") != "1d"
+            or any(history.get(k) is not v for k, v in FLAGS.items())):
+        raise ValueError("BROKER_RESEARCH_EVIDENCE_SCOPE_MISMATCH")
+    cutoff = _time(as_of)
+    received = _time(history["retrieved_at_utc"])
+    if received > cutoff or cutoff > datetime.now(UTC) or (cutoff-received).total_seconds() > 300:
+        raise ValueError("BROKER_RESEARCH_RECEIPT_OUTSIDE_WINDOW")
+    if not isinstance(history.get("source_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", history["source_sha256"]):
+        raise ValueError("BROKER_RESEARCH_DIGEST_REQUIRED")
+    meta = history.get("provider_metadata")
+    if (not isinstance(meta, dict) or meta.get("symbol") != symbol
+            or meta.get("barLength") != 300 or meta.get("outsideRth") is not False):
+        raise ValueError("BROKER_HISTORY_METADATA_MISMATCH")
+    rows = history.get("rows")
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise ValueError("BROKER_RESEARCH_ROW_LIMIT")
+    # Verify the documented epoch-ms shape and OHLC geometry again at this
+    # boundary; do not trust a saved report's flags or external timestamps.
+    bars = []
+    previous = None
+    latest_ms = int(received.timestamp()*1000)
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("INVALID_BROKER_RESEARCH_BAR")
+        stamp = row.get("t")
+        if (type(stamp) is not int or not 946684800000 <= stamp <= latest_ms
+                or (previous is not None and stamp <= previous)):
+            raise ValueError("INVALID_BROKER_RESEARCH_BAR_TIME")
+        values = [_number(row.get(key)) for key in ("o", "h", "l", "c", "v")]
+        if any(v is None for v in values):
+            raise ValueError("INVALID_BROKER_RESEARCH_BAR_VALUE")
+        op, hi, lo, close, _ = values
+        if not 0 < lo <= min(op, close) <= max(op, close) <= hi:
+            raise ValueError("INVALID_BROKER_RESEARCH_BAR_GEOMETRY")
+        previous = stamp
+        bars.append((stamp, close))
+    # The API permits partial bars. Drop the final returned bar even if its
+    # nominal end appears to have elapsed; restrict metrics to a trailing
+    # contiguous run, without interpolating missing bars or overnight gaps.
+    usable = []
+    for stamp, close in bars[:-1]:
+        if stamp + 300000 > latest_ms:
+            continue
+        if usable and stamp-usable[-1][0] != 300000:
+            usable.clear()
+        usable.append((stamp, close))
+    result = {**FLAGS, "security_id": f"conid:{cid}", "symbol": symbol,
+              "asset_type": asset_type, "asset_subtype_source": "operator_reviewed",
+              "broker_identity_checked": True, "identity_independently_verified": False,
+              "input_rows": len(rows), "contiguous_closed_bar_candidates": len(usable),
+              "snapshot_availability": quote.get("availability"),
+              "execution_price_eligible": False, "portfolio_mark_eligible": False,
+              "historical_units_verified": False, "volume_signal": None,
+              "expected_return": None, "research_contract": None, "fusion": None,
+              "metrics": None}
+    if len(usable) < 10:
+        return {**result, "status": "INSUFFICIENT_CONTIGUOUS_HISTORY"}
+    # Do not conflate recent retrieval with current prices. Bound the
+    # descriptive window to recent observations, including delayed feeds.
+    if latest_ms-usable[-1][0] > 86400000:
+        return {**result, "status": "HISTORY_OBSERVATION_TOO_OLD"}
+    closes = [value for _, value in usable]
+    returns = [b/a-1 for a,b in zip(closes, closes[1:])]
+    metrics = {
+        "observed_window_return": closes[-1]/closes[0]-1,
+        "last_vs_sma5": closes[-1]/fmean(closes[-5:])-1,
+        "last_vs_sma10": closes[-1]/fmean(closes[-10:])-1,
+        "observed_5min_return_stdev": stdev(returns),
+        "observed_max_drawdown": _drawdown(closes),
+    }
+    if not all(isfinite(value) for value in metrics.values()):
+        raise ValueError("NONFINITE_BROKER_RESEARCH_METRIC")
+    # Digest the exact derived evidence, not a vendor hash alone. Unknown
+    # original availability remains None, so no PIT or numeric eligibility.
+    evidence_hash = digest({"identity": identity, "subtype": asset_type,
+                            "history": history, "metrics": metrics,
+                            "usable_bar_times": [stamp for stamp,_ in usable]})
+    checked = contract({
+        "security_id": result["security_id"], "asset_type": asset_type,
+        "category": "technical", "kind": "objective", "source": "ibkr",
+        "model_version": "ibkr_intraday_observation_v1",
+        "evidence": [{"sha256": evidence_hash, "available_at": None,
+                      "received_at": received.isoformat(), "source": "ibkr",
+                      "rights_status": "operator_attested_not_independently_verified"}],
+        "generated_at": cutoff.isoformat(),
+        "expires_at": (cutoff+timedelta(minutes=5)).isoformat(),
+        "horizon_days": 1, "expected_return": None, "uncertainty_radius": None,
+        "risk_factors": ["provider history units and point-in-time availability unverified",
+                         "short intraday sample; no forecast or execution mark"],
+        "invalidation": ["superseding observation, expired evidence or identity disagreement"],
+        "synthetic_fixture": False,
+    }, as_of=cutoff.isoformat())
+    fusion = fuse([checked["contract"]], as_of=cutoff.isoformat(),
+                  weights={"ibkr_intraday_observation_v1": 1})
+    return {**result, "status": "DESCRIPTIVE_RESEARCH_COMPLETED",
+            "metrics": metrics, "research_contract": checked, "fusion": fusion}
+
+
 def offline_model_responses():
     """Exercise the actual request/response schemas without transport or keys.
 
