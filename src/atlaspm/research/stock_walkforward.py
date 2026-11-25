@@ -39,9 +39,10 @@ def _performance(curve: list[dict[str, Any]], key: str) -> dict[str, Any]:
     returns = [b / a - 1.0 if a else 0.0 for a, b in zip(levels, levels[1:])]
     total = levels[-1] / levels[0] - 1.0
     years = len(returns) / 252.0
-    vol = stdev(returns) * sqrt(252) if len(returns) > 1 else None
-    sharpe = (fmean(returns) * sqrt(252) / stdev(returns)
-              if len(returns) > 1 and stdev(returns) > 1e-12 else None)
+    daily_stdev = stdev(returns) if len(returns) > 1 else None
+    vol = daily_stdev * sqrt(252) if daily_stdev is not None else None
+    sharpe = (fmean(returns) * sqrt(252) / daily_stdev
+              if daily_stdev is not None and daily_stdev > 1e-12 else None)
     return {
         "total_return": total,
         "cagr": (levels[-1] / levels[0]) ** (1.0 / years) - 1 if years > 0 else None,
