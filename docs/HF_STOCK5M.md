@@ -919,3 +919,11 @@ issuers without periodic filings are excluded from that pilot. Modern cover
 facts and exact legacy three-column tables remain the only supported
 observations; older two-column covers do not prove a trading symbol.
 No stable identity, historical interval, action or training approval is inferred.
+
+For untagged periodic primary forms, an additional narrow text matcher
+reports separately bounded excerpts explicitly describing the registrant's
+common stock, exchange and quoted symbol. It does not elevate those leads
+to supported cover observations, even if a match is unique. It cannot
+resolve temporal scope, share-class identity or ownership of a ticker;
+no lead is ingested automatically. Exhibit-only text, tagged documents,
+unquoted ticker guesses and generic issuer name matches are not supported.

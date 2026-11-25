@@ -25,7 +25,7 @@ def body(item,html,extra=""):
     accession=item["source_url"].rsplit("/",1)[-1][:-4]
     return (f'<SEC-DOCUMENT>\n<SEC-HEADER>\nACCESSION NUMBER: {accession}\n'
             f'CENTRAL INDEX KEY: {item["cik"]}\nFILED AS OF DATE: {item["filed_date"].replace("-","")}\n'
-            f'</SEC-HEADER>\n<DOCUMENT>\n<TYPE>8-K\n<TEXT><table>{html}</table></TEXT></DOCUMENT>'
+            f'</SEC-HEADER>\n<DOCUMENT>\n<TYPE>{item["form"]}\n<TEXT><table>{html}</table></TEXT></DOCUMENT>'
             +extra+"</SEC-DOCUMENT>").encode()
 
 
@@ -61,6 +61,26 @@ class ExtractTests(unittest.TestCase):
                      header+legacy.replace("<td>ABC","<td colspan='2'>ABC"),
                      header+legacy+row(exchange_context="other")):
             self.assertEqual(v.extract(body(x,html),x)["observations"],[])
+
+
+    def test_periodic_legacy_listing_is_text_lead_not_cover_identity(self):
+        x={**filing(),"form":"10-K405"}
+        exact='<p>Our common stock is traded on the Nasdaq National Market under the symbol "ABC".</p>'
+        result=v.extract(body(x,exact),x)
+        self.assertEqual(result["observations"],[])
+        self.assertEqual(result["status"],"NO_SUPPORTED_COVER_FACTS")
+        lead=result["legacy_listing_text_leads"][0]
+        self.assertEqual(lead["symbol_candidate"],"ABC")
+        self.assertEqual(lead["status"],"UNVERIFIED_LEGACY_LISTING_TEXT")
+        self.assertIsNone(lead["security_id"])
+        self.assertIsNone(lead["valid_from"])
+        for text in (exact.replace('"ABC"',"ABC"),
+                     exact.replace("Our common stock","Their common stock"),
+                     exact.replace('"ABC"','"abc"'),
+                     exact+row(exchange_context="other")):
+            self.assertEqual(v.extract(body(x,text),x)["legacy_listing_text_leads"],[])
+        exhibit="<DOCUMENT>\n<TYPE>EX-99\n<TEXT>"+exact+"</TEXT></DOCUMENT>"
+        self.assertEqual(v.extract(body(x,"",extra=exhibit),x)["legacy_listing_text_leads"],[])
 
     def test_header_and_exhibits(self):
         x=filing()

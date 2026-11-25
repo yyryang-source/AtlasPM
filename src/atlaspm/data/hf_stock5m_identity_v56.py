@@ -84,6 +84,45 @@ class CoverRows(HTMLParser):
                 self.capture=None
 
 
+# Narrow primary-form text leads, kept separate from supported cover rows.
+# A quotation is mandatory; no issuer-name ticker inference or two-column join.
+_LEGACY_LISTING = re.compile(
+    r"\b(?:our|the company['’]s|the registrant['’]s) common stock "
+    r"is (?:listed|traded) (?:on|in) (?:the )?"
+    r"(?P<exchange>New York Stock Exchange|American Stock Exchange|Nasdaq National Market|"
+    r"Nasdaq SmallCap Market|Nasdaq Stock Market|NYSE|Nasdaq) "
+    r"under (?:the )?(?:trading |ticker )?symbol\s*[: ]*\s*"
+    r"""(?P<quote>["'“])(?P<symbol>(?-i:[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*))["'”]""",
+    re.I,
+)
+
+
+def _legacy_listing_leads(primary, filing):
+    """Reviewable text snippets; never security identity or effective intervals."""
+    parser=filings.TextParser()
+    parser.feed(primary)
+    parser.close()
+    clean=" ".join("".join(parser.parts).split())
+    leads=[]
+    seen=set()
+    for match in _LEGACY_LISTING.finditer(clean):
+        symbol=match["symbol"]
+        if not SYMBOL.fullmatch(symbol):
+            continue
+        key=(symbol,match["exchange"].upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        leads.append({"symbol_candidate":symbol,"exchange_reported":match["exchange"],
+                      "matched_text":match.group(0),"text_offset":match.start(),
+                      "excerpt":clean[max(0,match.start()-120):match.end()+120],
+                      "known_date_lower_bound":filing["filed_date"],"security_id":None,
+                      "valid_from":None,"valid_to":None,"status":"UNVERIFIED_LEGACY_LISTING_TEXT"})
+        if len(leads)>=20:
+            break
+    return leads
+
+
 def extract(data,filing):
     """Point observations only; no effective interval or stable ID inferred."""
     if not matching._header(data,filing):
@@ -143,7 +182,10 @@ def extract(data,filing):
                 "security_id":None,"valid_from":None,"valid_to":None,
                 "status":"SEC_COVER_OBSERVATION_REVIEW_REQUIRED"})
     conflicts={s for s,n in Counter(o["symbol"] for o in observations).items() if n>1}
+    leads = (_legacy_listing_leads(primary[0],filing) if filing["form"] in ev.PERIODIC_FORMS
+             and not re.search(r"<\s*ix:",primary[0],re.I) else [])
     return {"observations":[o for o in observations if o["symbol"] not in conflicts],
+            "legacy_listing_text_leads":leads,
             "conflicting_symbols":sorted(conflicts),"rejected_tagged_rows":rejected,
             "status":"COVER_OBSERVATIONS_REVIEW_REQUIRED" if observations and not conflicts
                      else "AMBIGUOUS_COVER_OBSERVATIONS" if conflicts else "NO_SUPPORTED_COVER_FACTS"}
@@ -266,6 +308,7 @@ def run(year,*,ciks=None,after_cik=None,max_issuers=20,fetch=False,max_requests=
     counts=Counter(x["status"] for x in results)
     report.update(results=results,status_counts=dict(counts),
                   cover_observations=sum(len(x.get("observations",[])) for x in results),
+                  legacy_listing_text_lead_count=sum(len(x.get("legacy_listing_text_leads",[])) for x in results),
                   filings_selected=len(results),filings_with_bodies=sum("sha256" in x for x in results),
                   certified_identities=0,claims_ingested=0,
                   page_complete=not any(counts[k] for k in ("NOT_CACHED","COLLECTION_OR_CACHE_ERROR")),
