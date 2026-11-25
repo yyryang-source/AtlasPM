@@ -363,6 +363,109 @@ def _reconcile_account(batch: dict, snapshot: dict) -> dict:
             "fills_confirmed": filled_as_reported, "working_or_uncertain": not finished}
 
 
+def review_profile_recovery(transport, journal, account, orders):
+    """Read-only recovery and fill feedback, including ambiguous send intents.
+
+    Called only inside the authenticated saved-profile check. Uses the exact
+    existing broker observation parser, but never applies transitions or
+    certifies a STKNOPT account with the legacy CASH reconciliation routine.
+    """
+    from collections import Counter
+    from atlaspm.execution.ibkr_equity_snapshot import _orders
+    from atlaspm.research.financial_events import FLAGS
+    if not isinstance(account,str) or not re.fullmatch(r"DU(?:R)?[0-9]{1,20}",account):
+        raise ValueError("RECOVERY_PAPER_ACCOUNT_REQUIRED")
+    active, _ = _orders(orders, account)
+    inventory = journal.recovery_inventory(hashlib.sha256(account.encode()).hexdigest())
+    batches = inventory["pending_batches"]
+    states = Counter()
+    all_ids = set()
+    all_refs = set()
+    matching_active = set()
+    unknown_count = 0
+    observed_count = 0
+    new_fills = 0
+    missing_commission = 0
+    broker_fill_conflicts = 0
+    reasons = set()
+    if inventory["stopped"]:
+        reasons.add("PAPER_JOURNAL_OPERATOR_STOPPED")
+    if batches:
+        reasons.add("PRIOR_PAPER_BATCH_REQUIRES_RECONCILIATION")
+        trades = transport.get("/iserver/account/trades")
+        if not isinstance(trades,list) or len(trades)>10000:
+            raise ValueError("RECOVERY_TRADE_SNAPSHOT_INVALID_OR_OVER_BUDGET")
+    else:
+        trades = []
+    for batch in batches:
+        for order in batch["orders"]:
+            _check_ticket(order["ticket"])
+            ref, oid = order["client_id"], order["order_id"]
+            if order["ticket"]["cOID"] != ref or ref in all_refs or (oid is not None and oid in all_ids):
+                raise ValueError("RECOVERY_JOURNAL_ORDER_IDENTITY_CONFLICT")
+            all_refs.add(ref)
+            if oid is not None:
+                all_ids.add(oid)
+            state = order["state"]
+            if state not in TERMINAL | {"not_sent","sending","working","partial","unknown",
+                                        "confirmation_required","cancel_requested","cancel_unknown"}:
+                raise ValueError("RECOVERY_UNKNOWN_JOURNAL_STATE")
+            states[state] += 1
+            if state in {"sending","unknown","confirmation_required","cancel_unknown"}:
+                unknown_count += 1
+        # Reuse exact ticket, order identity, state and fill validation.
+        observations, fills = _broker_observations(batch, orders["orders"], trades, account)
+        observed_count += len(observations)
+        matching_active.update(str(row["order_id"]) for row in observations
+                               if row["state"] in {"working","partial","cancel_requested","cancel_unknown"})
+        stored = {item["execution_id"]:item for item in batch["fills"]}
+        if len(stored)!=len(batch["fills"]):
+            raise ValueError("RECOVERY_DUPLICATE_STORED_EXECUTION")
+        candidate = dict(stored)
+        seen = set()
+        for fill in fills:
+            key = fill["execution_id"]
+            if key in seen:
+                raise ValueError("RECOVERY_DUPLICATE_BROKER_EXECUTION")
+            seen.add(key)
+            previous = stored.get(key)
+            if previous is None:
+                new_fills += 1
+            elif previous!=fill and (previous["commission"] is not None or
+                    previous | {"commission":fill["commission"]} != fill):
+                broker_fill_conflicts += 1
+            candidate[key] = fill
+        quantities = Counter()
+        for fill in candidate.values():
+            quantities[fill["client_id"]] += fill["shares"]
+            missing_commission += fill["commission"] is None
+        for order in batch["orders"]:
+            if quantities[order["client_id"]] > order["ticket"]["quantity"]:
+                broker_fill_conflicts += 1
+    external = sum(row["id"] not in matching_active for row in active)
+    if external:
+        reasons.add("UNMATCHED_WORKING_BROKER_ORDERS")
+    if unknown_count:
+        reasons.add("AMBIGUOUS_ORDER_INTENT_REQUIRES_BROKER_RECONCILIATION")
+    if broker_fill_conflicts:
+        reasons.add("BROKER_FILL_EVIDENCE_CONFLICT")
+    if missing_commission:
+        reasons.add("EXECUTION_COMMISSION_INCOMPLETE")
+    return {**FLAGS,"status":"PAPER_RECOVERY_REVIEW_COMPLETED",
+            "journal_state":inventory["journal_state"],
+            "journal_operator_stopped":inventory["stopped"],
+            "local_batch_count":inventory["batch_count"],
+            "locally_matched_batch_count":inventory["matched_batch_count"],
+            "pending_batch_count":len(batches),"journal_order_states":dict(states),
+            "ambiguous_intent_count":unknown_count,"broker_working_order_count":len(active),
+            "unmatched_working_order_count":external,"observed_journal_order_count":observed_count,
+            "new_broker_fill_candidates":new_fills,"missing_commission_count":missing_commission,
+            "fill_conflict_count":broker_fill_conflicts,"trade_snapshot_requested":bool(batches),
+            "block_reasons":sorted(reasons),"journal_updated":False,
+            "account_cash_reconciled":False,"feedback_eligible_for_training":False,
+            "auto_resend_enabled":False,"auto_cancel_enabled":False,"trade_authorized":False}
+
+
 def reconcile(transport, journal: PaperJournal, batch_id: str, account: str) -> dict:
     batch = journal.get(batch_id)
     if batch is None or batch["account_hash"] != hashlib.sha256(account.encode()).hexdigest():

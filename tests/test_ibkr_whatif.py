@@ -194,3 +194,72 @@ class OrderSnapshotDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ProfileCheckError) as ctx:
             _profile_stage("MARGIN_SUMMARY_READ",fail)
         self.assertEqual(ctx.exception.reason,"ValueError")
+
+
+class ProfileRecoveryReviewTests(unittest.TestCase):
+    def test_missing_journal_never_created(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        from atlaspm.execution.paper_order_journal import PaperJournal
+        from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/"missing.sqlite3"
+            broker = Mock()
+            result = review_profile_recovery(broker,PaperJournal(path),"DUR123",
+                                             {"snapshot":True,"orders":[]})
+            self.assertEqual(result["journal_state"],"NOT_INITIALIZED")
+            self.assertFalse(path.exists())
+            self.assertEqual(result["pending_batch_count"],0)
+            self.assertFalse(result["account_cash_reconciled"])
+            self.assertFalse(result["feedback_eligible_for_training"])
+            broker.get.assert_not_called()
+
+    def test_ambiguous_intent_survives_restart_and_read_only_review(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        from atlaspm.execution.paper_order_journal import PaperJournal
+        from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/"journal.sqlite3"
+            journal = PaperJournal(path)
+            account = "DUR123"
+            account_hash = hashlib.sha256(account.encode()).hexdigest()
+            client = "ATL-"+"a"*40
+            ticket = {"conid":10,"orderType":"LMT","side":"BUY","tif":"DAY",
+                      "quantity":1,"price":100.0,"cOID":client,"outsideRTH":False}
+            stamp = datetime.now(timezone.utc).isoformat()
+            journal.claim({"id":"test-batch","account_id_sha256":account_hash,
+                           "execution_session":stamp[:10]},
+                          {"observed_at":stamp,"next_day_snapshot":{"positions":{},"total_cash":1000},
+                           "broker_estimates":[{"symbol":"AAA","ticket":ticket}]})
+            journal.transition(client,"sending","intent",previous={"not_sent"})
+            before = journal.get("test-batch")
+            broker = Mock()
+            broker.get.return_value = []
+            result = review_profile_recovery(broker,PaperJournal(path),account,
+                                             {"snapshot":True,"orders":[]})
+            self.assertEqual(result["ambiguous_intent_count"],1)
+            self.assertEqual(result["pending_batch_count"],1)
+            self.assertIn("AMBIGUOUS_ORDER_INTENT_REQUIRES_BROKER_RECONCILIATION",result["block_reasons"])
+            self.assertEqual(journal.get("test-batch"),before)
+            self.assertFalse(result["journal_updated"])
+            self.assertFalse(result["auto_resend_enabled"])
+            broker.get.assert_called_once_with("/iserver/account/trades")
+
+    def test_untracked_active_order_is_not_ignored_without_journal(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+        from atlaspm.execution.paper_order_journal import PaperJournal
+        from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+        row={"acct":"DUR123","orderId":1,"status":"Submitted","ticker":"AAA",
+             "conid":10,"cashCcy":"USD","secType":"STK","side":"BUY","orderType":"LMT",
+             "remainingQuantity":1,"filledQuantity":0,"price":100}
+        with tempfile.TemporaryDirectory() as folder:
+            result=review_profile_recovery(Mock(),PaperJournal(Path(folder)/"missing.sqlite3"),
+                                           "DUR123",{"snapshot":True,"orders":[row]})
+        self.assertEqual(result["unmatched_working_order_count"],1)
+        self.assertIn("UNMATCHED_WORKING_BROKER_ORDERS",result["block_reasons"])
+        self.assertFalse(result["trade_authorized"])

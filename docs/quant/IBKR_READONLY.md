@@ -286,3 +286,21 @@ valid bounded order array is accepted. Incomplete responses are blocked,
 not treated as zero orders. Stage-specific failures report safe codes and
 schema flags/counts, never raw account or order data. No account switching.
 Reference: https://www.interactivebrokers.com/docs/web-api/v1/endpoints/order-monitoring/live-orders
+
+
+### Read-only recovery review (V7 foundation)
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.execution.ibkr_whatif --paper-profile-check --recovery-review
+~~~
+
+Uses the already authenticated account and complete order snapshot. The
+existing workbench SQLite journal is opened read-only, with bounded unresolved
+batch/order/fill scope; an absent journal is reported explicitly, not created.
+Unresolved batches trigger a read-only trades request and reuse exact broker
+ticket/fill validation. Unknown submission intent, conflicting fill evidence,
+missing commission and unmatched working orders are exposed as blockers.
+The review neither changes order state nor submits/cancels/resends orders.
+It does not certify cash reconciliation for STKNOPT or promote observed
+fills to model-training data. Existing manual reconciliation retains its
+cash-account contract; actual order and fill acceptance still need testing.

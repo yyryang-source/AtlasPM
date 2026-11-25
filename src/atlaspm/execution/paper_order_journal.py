@@ -203,6 +203,64 @@ class PaperJournal:
         return dict(row) | {"baseline": json.loads(row["baseline"]), "orders": orders, "fills": fills,
                             "reconciliation": json.loads(row["reconciliation"]) if row["reconciliation"] else None}
 
+    def recovery_inventory(self, account_hash: str) -> dict:
+        """Read one consistent local snapshot without creating or migrating a DB.
+
+        Bound work to unresolved batches, not the entire trading history.
+        A missing journal means no local evidence, not no broker orders.
+        """
+        import re
+        if not isinstance(account_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", account_hash):
+            raise ValueError("RECOVERY_ACCOUNT_HASH_REQUIRED")
+        empty = {"journal_state":"NOT_INITIALIZED", "stopped":None,
+                 "batch_count":0, "matched_batch_count":0, "pending_batches":[]}
+        if not self.path.exists():
+            return empty
+        if self.path.is_symlink():
+            raise ValueError("RECOVERY_JOURNAL_SYMLINK")
+        with closing(sqlite3.connect(self.path.resolve().as_uri()+"?mode=ro", uri=True, timeout=5)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN")
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            required = {"paper_batches","paper_orders","paper_executions","paper_controls",
+                        "paper_events","paper_control_events"}
+            if not tables & required:
+                return empty
+            if not required <= tables:
+                raise ValueError("RECOVERY_JOURNAL_SCHEMA_INCOMPLETE")
+            control = db.execute("SELECT stopped FROM paper_controls WHERE account_hash=?",
+                                 (account_hash,)).fetchone()
+            # Invalid JSON fails closed. A terminal state without matched
+            # accounting still needs recovery. Do not load completed history.
+            predicate = """b.account_hash=? AND (b.reconciliation IS NULL
+                OR COALESCE(json_extract(b.reconciliation,'$.status'),'')!='matched'
+                OR EXISTS (SELECT 1 FROM paper_orders o WHERE o.batch_id=b.id
+                    AND o.state NOT IN ('filled','cancelled','rejected','expired','not_sent'))
+                OR NOT EXISTS (SELECT 1 FROM paper_orders o WHERE o.batch_id=b.id))"""
+            total = db.execute("SELECT COUNT(*) FROM paper_batches WHERE account_hash=?",
+                               (account_hash,)).fetchone()[0]
+            ids = [row[0] for row in db.execute(
+                "SELECT b.id FROM paper_batches b WHERE "+predicate+" ORDER BY b.created_at,b.id LIMIT 101",
+                (account_hash,))]
+            if len(ids)>100:
+                raise ValueError("RECOVERY_PENDING_BATCH_BUDGET")
+            batches = []
+            order_budget, fill_budget = 2000, 10000
+            for bid in ids:
+                n = db.execute("SELECT COUNT(*) FROM paper_orders WHERE batch_id=?",(bid,)).fetchone()[0]
+                m = db.execute("""SELECT COUNT(*) FROM paper_executions e
+                    JOIN paper_orders o ON o.client_id=e.client_id WHERE o.batch_id=?""",(bid,)).fetchone()[0]
+                order_budget -= n
+                fill_budget -= m
+                if n==0 or order_budget<0 or fill_budget<0:
+                    raise ValueError("RECOVERY_JOURNAL_ROW_BUDGET_OR_EMPTY_BATCH")
+                batches.append(self._get(db,bid))
+            return {"journal_state":"READ_ONLY_SNAPSHOT",
+                    "stopped":bool(control[0]) if control is not None else False,
+                    "batch_count":total, "matched_batch_count":total-len(ids),
+                    "pending_batches":batches}
+
     def get(self, batch_id: str) -> dict | None:
         with self.connect() as db:
             db.execute("BEGIN")

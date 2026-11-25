@@ -384,7 +384,8 @@ def _profile_ticket(account_id, identity, limit_price, shares):
             "quantity":shares,"price":float(price),"cOID":"ATL-WHATIF-"+nonce,"outsideRTH":False}
 
 
-def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_preview=False):
+def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_preview=False,
+                          recovery_review=False):
     """Saved-profile risk diagnostics; optional isolated exact-ticket What-If.
 
     No market subscriptions in check-only mode. An explicit ticket, current
@@ -401,6 +402,8 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
     from atlaspm.framework.orchestrator import market_phase
     import sys
 
+    if type(recovery_review) is not bool or (recovery_review and symbol is not None):
+        raise ValueError("RECOVERY_REVIEW_CHECK_ONLY")
     if type(allow_preview) is not bool or (symbol is None) != (limit_price is None):
         raise ValueError("PREVIEW_REQUIRES_EXPLICIT_SYMBOL_AND_LIMIT")
     if symbol is None and (allow_preview or shares != 1):
@@ -446,6 +449,24 @@ def profile_preview_check(*, symbol=None, limit_price=None, shares=1, allow_prev
                   "financing_verified":False,"collateral_verified":False,
                   "order_specific_risk_approved":False,"submitted":False,
                   "trade_authorized":False,"ready_for_institutional_risk_gate":False}
+        if recovery_review:
+            from atlaspm.execution.paper_order_journal import PaperJournal
+            from atlaspm.execution.ibkr_paper_orders import review_profile_recovery
+            import sqlite3
+            try:
+                db = require_private_output(Path("local_data/rebalance/workbench.sqlite3"))
+                # Resolve only after rejecting a symlinked source path.
+                if Path("local_data").is_symlink() or Path("local_data/rebalance").is_symlink() or Path("local_data/rebalance/workbench.sqlite3").is_symlink():
+                    raise ValueError("RECOVERY_PRIVATE_PATH_REQUIRED")
+                recovery = _profile_stage("ORDER_RECOVERY", review_profile_recovery,
+                                          transport, PaperJournal(db), account_id, orders)
+                report["recovery_review"] = recovery
+                reasons.extend(r for r in recovery["block_reasons"] if r not in reasons)
+            except (ProfileCheckError, sqlite3.Error, ValueError, OSError):
+                report["recovery_review"] = {**FLAGS,"status":"PAPER_RECOVERY_REVIEW_BLOCKED",
+                    "reason":"JOURNAL_OR_BROKER_EVIDENCE_UNVERIFIED","journal_updated":False,
+                    "auto_resend_enabled":False,"trade_authorized":False}
+                reasons.append("ORDER_RECOVERY_EVIDENCE_UNVERIFIED")
         if symbol is None or reasons:
             return report
         if market_phase(datetime.now(timezone.utc).isoformat()) != "market":
@@ -535,10 +556,13 @@ def main() -> int:
         parser.add_argument("--limit-price")
         parser.add_argument("--shares",type=int,default=1)
         parser.add_argument("--allow-paper-preview",action="store_true")
+        parser.add_argument("--recovery-review",action="store_true",
+                            help="Read-only journal and broker execution recovery diagnostics")
         args = parser.parse_args()
         try:
             result = profile_preview_check(symbol=args.symbol, limit_price=args.limit_price,
-                                           shares=args.shares, allow_preview=args.allow_paper_preview)
+                                           shares=args.shares, allow_preview=args.allow_paper_preview,
+                                           recovery_review=args.recovery_review)
             print(json.dumps(result,indent=2,allow_nan=False))
             return 0
         except ProfileCheckError as exc:
