@@ -8,7 +8,7 @@ from atlaspm.data.api_gateway import GatewayError
 from atlaspm.data.fed_disclosures import recent_events
 from atlaspm.data.sec_latest_filings import recent_filings
 from atlaspm.research import event_queue
-from atlaspm.research.disclosure_jobs import register, work_once
+from atlaspm.research.disclosure_jobs import register
 
 
 def poll_once(source, *, path=event_queue.PATH, fetcher=None, documents=False):
@@ -34,10 +34,7 @@ def main():
     parser.add_argument("--interval", type=int, default=1)
     parser.add_argument("--fed-interval", type=int, default=30)
     parser.add_argument("--documents", action="store_true")
-    parser.add_argument("--local-model", help="Explicit installed local Ollama model")
     args = parser.parse_args()
-    if args.local_model and not args.documents:
-        parser.error("--local-model requires --documents")
     if not 1 <= args.cycles <= 86400 or not 1 <= args.interval <= 300 or not 15 <= args.fed_interval <= 3600:
         parser.error("Invalid polling limits")
     next_fed = 0.
@@ -59,8 +56,6 @@ def main():
             if report["status"] == "PAUSED":
                 return 0
         print(json.dumps(event_queue.drain(as_of=datetime.now(UTC).isoformat())), flush=True)
-        if args.documents:
-            print(json.dumps(work_once(model=args.local_model)), flush=True)
         if index + 1 < args.cycles:
             time.sleep(max(0., args.interval - (time.monotonic() - started)))
     return 0
