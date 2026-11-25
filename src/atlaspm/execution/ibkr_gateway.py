@@ -541,6 +541,7 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
                        captured_at_utc=report["captured_at_utc"],
                        position_count=report["position_count"], paper_identity_verified=True,
                        margin_monitor_state=report.get("margin_monitor", {}).get("monitor_state"),
+                       margin_block_reasons=report.get("margin_monitor", {}).get("data_integrity_block_reasons", []),
                        maximum_snapshot_age_seconds=interval + 60)
                 if cycles > 1:
                     progress(f"Cycle {count}/{cycles}: snapshot and heartbeat OK")
@@ -562,9 +563,17 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
             detail = f" at {endpoint}" if endpoint else ""
             raise ValueError("Paper sync stopped: " + reason + detail
                              + "; see local status and verify login/configuration") from None
-        status("SYNC_COMPLETED", captured_at_utc=report["captured_at_utc"])
+        margin = report.get("margin_monitor", {})
+        status("SYNC_COMPLETED", captured_at_utc=report["captured_at_utc"],
+               margin_monitor_state=margin.get("monitor_state"),
+               margin_block_reasons=margin.get("data_integrity_block_reasons", []))
         return {**redacted_console_summary(report, PAPER_SNAPSHOT),
                 "status": "PAPER_SYNC_COMPLETED", "completed_cycles": count,
                 "paper_identity_verified": True, "heartbeat_verified": True,
-                "margin_monitor_state": report.get("margin_monitor", {}).get("monitor_state"),
+                "margin_monitor_state": margin.get("monitor_state"),
+                **({"margin_block_reasons": margin["data_integrity_block_reasons"],
+                    "margin_risk_alerts": margin["risk_alerts"],
+                    "foreign_ledger_diagnostics": margin["foreign_ledger_diagnostics"],
+                    "foreign_ledger_risk_clear": margin["foreign_ledger_risk_clear"]}
+                   if include_margin else {}),
                 "broker_order_submission_enabled": False}

@@ -148,15 +148,70 @@ class IBKRMarginMonitorTests(unittest.TestCase):
         self.assertFalse(result["IBKR_financing_debt_separately_verified"])
         self.assertFalse(result["ready_for_institutional_risk_gate"])
 
-    def test_multicurrency_ledger_rejected(self):
-        fixture = copy.deepcopy(self.fixture)
-        transport = FixtureGatewayTransport(fixture)
-        capture = collect_ibkr_readonly_account(transport, account_id=ACCOUNT, fixture_mode=True)
-        capture["raw"]["USD_ledger"]["EUR"] = {"settledcash": 5}
-        with self.assertRaisesRegex(ValueError, "Multicurrency"):
-            normalize_ibkr_margin_summary(
-                fixture["responses"][ENDPOINT], capture, fixture_mode=True
-            )
+    def foreign_ledger(self, **overrides):
+        fields = (
+            "cashbalance cashbalancefxsegment settledcash commoditymarketvalue "
+            "corporatebondsmarketvalue cryptocurrencyvalue dividends funds "
+            "futuremarketvalue futureoptionmarketvalue futuresonlypnl issueroptionsmarketvalue "
+            "moneyfunds realizedpnl stockmarketvalue stockoptionmarketvalue tbillsmarketvalue "
+            "tbondsmarketvalue unrealizedpnl warrantsmarketvalue"
+        ).split()
+        row = dict.fromkeys(fields, 0.0)
+        row.update(currency="CNH", acctcode=ACCOUNT, secondkey="CNH", severity=0,
+                   exchangerate=7.0, interest=0.02, netliquidationvalue=0.0)
+        row.update(overrides)
+        self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]["CNH"] = row
+        return row
+
+    def test_zero_foreign_ledger_does_not_duplicate_usd_nlv(self):
+        self.foreign_ledger()
+        report, _ = self.run_monitor()
+        self.assertEqual(report["monitor_state"], "NORMAL")
+        self.assertEqual(report["margin_summary_usd_claim"]["total_nlv"], 123950)
+        self.assertTrue(report["foreign_ledger_risk_clear"])
+        self.assertFalse(report["ready_for_institutional_risk_gate"])
+
+    def test_nonzero_foreign_nlv_not_silently_excluded_even_if_fx_matches(self):
+        self.foreign_ledger(netliquidationvalue=123950 * 7)
+        report, _ = self.run_monitor()
+        self.assertEqual(report["monitor_state"], "BLOCKED_DATA")
+        self.assertIn("FOREIGN_NLV_UNEXPLAINED", report["data_integrity_block_reasons"])
+        self.assertTrue(report["foreign_ledger_diagnostics"][0]["possible_base_to_foreign_nlv_translation"])
+        self.assertEqual(report["margin_summary_usd_claim"]["total_nlv"], 123950)
+        self.assertFalse(report["foreign_ledger_risk_clear"])
+        self.assertFalse(report["ready_for_institutional_risk_gate"])
+
+    def test_foreign_exposure_blocks_even_if_net_zero(self):
+        self.foreign_ledger(settledcash=-5, stockmarketvalue=5)
+        report, _ = self.run_monitor()
+        self.assertEqual(report["monitor_state"], "BLOCKED_DATA")
+        self.assertIn("NONZERO_FOREIGN_LEDGER_EXPOSURE", report["data_integrity_block_reasons"])
+
+    def test_foreign_missing_unknown_and_invalid_fields_block(self):
+        row = self.foreign_ledger()
+        row.pop("cashbalance")
+        report, _ = self.run_monitor()
+        self.assertIn("FOREIGN_LEDGER_EXPOSURE_FIELDS_INCOMPLETE_OR_UNKNOWN", report["data_integrity_block_reasons"])
+        self.foreign_ledger(unknown_amount=0)
+        report, _ = self.run_monitor()
+        self.assertEqual(report["monitor_state"], "BLOCKED_DATA")
+        for invalid in (True, float("nan"), "0", None):
+            self.foreign_ledger(settledcash=invalid)
+            report, _ = self.run_monitor()
+            self.assertIn("FOREIGN_LEDGER_NUMERIC_FIELDS_INVALID", report["data_integrity_block_reasons"])
+        self.foreign_ledger(acctcode="OTHER")
+        report, _ = self.run_monitor()
+        self.assertIn("FOREIGN_LEDGER_IDENTITY_OR_SCHEMA_UNVERIFIED", report["data_integrity_block_reasons"])
+
+    def test_foreign_ledger_base_disagreement_blocks(self):
+        self.foreign_ledger()
+        ledger = self.fixture["responses"][f"/portfolio/{ACCOUNT}/ledger"]
+        ledger["BASE"] = dict(ledger["USD"], currency="BASE", netliquidationvalue=123960)
+        report, _ = self.run_monitor()
+        self.assertIn("BASE_VS_USD_LEDGER_MISMATCH", report["data_integrity_block_reasons"])
+        ledger["BASE"]["netliquidationvalue"] = 123950
+        report, _ = self.run_monitor()
+        self.assertEqual(report["monitor_state"], "NORMAL")
 
     def test_console_redaction(self):
         report, _ = self.run_monitor()

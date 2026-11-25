@@ -10,6 +10,7 @@ from atlaspm.engine.contracts import finite_number
 
 from datetime import datetime, timezone
 from math import isfinite
+import re
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -34,9 +35,85 @@ OPTIONAL_FIELDS = {
 }
 USD_TOLERANCE = 1.0
 
+# Known exposure fields from the Gateway ledger and observed Paper schema.
+# Require complete zero exposure evidence, not a sum that can hide offsets.
+_FOREIGN_EXPOSURE_FIELDS = frozenset({
+    "cashbalance", "cashbalancefxsegment", "settledcash", "commoditymarketvalue",
+    "corporatebondsmarketvalue", "cryptocurrencyvalue", "dividends", "funds",
+    "futuremarketvalue", "futureoptionmarketvalue", "futuresonlypnl",
+    "issueroptionsmarketvalue", "moneyfunds", "realizedpnl", "stockmarketvalue",
+    "stockoptionmarketvalue", "tbillsmarketvalue", "tbondsmarketvalue",
+    "unrealizedpnl", "warrantsmarketvalue",
+})
+_FOREIGN_METADATA_FIELDS = frozenset({
+    "acctcode", "currency", "key", "secondkey", "sessionid", "timestamp",
+    "severity", "endofbundle", "exchangerate", "interest", "netliquidationvalue",
+})
+
 
 def _number(value: Any, name: str) -> float:
     return finite_number(value, name, invalid_message=f"{name} must be a finite JSON number")
+
+def _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv):
+    """USD-only diagnostics; nonzero foreign NLV is never silently discarded.
+
+    A matching FX translation is only a possible explanation, not proof of
+    zero foreign exposure. Keep this distinct from verified financing.
+    """
+    diagnostics = []
+    blocks = set()
+    for currency in sorted(set(ledger) - {"USD", "BASE"}):
+        row = ledger[currency]
+        if (not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)
+                or not isinstance(row, dict)
+                or row.get("currency") != currency or row.get("acctcode") != account_id
+                or row.get("secondkey", currency) != currency
+                or type(row.get("severity")) is not int or row["severity"] != 0):
+            blocks.add("FOREIGN_LEDGER_IDENTITY_OR_SCHEMA_UNVERIFIED")
+            continue
+        if (not _FOREIGN_EXPOSURE_FIELDS.issubset(row)
+                or set(row) - _FOREIGN_EXPOSURE_FIELDS - _FOREIGN_METADATA_FIELDS):
+            blocks.add("FOREIGN_LEDGER_EXPOSURE_FIELDS_INCOMPLETE_OR_UNKNOWN")
+            continue
+        try:
+            exposure = [_number(row[key], "foreign exposure") for key in _FOREIGN_EXPOSURE_FIELDS]
+            nlv = _number(row.get("netliquidationvalue"), "foreign NLV")
+            rate = _number(row.get("exchangerate"), "foreign exchange rate")
+            # Documented rate is base to foreign currency. Do not guess inverse.
+            if rate <= 0:
+                raise ValueError("Nonpositive FX rate")
+            if "interest" in row:
+                _number(row["interest"], "foreign interest field")
+        except (ValueError, OverflowError):
+            blocks.add("FOREIGN_LEDGER_NUMERIC_FIELDS_INVALID")
+            continue
+        if any(value != 0 for value in exposure):
+            blocks.add("NONZERO_FOREIGN_LEDGER_EXPOSURE")
+            state = "NONZERO_EXPOSURE"
+        elif nlv != 0:
+            blocks.add("FOREIGN_NLV_UNEXPLAINED")
+            state = "ZERO_EXPOSURE_FIELDS_NONZERO_NLV"
+        else:
+            state = "ZERO_REPORTED_EXPOSURE_AND_NLV"
+        diagnostics.append({
+            "currency": currency, "state": state,
+            "possible_base_to_foreign_nlv_translation": (
+                nlv != 0 and abs(nlv / rate - gateway_nlv) <= USD_TOLERANCE
+            ),
+        })
+    if "BASE" in ledger and set(ledger) - {"USD", "BASE"}:
+        base = ledger["BASE"]
+        try:
+            if not isinstance(base, dict) or base.get("currency") not in {"BASE", "USD"} or base.get("acctcode") != account_id:
+                raise ValueError("BASE identity")
+            for field in ("netliquidationvalue", "settledcash", "cashbalance"):
+                if abs(_number(base.get(field), "BASE field") -
+                       _number(ledger["USD"].get(field), "USD field")) > USD_TOLERANCE:
+                    blocks.add("BASE_VS_USD_LEDGER_MISMATCH")
+        except (ValueError, OverflowError):
+            blocks.add("BASE_LEDGER_UNVERIFIED")
+    return diagnostics, sorted(blocks)
+
 
 def _metric(
     summary: Mapping[str, Any], key: str, *,
@@ -105,12 +182,13 @@ def normalize_ibkr_margin_summary(
     if account.get("accountId", account.get("id")) != account_id:
         raise ValueError("Captured account selector mismatch")
     ledger = raw.get("USD_ledger")
-    if not isinstance(ledger, dict) or set(ledger.keys()) - {"USD", "BASE"}:
-        raise ValueError("Multicurrency ledgers are not supported")
+    if not isinstance(ledger, dict) or not all(isinstance(key, str) for key in ledger):
+        raise ValueError("Invalid IBKR ledger object")
     usd = ledger.get("USD")
     if not isinstance(usd, dict):
         raise ValueError("USD ledger missing")
     gateway_nlv = _number(usd.get("netliquidationvalue"), "gateway USD NLV")
+    foreign_diagnostics, foreign_blocks = _foreign_ledger_diagnostics(ledger, account_id, gateway_nlv)
 
     metrics: dict[str, float] = {}
     stamps: list[datetime] = []
@@ -137,7 +215,7 @@ def normalize_ibkr_margin_summary(
     earliest = min(stamps)
     latest = max(stamps)
     span = (latest - earliest).total_seconds()
-    integrity: list[str] = []
+    integrity: list[str] = list(foreign_blocks)
     alerts: list[str] = []
     if age > max_field_age_seconds:
         integrity.append("MARGIN_DATA_STALE")
@@ -202,6 +280,9 @@ def normalize_ibkr_margin_summary(
         "data_integrity_block_reasons": sorted(set(integrity)),
         "risk_alerts": sorted(set(alerts)),
         "margin_summary_usd_claim": metrics,
+        "foreign_ledger_diagnostics": foreign_diagnostics,
+        "foreign_ledger_risk_clear": not foreign_blocks,
+        "account_base_currency": "USD",
         "optional_margin_summary_usd_claim": extra,
         "formula_differences_usd": {
             "available_funds": available_gap,
@@ -261,6 +342,8 @@ def redacted_margin_console(report: Mapping[str, Any], output: str) -> dict[str,
         "monitor_state": report["monitor_state"],
         "data_integrity_block_reasons": report["data_integrity_block_reasons"],
         "risk_alerts": report["risk_alerts"],
+        "foreign_ledger_diagnostics": report["foreign_ledger_diagnostics"],
+        "foreign_ledger_risk_clear": report["foreign_ledger_risk_clear"],
         "broker_observed_summary_fields": report["broker_observed_summary_fields"],
         "IBKR_financing_debt_separately_verified": False,
         "ready_for_institutional_risk_gate": False,

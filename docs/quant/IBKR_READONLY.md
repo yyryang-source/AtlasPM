@@ -109,3 +109,19 @@ This cannot account for other clients calling the same SSO endpoint; use one
 worker and respect IBKR's one-request-per-minute limit. HTTP failures record a
 sanitized endpoint label and stop without reauthentication or retry. Daily
 manual Gateway authentication remains required.
+
+
+### USD-only margin monitoring with auxiliary currency rows
+
+The margin monitor now reports rather than rejects a ledger merely because an
+additional currency row exists. Only explicit USD amounts enter its formulas;
+BASE and foreign NLV are never added. A complete, identity-matched foreign
+row with all known exposure fields and NLV zero is compatible. Nonzero foreign
+cash, positions, P&L, unknown/missing fields, malformed values, and unexplained
+foreign NLV produce BLOCKED_DATA. If a foreign NLV matches USD NLV translated
+using the documented base-to-foreign rate, this is a diagnostic hint only, not
+proof of a duplicate value. BASE totals, if supplied with foreign rows, must
+also reconcile with USD. No FX conversion or multi-currency order support.
+The sync console exposes redacted margin block reasons and currency diagnostics.
+Independent financing reconciliation and the institutional gate remain required.
+Provider reference: https://www.interactivebrokers.com/docs/web-api/v1/endpoints/portfolio/portfolio-ledger
