@@ -12,10 +12,19 @@ from atlaspm.execution.ibkr_mapping import diagnose_ibkr_contract_mapping, mappi
 from atlaspm.risk.ibkr_financing import reconcile_ibkr_financing_margin, financing_redacted_summary
 from atlaspm.risk.ibkr_margin_monitor import collect_ibkr_margin_monitor, redacted_margin_console
 
-COMMANDS = frozenset(["ibkr-readonly","ibkr-map-check","ibkr-financing-check","ibkr-margin-monitor"])
+COMMANDS = frozenset(["ibkr-readonly","ibkr-map-check","ibkr-financing-check","ibkr-margin-monitor","ibkr-paper-sync"])
 
 
 def run(args) -> dict:
+    if args.command == "ibkr-paper-sync":
+        from atlaspm.execution.ibkr_gateway import configure_paper_sync, sync_paper_account
+        if args.configure:
+            if args.allow_local_gateway or not args.account or not args.ca_file or args.margin:
+                raise ValueError("Configure requires --account and --ca-file only; no network")
+            return configure_paper_sync(account=args.account, ca_file=args.ca_file, url=args.url)
+        if not args.allow_local_gateway or args.account or args.ca_file or args.url != "https://localhost:5000/v1/api":
+            raise ValueError("Sync requires --allow-local-gateway and uses the saved profile")
+        return sync_paper_account(cycles=args.cycles, interval=args.interval, include_margin=args.margin)
     if args.command == "ibkr-margin-monitor":
         destination = require_private_output(args.output)
         if (args.fixture is None) == (not args.allow_local_gateway):
@@ -168,3 +177,15 @@ def register_ibkr_margin_monitor(sub) -> None:
         "--output", type=Path, default=Path("local_data/ibkr_margin_monitor.json")
     )
 
+
+
+def register_ibkr_paper_sync(sub) -> None:
+    sync = sub.add_parser("ibkr-paper-sync", help="Configure or run bounded Paper-only account synchronization")
+    sync.add_argument("--configure", action="store_true")
+    sync.add_argument("--account")
+    sync.add_argument("--ca-file", type=Path)
+    sync.add_argument("--url", default="https://localhost:5000/v1/api")
+    sync.add_argument("--allow-local-gateway", action="store_true")
+    sync.add_argument("--cycles", type=int, default=1)
+    sync.add_argument("--interval", type=int, default=65)
+    sync.add_argument("--margin", action="store_true", help="Also validate current broker margin summary")

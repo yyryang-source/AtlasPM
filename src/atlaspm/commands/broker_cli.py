@@ -15,6 +15,7 @@ COMMANDS = frozenset({
     "oms-replay",
     "broker-reconcile",
     "ibkr-readonly",
+    "ibkr-paper-sync",
     "ibkr-map-check",
     "ibkr-financing-check",
     "ibkr-margin-monitor",
@@ -47,6 +48,7 @@ def register_parsers(sub) -> None:
     broker_paper_cli.register_oms_replay(sub)
     broker_paper_cli.register_broker_reconcile(sub)
     broker_accounts_cli.register_ibkr_readonly(sub)
+    broker_accounts_cli.register_ibkr_paper_sync(sub)
     broker_accounts_cli.register_ibkr_map_check(sub)
     broker_accounts_cli.register_ibkr_financing_check(sub)
     broker_accounts_cli.register_ibkr_margin_monitor(sub)

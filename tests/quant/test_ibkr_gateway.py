@@ -160,5 +160,85 @@ class IBKRGatewayTests(unittest.TestCase):
                 )
 
 
+class PaperSyncTests(unittest.TestCase):
+    def setUp(self):
+        import os
+        from atlaspm.execution import ibkr_gateway as gateway
+        self.gateway = gateway
+        temp = TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        cwd = Path.cwd()
+        os.chdir(temp.name)
+        self.addCleanup(os.chdir, cwd)
+        self.account = "DUR1234567"
+        fixture = json.loads(SAMPLE.read_text(encoding="utf-8"))
+        responses = fixture["responses"]
+        responses["/iserver/auth/status"].update(established=True, competing=False)
+        responses["/sso/validate"] = {"RESULT": True, "LOGIN_TYPE": 2}
+        responses["/portfolio/accounts"] = [{"id": self.account, "accountId": self.account,
+            "currency": "USD", "type": "DEMO", "brokerageAccess": True}]
+        responses[f"/portfolio/{self.account}/ledger"] = responses.pop(f"/portfolio/{ACCOUNT}/ledger")
+        responses[f"/portfolio2/{self.account}/positions"] = []
+        self.transport = FixtureGatewayTransport(fixture)
+
+    def test_dur_identity_independent_sso_and_account_checks(self):
+        report = collect_ibkr_readonly_account(self.transport, account_id=self.account,
+                                               fixture_mode=True, paper_only=True)
+        self.assertFalse(report["paper_identity_verified"])
+        self.assertFalse(report["broker_order_submission_enabled"])
+        self.assertEqual(self.transport.called[:3],
+                         ["/iserver/auth/status", "/sso/validate", "/portfolio/accounts"])
+        for invalid in ({"RESULT":True,"LOGIN_TYPE":1}, {"RESULT":True,"LOGIN_TYPE":True},
+                        {"RESULT":True,"LOGIN_TYPE":2,"loginType":1}, {"RESULT":True}):
+            self.transport.called.clear()
+            self.transport.responses["/sso/validate"] = invalid
+            with self.assertRaisesRegex(ValueError, "PAPER_LOGIN_TYPE"):
+                collect_ibkr_readonly_account(self.transport, account_id=self.account,
+                                              fixture_mode=True, paper_only=True)
+            self.assertEqual(self.transport.called, ["/iserver/auth/status", "/sso/validate"])
+        self.transport.responses["/sso/validate"] = {"RESULT":True,"loginType":2}
+        self.transport.responses["/portfolio/accounts"][0]["type"] = "INDIVIDUAL"
+        with self.assertRaisesRegex(ValueError, "PAPER_DEMO_ACCOUNT"):
+            collect_ibkr_readonly_account(self.transport, account_id=self.account,
+                                          fixture_mode=True, paper_only=True)
+
+    def test_configure_and_sync_stop_without_overwriting_last_snapshot(self):
+        g = self.gateway
+        cert = Path("local.pem")
+        cert.write_text("fixture; no actual TLS transport", encoding="utf-8")
+        g.configure_paper_sync(account=self.account, ca_file=cert)
+        self.assertNotIn("password", g.PAPER_PROFILE.read_text(encoding="utf-8"))
+        self.assertEqual(self.transport.called, [])
+        from unittest.mock import Mock
+        self.transport.keepalive = Mock(return_value=True)
+        with patch.object(g, "LocalGatewayTransport", return_value=self.transport), patch.object(g.time, "sleep"):
+            result = g.sync_paper_account(cycles=2)
+            self.assertEqual(result["completed_cycles"], 2)
+            self.assertEqual(self.transport.keepalive.call_count, 2)
+            self.assertFalse(result["broker_order_submission_enabled"])
+            self.assertNotIn(self.account, json.dumps(result))
+            saved = g.PAPER_SNAPSHOT.read_bytes()
+            self.transport.responses["/sso/validate"]["LOGIN_TYPE"] = 1
+            with self.assertRaisesRegex(ValueError, "PAPER_LOGIN_TYPE"):
+                g.sync_paper_account()
+            self.assertEqual(saved, g.PAPER_SNAPSHOT.read_bytes())
+            status = json.loads(g.PAPER_SYNC_STATUS.read_text(encoding="utf-8"))
+            self.assertEqual(status["state"], "BLOCKED_OPERATOR_REVIEW_REQUIRED")
+            self.assertFalse(status["snapshot_current"])
+            self.assertFalse(Path("local_data/ibkr_paper_sync.lock").exists())
+
+    def test_heartbeat_fixed_route_and_competing_session_rejected(self):
+        client = LocalGatewayTransport()
+        with patch.object(client, "_send_json", return_value={"iserver":{"authStatus":{
+                "authenticated": True, "connected": True, "competing": False}}}) as send:
+            self.assertTrue(client.keepalive())
+            request = send.call_args.args[0]
+            self.assertEqual(request.get_method(), "POST")
+            self.assertEqual(request.full_url, client.base_url + "/tickle")
+            send.return_value["iserver"]["authStatus"]["competing"] = True
+            with self.assertRaisesRegex(ValueError, "PAPER_HEARTBEAT"):
+                client.keepalive()
+
+
 if __name__ == "__main__":
     unittest.main()

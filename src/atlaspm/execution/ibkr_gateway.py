@@ -11,7 +11,9 @@ from atlaspm.engine.contracts import finite_number
 from atlaspm.data.provider_policy import local_rights
 
 import json
+import os
 import re
+from contextlib import contextmanager
 import ssl
 import time
 from datetime import datetime, timezone
@@ -99,6 +101,19 @@ class LocalGatewayTransport:
 
     def get(self, endpoint: str) -> Any:
         return self._request(endpoint)
+
+    def keepalive(self):
+        """Only the documented session ping; never log or persist its token."""
+        req = Request(self.base_url + "/tickle", method="POST",
+                      headers={"Accept": "application/json", "Content-Type": "application/json"},
+                      data=b"")
+        response = self._send_json(req)
+        server = response.get("iserver") if isinstance(response, dict) else None
+        auth = server.get("authStatus") if isinstance(server, dict) else None
+        if (not isinstance(auth, dict) or auth.get("authenticated") is not True
+                or auth.get("connected") is not True or auth.get("competing") is not False):
+            raise ValueError("PAPER_HEARTBEAT_NOT_READY")
+        return True
 
     def market_snapshot(self, conids, fields):
         """Fixed L1 market-data route; never a regulatory fee-based snapshot."""
@@ -217,8 +232,21 @@ def _positive_int(value: Any, label: str) -> int:
 def _num(value: Any, label: str) -> float:
     return finite_number(value, label, invalid_message=f"{label} must be a finite number")
 
+def _require_paper_session(transport, auth):
+    """SSO validation is separate from account-number and account-type checks."""
+    if auth.get("established") is not True or auth.get("competing") is not False:
+        raise ValueError("PAPER_SESSION_NOT_READY")
+    sso = transport.get("/sso/validate")
+    if not isinstance(sso, dict) or sso.get("RESULT") is not True:
+        raise ValueError("PAPER_SSO_NOT_VALIDATED")
+    modes = [sso[key] for key in ("LOGIN_TYPE", "loginType") if key in sso]
+    if not modes or any(type(mode) is not int or mode != 2 for mode in modes):
+        raise ValueError("PAPER_LOGIN_TYPE_NOT_VERIFIED")
+
+
 def collect_ibkr_readonly_account(
     transport: Any, *, account_id: str, fixture_mode: bool = False,
+    paper_only: bool = False,
 ) -> dict[str, Any]:
     """GET auth, account list, USD ledger, and portfolio2 positions.
 
@@ -239,6 +267,10 @@ def collect_ibkr_readonly_account(
     if auth.get("authenticated") is not True or auth.get("connected") is not True:
         raise ValueError("IBKR local Gateway session is not authenticated and connected")
 
+    if paper_only:
+        if not re.fullmatch(r"DU(?:R)?[0-9]{1,20}", account_id):
+            raise ValueError("PAPER_ACCOUNT_SELECTOR_REQUIRED")
+        _require_paper_session(transport, auth)
     accounts = transport.get("/portfolio/accounts")
     if not isinstance(accounts, list) or not all(isinstance(a, dict) for a in accounts):
         raise ValueError("IBKR portfolio/accounts must return an account array")
@@ -248,6 +280,10 @@ def collect_ibkr_readonly_account(
     ]
     if len(match) != 1:
         raise ValueError("Specified IBKR account not found uniquely in accessible accounts")
+    if paper_only and (match[0].get("type") != "DEMO"
+                       or match[0].get("brokerageAccess") is not True
+                       or any(match[0][key] != account_id for key in ("id", "accountId") if key in match[0])):
+        raise ValueError("PAPER_DEMO_ACCOUNT_NOT_VERIFIED")
     if match[0].get("currency") not in {"USD"}:
         raise ValueError("AtlasPM raw collection currently requires a USD base-currency account")
 
@@ -290,6 +326,8 @@ def collect_ibkr_readonly_account(
         "session_reported_authenticated": True,
         "gateway_tls_certificate_validated": not fixture_mode,
         "live_execution_enabled": False,
+        **({"paper_identity_verified": not fixture_mode,
+            "broker_order_submission_enabled": False} if paper_only else {}),
         "broker_margin_or_collateral_verified": False,
         "ready_for_institutional_risk_gate": False,
         "USD_ledger_summary": {
@@ -345,3 +383,135 @@ def require_private_output(path: Path, *, project_root: Path | None = None) -> P
     if not target.is_relative_to(private) or target == private:
         raise ValueError("IBKR raw account capture must be saved under local_data/ only")
     return target
+
+
+# Local-only, read-only synchronization. Neither the profile nor a successful
+# snapshot confers order authority. Keep the existing order guards unchanged.
+PAPER_PROFILE = Path("local_data/ibkr_paper_config.json")
+PAPER_SNAPSHOT = Path("local_data/ibkr_paper_raw.json")
+PAPER_SYNC_STATUS = Path("local_data/ibkr_paper_sync_status.json")
+
+
+def _sync_path(path):
+    # Do not allow a symlinked local_data root or fixed files to redirect data.
+    if Path("local_data").is_symlink() or path.is_symlink():
+        raise ValueError("PAPER_SYNC_PRIVATE_PATH_REQUIRED")
+    return require_private_output(path)
+
+
+@contextmanager
+def _paper_sync_lock():
+    path = _sync_path(Path("local_data/ibkr_paper_sync.lock"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    os.close(fd)
+    try:
+        yield
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _write_sync_json(path, value):
+    from atlaspm.data.sec_download import _atomic_write
+    destination = _sync_path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    def write(handle):
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _atomic_write(destination, write)
+
+
+def _validate_paper_profile(profile):
+    if not isinstance(profile, dict) or set(profile) != {"account", "url", "ca_file"}:
+        raise ValueError("PAPER_PROFILE_INVALID")
+    account = profile["account"]
+    if not isinstance(account, str) or not re.fullmatch(r"DU(?:R)?[0-9]{1,20}", account):
+        raise ValueError("PAPER_ACCOUNT_SELECTOR_REQUIRED")
+    if not isinstance(profile["ca_file"], str) or not profile["ca_file"]:
+        raise ValueError("PAPER_PROFILE_CA_FILE_REQUIRED")
+    cert = Path(profile["ca_file"]).expanduser().resolve()
+    if not cert.is_file():
+        raise ValueError("PAPER_PROFILE_CA_FILE_NOT_FOUND")
+    return {"account": account, "url": validate_gateway_url(profile["url"]), "ca_file": str(cert)}
+
+
+def configure_paper_sync(*, account, ca_file, url=DEFAULT_GATEWAY_URL):
+    """Save only local selectors and a public CA path, no login secrets."""
+    profile = _validate_paper_profile({"account": account, "url": url, "ca_file": str(ca_file or "")})
+    with _paper_sync_lock():
+        _write_sync_json(PAPER_SYNC_STATUS, {
+            "state": "CONFIGURED_NOT_CONNECTED", "snapshot_current": False,
+            "broker_order_submission_enabled": False, "live_execution_enabled": False,
+        })
+        _write_sync_json(PAPER_PROFILE, profile)
+    return {"status": "PAPER_PROFILE_SAVED", "account_hint": "****" + account[-4:],
+            "written": str(PAPER_PROFILE), "network_calls": 0,
+            "broker_order_submission_enabled": False, "live_execution_enabled": False}
+
+
+def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
+    """Bounded foreground worker; stop on any auth, identity or data failure."""
+    if type(cycles) is not int or not 1 <= cycles <= 480:
+        raise ValueError("PAPER_SYNC_CYCLE_LIMIT")
+    if type(interval) is not int or not 65 <= interval <= 120:
+        raise ValueError("PAPER_SYNC_INTERVAL_LIMIT")
+    if type(include_margin) is not bool:
+        raise ValueError("PAPER_SYNC_MARGIN_FLAG")
+    with _paper_sync_lock():
+        count = 0
+        report = {}
+        def status(state, **fields):
+            value = {"state": state, "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                     "completed_cycles": count, "snapshot_current": False,
+                     "broker_order_submission_enabled": False, "live_execution_enabled": False,
+                     **fields}
+            _write_sync_json(PAPER_SYNC_STATUS, value)
+            return value
+        try:
+            status("CONNECTING")
+            with _sync_path(PAPER_PROFILE).open("rb") as handle:
+                raw = handle.read(16385)
+            if len(raw) > 16384:
+                raise ValueError("PAPER_PROFILE_SIZE_LIMIT")
+            profile = _validate_paper_profile(_json_no_nan(raw))
+            transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
+            for index in range(cycles):
+                status("REFRESHING")
+                report = collect_ibkr_readonly_account(
+                    transport, account_id=profile["account"], paper_only=True)
+                if include_margin:
+                    from atlaspm.risk.ibkr_margin_monitor import normalize_ibkr_margin_summary
+                    summary = transport.get(f"/portfolio/{quote(profile['account'], safe='')}/summary")
+                    margin = normalize_ibkr_margin_summary(summary, report)
+                    report["margin_monitor"] = margin
+                    report["raw"]["portfolio_summary"] = summary
+                transport.keepalive()
+                _write_sync_json(PAPER_SNAPSHOT, report)
+                count += 1
+                status("SNAPSHOT_CAPTURED", snapshot_current=True,
+                       captured_at_utc=report["captured_at_utc"],
+                       position_count=report["position_count"], paper_identity_verified=True,
+                       margin_monitor_state=report.get("margin_monitor", {}).get("monitor_state"),
+                       maximum_snapshot_age_seconds=interval + 60)
+                if index + 1 < cycles:
+                    time.sleep(interval)
+        except KeyboardInterrupt:
+            status("STOPPED_BY_OPERATOR")
+            return {"status": "STOPPED_BY_OPERATOR", "completed_cycles": count,
+                    "broker_order_submission_enabled": False, "live_execution_enabled": False}
+        except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
+            # Previous snapshot is retained for audit only. Do not print raw
+            # provider responses, account details, tokens or exception paths.
+            reason = "HTTP_" + str(exc.status) if isinstance(exc, GatewayHTTPError) else type(exc).__name__
+            if isinstance(exc, ValueError) and re.fullmatch(r"PAPER_[A-Z_]+", str(exc)):
+                reason = str(exc)
+            status("BLOCKED_OPERATOR_REVIEW_REQUIRED", reason=reason)
+            raise ValueError("Paper sync stopped: " + reason + "; see local status and verify login/configuration") from None
+        status("SYNC_COMPLETED", captured_at_utc=report["captured_at_utc"])
+        return {**redacted_console_summary(report, PAPER_SNAPSHOT),
+                "status": "PAPER_SYNC_COMPLETED", "completed_cycles": count,
+                "paper_identity_verified": True, "heartbeat_verified": True,
+                "margin_monitor_state": report.get("margin_monitor", {}).get("monitor_state"),
+                "broker_order_submission_enabled": False}

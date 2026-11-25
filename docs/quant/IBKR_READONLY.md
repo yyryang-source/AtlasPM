@@ -62,3 +62,41 @@ References:
 ## Remaining work
 
 Normalize conid vs ticker/CUSIP/OCC identities, verify actual brokerage margin inputs, handle multi-currency/settlement differences, reconcile transactions and account financing, add safe transient data snapshots and fully authenticated What-If checks. The existing Paper OMS remains offline and the live trading code path does not exist.
+
+
+## Paper-only local synchronization (DUR demo accounts)
+
+After a successful local TLS read, save a local-only account selector and public
+CA path once. No password, session token or private key is stored. The profile
+does not grant trading permission.
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.cli ibkr-paper-sync --configure --account YOUR_PAPER_ID --ca-file C:\path\to\your\trusted-local-ca.pem
+.\.venv\Scripts\python.exe -m atlaspm.cli ibkr-paper-sync --allow-local-gateway
+~~~
+
+For a bounded foreground session, add `--cycles 10 --interval 65`. The worker
+checks authenticated, connected, established and noncompeting status, validates
+SSO login type 2 (both documented key spellings), checks exact DEMO account
+identity and USD before reading ledger/positions, and pings the documented
+POST /tickle endpoint without storing its session token. The 65–120 second
+interval avoids exceeding the SSO validation rate limit. Do not run competing
+workers against the same session. Ctrl+C stops the worker; after a failure
+re-authenticate manually and rerun. No automatic login, takeover or orders.
+
+Use `--margin` to additionally validate the existing margin monitor in the same
+capture. A margin report does not certify debt, collateral or order authority.
+The latest snapshot and status are stored atomically under ignored local_data/.
+A blocked or stopped status marks the snapshot non-current; a crash can leave
+a stale status, so consumers must also check the timestamp and worker state.
+These files are diagnostics only and are not admitted into automatic trading.
+
+`DUR` is accepted by this read-only sync after independent SSO and account checks.
+The separate Paper order guard still accepts only the existing DU numeric format;
+DUR submission, What-If actual behavior and brokerage recovery need separate
+local verification. Live submission, formal training and formal backtesting
+remain disabled.
+
+Official session reference:
+https://www.interactivebrokers.com/docs/web-api/v1/endpoints/session/validate-sso
+https://www.interactivebrokers.com/docs/web-api/v1/endpoints/session/ping-the-server
