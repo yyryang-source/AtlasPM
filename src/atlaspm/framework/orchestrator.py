@@ -36,6 +36,7 @@ def status(*, path=event_queue.PATH):
     blocked=0
     local_statuses={}
     local_completed={}
+    local_decisions={}
     events_without_local_receipts=0
     for key,item in items.items():
         if key!=event_queue.CONTROL_KEY:
@@ -51,6 +52,8 @@ def status(*, path=event_queue.PATH):
                 events_without_local_receipts+=1
             for receipt in receipts:
                 outcome=receipt["status"]
+                decision=receipt.get("decision_receipt",{}).get("status","NOT_ROUTED")
+                local_decisions[decision]=local_decisions.get(decision,0)+1
                 local_statuses[outcome]=local_statuses.get(outcome,0)+1
                 if outcome=="LOCAL_REVIEW_COMPLETED":
                     route=receipt["route"]
@@ -62,6 +65,7 @@ def status(*, path=event_queue.PATH):
             "blocked_metadata_tasks":blocked,"blocked_local_specialist_tasks":local_blocked,
             "local_specialist_status_counts":local_statuses,
             "local_specialist_completed_by_route":local_completed,
+            "local_specialist_decision_status_counts":local_decisions,
             "completed_events_without_local_receipts":events_without_local_receipts,
             "professional_research_coverage_verified":False,
             "network_tasks_enabled":False,"formal_training_enabled":False,
