@@ -226,6 +226,12 @@ def portfolio_cycle(payload, rows, *, weights, cost_fraction, liquidity, horizon
             return blocked("NO_COMPLETE_POSITIVE_HELD_EQUITY_SET",research=decision)
         adapted=deepcopy(payload)
         adapted["signals"]=[]
+        # The conservative fusion envelope is not a calibrated interval.
+        # Forward it only for explicit cash-flexible synthetic research;
+        # replace rather than trust caller-supplied lower-bound estimates.
+        use_lower=adapted["constraints"].get("allow_cash_slack",False) is True
+        if use_lower:
+            adapted["market"]["expected_return_lower_bounds"]={}
         ranks={g["security_id"]:i+1 for i,g in enumerate(decision["candidates"])}
         validated=[contract(row,as_of=as_of) for row in rows]
         plans=[]
@@ -234,7 +240,7 @@ def portfolio_cycle(payload, rows, *, weights, cost_fraction, liquidity, horizon
             relevant=[v for v in validated if v["research_id"] in g["research_ids"] and v["numeric_eligible"]]
             if not relevant:
                 raise ValueError("NO_NUMERIC_EVIDENCE")
-            available=min(v["data_available_at"] for v in relevant)
+            available=max(v["data_available_at"] for v in relevant)
             expires=min(v["contract"]["expires_at"] for v in relevant)
             hold=next(h for h in account.holdings if h.symbol==symbol)
             info=liquidity[symbol]
@@ -263,6 +269,8 @@ def portfolio_cycle(payload, rows, *, weights, cost_fraction, liquidity, horizon
                 "factor_score":g["robust_net_edge"],"model_rank":ranks["SYN:"+symbol],
                 "model_version":digest(g)})
             adapted["market"]["expected_returns"][symbol]=g["expected_return"]
+            if use_lower:
+                adapted["market"]["expected_return_lower_bounds"][symbol]=g["lower_bound"]
             plans.append({"symbol":symbol,"research_ids":g["research_ids"],"entry_mark":hold.price,
                 "horizon_days":horizon_days,"invalidation":g["invalidation"],"estimated_round_trip_cost_fraction":cost_fraction,
                 "daily_dollar_volume":adv,"spread_bps":spread,"risk_budget":deepcopy(payload["constraints"]),

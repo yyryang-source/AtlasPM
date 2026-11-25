@@ -78,6 +78,28 @@ class UnifiedResearchTests(unittest.TestCase):
         self.assertEqual(result["exit_oms"]["account_replay"]["unsettled_receivable"],0)
         self.assertTrue(all(o["status"]=="FILLED" for o in result["exit_oms"]["orders"]))
 
+    def test_fusion_envelope_reaches_opt_in_portfolio_objective(self):
+        from unittest.mock import patch
+        from atlaspm.engine.autonomous_decision import portfolio_cycle
+        p=json.loads((ROOT/"examples/unified_portfolio_synthetic.json").read_text())
+        p["constraints"].update(method="mean_variance",allow_cash_slack=True)
+        p["market"]["expected_return_lower_bounds"]={"AAA":.9,"BBB":.9}
+        rows=[signal(),signal("m2",.12,"b"),
+              signal(value=.11,ref="c",security_id="SYN:BBB"),
+              signal("m2",.13,"d",security_id="SYN:BBB")]
+        liquidity={s:{"daily_dollar_volume":1e8,"spread_bps":2.,
+                      "observed_at":NOW,"source":"synthetic"} for s in ("AAA","BBB")}
+        with patch("atlaspm.engine.autonomous_decision.run_unified_portfolio",
+                   return_value={"decision":"BLOCK"}) as run:
+            result=portfolio_cycle(p,rows,weights={"m1":1,"m2":1},
+                                   cost_fraction=.03,liquidity=liquidity)
+        run.assert_called_once()
+        market=run.call_args.args[0]["market"]
+        self.assertAlmostEqual(market["expected_return_lower_bounds"]["AAA"],.08)
+        self.assertAlmostEqual(market["expected_return_lower_bounds"]["BBB"],.09)
+        self.assertAlmostEqual(market["expected_returns"]["AAA"],.11)
+        self.assertFalse(result["live_execution_enabled"])
+
     def test_risk_gate_blocks_or_permission_rejected(self):
         p=json.loads((ROOT/"examples/unified_portfolio_synthetic.json").read_text())
         p["live_execution_enabled"]=True

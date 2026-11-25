@@ -208,6 +208,32 @@ class UnifiedPortfolioEngineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             optimize_target(candidates,account,market,dict(constraints,risk_aversion=-1.))
 
+    def test_cash_slack_uses_lower_return_and_settled_buy_budget(self) -> None:
+        from atlaspm.engine.allocation import optimize_target
+        from atlaspm.engine.contracts import Account, validate_candidates, timestamp
+        account=Account.from_payload(self.payload["account"])
+        candidates=validate_candidates(self.payload["signals"],
+                    as_of=timestamp(self.payload["as_of"],"as_of"),max_age_seconds=86400)
+        market=copy.deepcopy(self.payload["market"])
+        market["expected_returns"]={"AAA":.9,"BBB":.8}
+        constraints=dict(self.payload["constraints"],method="mean_variance",allow_cash_slack=True)
+        result=optimize_target(candidates,account,market,constraints,
+                               paper={"fee_per_order":5.,"slippage_bps":10.})
+        limit=(10000.-.19*30000.-10.)/30000.
+        self.assertAlmostEqual(result["settled_buy_budget_fraction"],limit)
+        self.assertLessEqual(result["modeled_buy_cash_fraction"],limit+1e-6)
+        self.assertFalse(result["sale_proceeds_used_for_buys"])
+        market["expected_return_lower_bounds"]={"AAA":-.2,"BBB":-.1}
+        result=optimize_target(candidates,account,market,constraints)
+        self.assertTrue(result["lower_return_objective_used"])
+        self.assertAlmostEqual(result["target_cash_fraction"],1.,places=6)
+        self.assertFalse(result["lower_bounds_independently_calibrated"])
+        self.assertFalse(result["live_execution_enabled"])
+        for bad in ({"AAA":0.},{"AAA":1.,"BBB":0.},{"AAA":float("nan"),"BBB":0.}):
+            market["expected_return_lower_bounds"]=bad
+            with self.assertRaises(ValueError):
+                optimize_target(candidates,account,market,constraints)
+
     def test_cash_slack_keeps_independent_risk_and_synthetic_permissions(self) -> None:
         self.payload["market"]["expected_returns"]={"AAA":-.2,"BBB":-.1}
         self.payload["constraints"].update(method="mean_variance",allow_cash_slack=True)

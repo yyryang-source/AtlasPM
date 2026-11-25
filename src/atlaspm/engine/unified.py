@@ -413,7 +413,7 @@ def run_unified_portfolio(payload: Mapping[str, Any]) -> dict[str, Any]:
                                           max_age_seconds=max_age)
         if any(c.symbol not in {h.symbol for h in account.holdings} for c in candidates):
             raise ValueError("OMS_UNHELD_EQUITY_UNSUPPORTED")
-        allocation = optimize_target(candidates,account,market,constraints)
+        allocation = optimize_target(candidates,account,market,constraints,paper=paper)
         gate = _risk_gate(candidates,account,allocation,market,constraints,history)
         if gate["block_reasons"]:
             return _blocked("RISK_GATE_BLOCKED",account,allocation=allocation,

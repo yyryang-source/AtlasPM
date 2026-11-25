@@ -21,7 +21,8 @@ METHODS = frozenset({
 
 
 def optimize_target(candidates: Sequence[Candidate], account: Account,
-                    market: Mapping[str, Any], constraints: Mapping[str, Any]) -> dict[str, Any]:
+                    market: Mapping[str, Any], constraints: Mapping[str, Any], *,
+                    paper: Mapping[str, Any] | None = None) -> dict[str, Any]:
     try:
         import numpy as np
         from scipy.optimize import linprog, minimize
@@ -54,6 +55,15 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     if flexible and (method!="mean_variance" or account.kind!="cash"
                      or not account.account_id.startswith("SYN-")):
         raise ValueError("CASH_SLACK_REQUIRES_SYNTHETIC_CASH_MEAN_VARIANCE")
+    lower_raw=market.get("expected_return_lower_bounds")
+    robust_mu=mu
+    if "expected_return_lower_bounds" in market:
+        if (not flexible or not isinstance(lower_raw,dict)
+                or set(lower_raw)!=set(symbols)):
+            raise ValueError("LOWER_RETURN_BOUNDS_REQUIRE_CASH_SLACK_AND_EXACT_COVERAGE")
+        robust_mu=np.array([finite(lower_raw[s],f"lower_mu.{s}") for s in symbols])
+        if np.any(robust_mu>mu):
+            raise ValueError("LOWER_RETURN_BOUND_EXCEEDS_ESTIMATE")
     # V1 cannot validate broker margin; risky investment remains cash-funded.
     target_total = min(exposure, 1 - cash_reserve)
     if not n or (not flexible and (target_total <= 0 or cap * n + 1e-9 < target_total)):
@@ -104,7 +114,25 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         budget = np.array([seed["weights"][s] for s in symbols], dtype=float)
     x0 = budget * target_total
     vol_cap=shock=stress_cap=None
+    buy_budget=buy_multiplier=fee_reserve=None
     if flexible:
+        # Reserve worst-case per-leg fees and adverse execution prices before
+        # the continuous solve. Unsettled sale proceeds never increase this
+        # budget. The exact integer planner still independently checks cash.
+        assumptions={} if paper is None else paper
+        if not isinstance(assumptions,Mapping):
+            raise ValueError("INVALID_PAPER_COST_ASSUMPTIONS")
+        fee=finite(assumptions.get("fee_per_order",1.),"fee_per_order",minimum=0)
+        slip=finite(assumptions.get("slippage_bps",0.),"slippage_bps",minimum=0)
+        impact=finite(assumptions.get("market_impact_bps",0.),"market_impact_bps",minimum=0)
+        if slip+impact>20:
+            raise ValueError("UNSUPPORTED_SLIPPAGE_OR_FILL_FRACTION")
+        fee_reserve=n*fee/equity
+        buy_multiplier=1+(slip+impact)/10000
+        buy_budget=max(0.,account.cash/equity-cash_reserve-fee_reserve)
+        # A buy-only constraint: sales cannot offset positive deltas.
+        base.append({"type":"ineq","fun":lambda x:float(
+            buy_budget-buy_multiplier*np.maximum(x-current,0.).sum())})
         vol_cap=finite(constraints.get("max_annual_volatility",.7),"max_annual_volatility",minimum=0)
         shock=finite(constraints.get("uniform_equity_shock",.2),"uniform_equity_shock",minimum=0)
         stress_cap=finite(constraints.get("max_stress_loss_fraction",.5),"max_stress_loss_fraction",minimum=0)
@@ -207,7 +235,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
             if bps >= 10000 or interval > 252:
                 raise ValueError("INVALID_TURNOVER_COST_MODEL")
             penalty = bps / 10000 * 252 / interval
-            objective = lambda x: .5*gamma*variance(x) - float(mu @ x) + penalty*float(np.sum(np.abs(x-current)))
+            objective = lambda x: .5*gamma*variance(x) - float(robust_mu @ x) + penalty*float(np.sum(np.abs(x-current)))
         elif method == "maximum_diversification":
             objective = lambda x: -float(sigma @ x) / sqrt(max(variance(x), 1e-14))
         else:
@@ -224,7 +252,8 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     exposure_invalid=(actual_total>target_budget+tol if flexible
                       else abs(actual_total-target_total)>tol)
     if (not np.isfinite(weights).all() or exposure_invalid
-        or (flexible and variance(weights)>vol_cap**2+1e-9)
+        or (flexible and (variance(weights)>vol_cap**2+1e-9
+                          or buy_multiplier*float(np.maximum(weights-current,0.).sum())>buy_budget+tol))
         or any(w < -tol or w > cap+tol for w in weights)
         or any(sum(weights[ids]) > sector_limits[s]+tol for s, ids in industries.items())
         or sum(abs(weights-current)) > turnover_limit+tol):
@@ -237,6 +266,13 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         **({"cash_slack_enabled":True,"risky_exposure_limit":target_budget,
             "modeled_risky_exposure":actual_total,
             "modeled_expected_annual_return":float(mu@weights),
+            "modeled_lower_annual_return":float(robust_mu@weights) if lower_raw is not None else None,
+            "lower_return_objective_used":lower_raw is not None,
+            "lower_bounds_independently_calibrated":False,
+            "settled_buy_budget_fraction":buy_budget,
+            "modeled_buy_cash_fraction":buy_multiplier*float(np.maximum(weights-current,0.).sum()),
+            "reserved_maximum_leg_fee_fraction":fee_reserve,
+            "sale_proceeds_used_for_buys":False,
             "risk_constraints_in_solver":True} if flexible else {}),
         "modeled_variance": modeled_variance,
         "modeled_annual_volatility": sqrt(max(0.,modeled_variance)),
