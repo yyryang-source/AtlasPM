@@ -403,29 +403,71 @@ def snapshot(as_of,trade_date=None,*,read_only=False):
                         "PRICE_ADJUSTMENT_SEMANTICS_AND_RIGHTS_UNVERIFIED"]}
 
 
+def continuous_action_path(identities,actions,start,end,*,start_symbol=None,end_symbol=None):
+    """Shared declared-identity and action continuity contract.
+
+    Inputs are resolved rows for one security ID. Dates are calendar dates,
+    inclusive mark endpoints and exclusive identity interval ends. This
+    checks visible claims only, not historical universe or action completeness.
+    """
+    start,end=_date(start),_date(end)
+    if start>end:
+        raise ValueError("INVALID_IDENTITY_PATH_DATES")
+    intervals=sorted((i for i in identities if i["valid_from"]<=end and
+                      (i["valid_to"] is None or i["valid_to"]>start)),
+                     key=lambda i:i["valid_from"])
+    if not intervals or intervals[0]["valid_from"]>start:
+        raise ValueError("MISSING_START_IDENTITY")
+    if ((start_symbol is not None and intervals[0]["symbol"]!=start_symbol)
+            or (end_symbol is not None and intervals[-1]["symbol"]!=end_symbol)):
+        raise ValueError("ENDPOINT_SYMBOL_MISMATCH")
+    if intervals[-1]["valid_to"] is not None and intervals[-1]["valid_to"]<=end:
+        raise ValueError("MISSING_END_IDENTITY")
+    relevant=[a for a in actions if start<a["effective_date"]<=end]
+    if any(a["kind"] in ("CASH_EXIT","DELISTING","MERGER") for a in relevant):
+        raise ValueError("UNSUPPORTED_EXIT_ECONOMICS")
+    transitions=set()
+    for left,right in zip(intervals,intervals[1:]):
+        boundary=right["valid_from"]
+        if left["valid_to"]!=boundary:
+            raise ValueError("IDENTITY_INTERVAL_GAP")
+        if left["exchange"]!=right["exchange"]:
+            raise ValueError("EXCHANGE_TRANSITION_REVIEW_REQUIRED")
+        if left["symbol"]!=right["symbol"]:
+            transitions.add((boundary,right["symbol"]))
+    recorded={(a["effective_date"],a["new_symbol"]) for a in relevant if a["kind"]=="TICKER_CHANGE"}
+    if transitions!=recorded:
+        raise ValueError("TICKER_TRANSITION_NOT_RECONCILED")
+    return intervals,relevant
+
+
 def adjustment(security_id,bar_date,as_of,*,raw_unadjusted=False):
     _token(security_id)
     bar_date=_date(bar_date)
     report=snapshot(as_of,bar_date)
-    if not raw_unadjusted or report["unresolved"]:
+    if raw_unadjusted is not True or report["unresolved"]:
         raise ValueError("Require explicit unadjusted input and no unresolved visible evidence")
     if not any(i["security_id"]==security_id for i in report["members"]):
         raise ValueError("No corroborated security identity on bar date")
+    intervals,relevant=continuous_action_path(
+        [i for i in report["identities"] if i["security_id"]==security_id],
+        [a for a in report["actions"] if a["security_id"]==security_id],
+        bar_date,as_of)
     # This is only the multiplier from currently visible assertions. Unknown
     # actions cannot be excluded and completeness is never claimed.
     ratio=Decimal(1)
     with localcontext() as ctx:
         ctx.prec=50
-        for a in report["actions"]:
-            if a["security_id"]==security_id and bar_date<a["effective_date"]<=as_of:
-                if a["kind"]=="SPLIT":
-                    ratio*=Decimal(a["value"])
-                elif a["kind"] in {"CASH_EXIT","MERGER","DELISTING"}:
-                    raise ValueError("Unsupported exit economics in adjustment interval")
+        for a in relevant:
+            if a["kind"]=="SPLIT":
+                ratio*=Decimal(a["value"])
         price=Decimal(1)/ratio
     return {"schema":"atlaspm_visible_split_adjustment_v53",**v4.GUARDS,
             "security_id":security_id,"bar_date":bar_date,"as_of":as_of,
             "price_multiplier":str(price),"volume_multiplier":str(ratio),
+            "identity_record_ids":[i["record_id"] for i in intervals],
+            "action_record_ids":[a["record_id"] for a in relevant],
+            "raw_price_semantics_verified":False,
             "status":"PROVISIONAL_VISIBLE_ACTIONS_ONLY","completeness_verified":False}
 
 
