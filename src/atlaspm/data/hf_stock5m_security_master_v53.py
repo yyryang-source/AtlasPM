@@ -27,6 +27,10 @@ ACTION_KINDS = {"SPLIT","CASH_DIVIDEND","CASH_EXIT","MERGER","DELISTING","TICKER
 TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9.\-]{0,31}")
 SHA = re.compile(r"[0-9a-f]{64}")
+MAX_CLAIM_BYTES = 16 * 1024 * 1024
+MAX_CLAIM_ROWS = 10000
+MAX_EVIDENCE_OBJECTS = 1000
+MAX_EVIDENCE_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _date(s):
@@ -156,35 +160,115 @@ def _db(*, read_only=False):
     return cx
 
 
-def ingest(filename):
-    """Atomic append, idempotent exact claims; no destructive revision."""
+def _claim_batch(filename, expected_sha256):
+    """Bound input and validate original evidence before opening a writer."""
+    from atlaspm.data.api_gateway import _strict_json
     path=private_path(Path(filename),exists=True)
+    if expected_sha256 is not None and (not isinstance(expected_sha256,str)
+                                        or not SHA.fullmatch(expected_sha256)):
+        raise ValueError("INVALID_EXPECTED_CLAIM_SHA256")
+    with path.open("rb") as handle:
+        raw=handle.read(MAX_CLAIM_BYTES+1)
+    if len(raw)>MAX_CLAIM_BYTES:
+        raise ValueError("CLAIM_INPUT_BYTE_BUDGET")
+    digest=ev._sha(raw)
+    if expected_sha256 is not None and digest!=expected_sha256:
+        raise ValueError("CLAIM_INPUT_SHA256_MISMATCH")
     checked={}
-    added=0
+    rows=[]
+    evidence_bytes=0
+    for line_no,line in enumerate(raw.decode("utf-8-sig").splitlines(),1):
+        if not line.strip():
+            continue
+        if len(rows)>=MAX_CLAIM_ROWS:
+            raise ValueError("CLAIM_INPUT_ROW_BUDGET")
+        try:
+            value=_strict_json(line)
+            if set(value)!=FIELDS:
+                raise ValueError("Unexpected reviewed claim fields")
+            evidence=_primary_path(value)
+            if evidence==path:
+                raise ValueError("Claim batch cannot be primary evidence")
+            if str(evidence) not in checked:
+                if len(checked)>=MAX_EVIDENCE_OBJECTS:
+                    raise ValueError("CLAIM_EVIDENCE_OBJECT_BUDGET")
+                evidence_bytes+=evidence.stat().st_size
+                if evidence_bytes>MAX_EVIDENCE_BYTES:
+                    raise ValueError("CLAIM_EVIDENCE_BYTE_BUDGET")
+            row=validate(value,checked)
+            canonical=_canonical(row)
+            key=ev._sha(canonical.encode())
+            rows.append((key,row["record_type"],row["record_id"],
+                         row["source_family"],row["known_date"],canonical))
+        except (OSError,ValueError,TypeError,KeyError,RecursionError) as exc:
+            raise ValueError(f"Claim line {line_no}: {exc}") from exc
+    if not rows:
+        raise ValueError("Empty claim file")
+    return path,digest,rows,checked
+
+
+def _recheck_batch(path,digest,checked):
+    # Read the bounded input again rather than trusting file size/mtime.
+    with path.open("rb") as handle:
+        raw=handle.read(MAX_CLAIM_BYTES+1)
+    if len(raw)>MAX_CLAIM_BYTES or ev._sha(raw)!=digest:
+        raise ValueError("CLAIM_INPUT_CHANGED")
     total=0
-    with closing(_db()) as cx, cx:
-        cx.execute("BEGIN IMMEDIATE")
-        _verify_ledger(cx)
-        with path.open(encoding="utf-8-sig") as handle:
-            for line_no,line in enumerate(handle,1):
-                if not line.strip():
-                    continue
-                try:
-                    row=validate(json.loads(line),checked)
-                    canonical=_canonical(row)
-                    key=ev._sha(canonical.encode())
-                    cur=cx.execute("INSERT OR IGNORE INTO claims VALUES (?,?,?,?,?,?)",
-                                   (key,row["record_type"],row["record_id"],
-                                    row["source_family"],row["known_date"],canonical))
-                    added+=cur.rowcount
-                    total+=1
-                except Exception as exc:
-                    raise ValueError(f"Claim line {line_no}: {exc}") from exc
-        if not total:
-            raise ValueError("Empty claim file")
+    for evidence,expected in checked.items():
+        p=private_path(Path(evidence),exists=True)
+        total+=p.stat().st_size
+        if total>MAX_EVIDENCE_BYTES or fingerprint(p)["sha256"]!=expected:
+            raise ValueError("CLAIM_EVIDENCE_CHANGED")
+
+
+def _count_batch(cx,rows,*,write):
+    """Count exact duplicates against one ledger snapshot and within input."""
+    seen=set()
+    added=0
+    for row in rows:
+        key=row[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        if cx is not None:
+            existing=cx.execute("SELECT 1 FROM claims WHERE claim_id=?",(key,)).fetchone()
+            if existing:
+                continue
+            if write:
+                cx.execute("INSERT INTO claims VALUES (?,?,?,?,?,?)",row)
+        added+=1
+    return added
+
+
+def ingest(filename, *, preview=False, expected_sha256=None):
+    """Bounded reviewed assertions; preview never creates or edits a ledger.
+
+    A preview checks structure, original hashes and duplicate counts, not
+    agreement, authenticity or training eligibility. Commit can bind the
+    exact reviewed batch bytes using expected_sha256. The duplicate counts
+    are recomputed inside the write transaction, not reserved by preview.
+    """
+    if type(preview) is not bool:
+        raise ValueError("Preview must be boolean")
+    path,digest,rows,checked=_claim_batch(filename,expected_sha256)
+    if preview and not private_path(BASE/"ledger.sqlite3").is_file():
+        added=_count_batch(None,rows,write=False)
+        _recheck_batch(path,digest,checked)
+    else:
+        with closing(_db(read_only=preview)) as cx,cx:
+            if preview:
+                cx.execute("PRAGMA query_only=ON")
+            cx.execute("BEGIN" if preview else "BEGIN IMMEDIATE")
+            _verify_ledger(cx)
+            added=_count_batch(cx,rows,write=not preview)
+            _recheck_batch(path,digest,checked)
+    total=len(rows)
     return {"schema":"atlaspm_security_master_ingest_v53",**v4.GUARDS,
-            "claims_read":total,"claims_added":added,"claims_reused":total-added,
-            "status":"REVIEWED_ASSERTIONS_IMPORTED"}
+            "claims_read":total,"claims_added":0 if preview else added,
+            "claims_reused":total-added,"claims_would_add":added if preview else None,
+            "preview":preview,"input_sha256":digest,"evidence_objects":len(checked),
+            "source_independence_verified":False,"coverage_verified":False,
+            "status":"CLAIM_BATCH_REVIEW_REQUIRED" if preview else "REVIEWED_ASSERTIONS_IMPORTED"}
 
 
 def _verify_ledger(cx):

@@ -116,6 +116,80 @@ class SecurityMasterTests(unittest.TestCase):
             self.ingest([self.claim("good",self.identity(),"A"),bad])
         self.assertEqual(m.inventory()["claim_counts"],{})
 
+    def test_preview_no_ledger_and_exact_batch_commit(self):
+        p=Path("local_data/claims.jsonl")
+        rows=self.pair("listing",self.identity())
+        p.write_text("\n".join(json.dumps(r) for r in rows+[rows[0]]),encoding="utf-8")
+        report=m.ingest(p,preview=True)
+        self.assertFalse((m.BASE/"ledger.sqlite3").exists())
+        self.assertEqual(report["claims_would_add"],2)
+        self.assertEqual(report["claims_added"],0)
+        self.assertEqual(report["claims_reused"],1)
+        self.assertFalse(report["approved_for_model_training"])
+        result=m.ingest(p,expected_sha256=report["input_sha256"])
+        self.assertEqual(result["claims_added"],2)
+        old=(m.BASE/"ledger.sqlite3").read_bytes()
+        self.assertEqual(m.ingest(p,preview=True)["claims_would_add"],0)
+        self.assertEqual((m.BASE/"ledger.sqlite3").read_bytes(),old)
+        p.write_text(p.read_text()+"\n",encoding="utf-8")
+        with self.assertRaisesRegex(ValueError,"SHA256_MISMATCH"):
+            m.ingest(p,expected_sha256=report["input_sha256"])
+        self.assertEqual((m.BASE/"ledger.sqlite3").read_bytes(),old)
+
+    def test_claim_input_and_evidence_budgets(self):
+        from unittest.mock import patch
+        p=Path("local_data/claims.jsonl")
+        p.write_text("\n".join(json.dumps(r) for r in self.pair("listing",self.identity())),encoding="utf-8")
+        for name,limit,message in (("MAX_CLAIM_BYTES",1,"BYTE_BUDGET"),
+                                   ("MAX_CLAIM_ROWS",1,"ROW_BUDGET"),
+                                   ("MAX_EVIDENCE_OBJECTS",1,"OBJECT_BUDGET"),
+                                   ("MAX_EVIDENCE_BYTES",1,"BYTE_BUDGET")):
+            with self.subTest(name=name),patch.object(m,name,limit):
+                with self.assertRaisesRegex(ValueError,message):
+                    m.ingest(p)
+                self.assertFalse((m.BASE/"ledger.sqlite3").exists())
+
+    def test_duplicate_json_claim_members_rejected(self):
+        p=Path("local_data/claims.jsonl")
+        raw=json.dumps(self.claim("listing",self.identity(),"A"))
+        p.write_text(raw[:-1]+',"record_id":"other"}',encoding="utf-8")
+        with self.assertRaisesRegex(ValueError,"Duplicate JSON member"):
+            m.ingest(p,preview=True)
+        self.assertFalse((m.BASE/"ledger.sqlite3").exists())
+
+    def test_changed_input_or_evidence_rolls_back_transaction(self):
+        from unittest.mock import patch
+        p=Path("local_data/claims.jsonl")
+        p.write_text("\n".join(json.dumps(r) for r in self.pair("listing",self.identity())),encoding="utf-8")
+        original=p.read_bytes()
+        evidence=Path("local_data/A.txt")
+        original_evidence=evidence.read_bytes()
+        real=m._count_batch
+        for path,contents,message in ((p,original+b"\n","INPUT_CHANGED"),
+                                       (evidence,b"altered","EVIDENCE_CHANGED")):
+            def change(cx,rows,*,write):
+                result=real(cx,rows,write=write)
+                path.write_bytes(contents)
+                return result
+            with patch.object(m,"_count_batch",side_effect=change):
+                with self.assertRaisesRegex(ValueError,message):
+                    m.ingest(p)
+            p.write_bytes(original)
+            evidence.write_bytes(original_evidence)
+            self.assertEqual(m.inventory()["claim_counts"],{})
+        self.assertEqual(m.ingest(p)["claims_added"],2)
+
+    def test_claim_cli_preview_wires_expected_digest(self):
+        from atlaspm.cli import build_parser
+        from atlaspm.data import market_db
+        p=Path("local_data/claims.jsonl")
+        p.write_text(json.dumps(self.claim("listing",self.identity(),"A")),encoding="utf-8")
+        args=build_parser().parse_args(["market-db","hf-5m-security-ingest-v53",
+                                        "--claims",str(p),"--preview"])
+        result=market_db.run(args)
+        self.assertEqual(result["claims_would_add"],1)
+        self.assertFalse((m.BASE/"ledger.sqlite3").exists())
+
     def test_split_and_duplicate_economic_key(self):
         self.ingest(self.pair("listing",self.identity())+
                     self.pair("split",self.action(),known="2020-02-20",kind="ACTION"))
