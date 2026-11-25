@@ -33,6 +33,24 @@ class StockAllocationTest(unittest.TestCase):
         self.assertAlmostEqual(capped["A"] + capped["B"], .45, places=6)
         self.assertLessEqual(capped["C"], .60000001)
 
+    def test_shared_covariance_matches_sample_and_preserves_diagonal(self):
+        import numpy as np
+        from atlaspm.data.historical import rolling_return_estimates
+        from atlaspm.engine.mean_variance import _validate_covariance
+        rng=np.random.default_rng(9)
+        rows=rng.normal(0,.02,(60,3))
+        _,raw,_=rolling_return_estimates(rows.tolist(),["A","B","C"])
+        np.testing.assert_allclose(raw,np.cov(rows,rowvar=False,ddof=1)*252,atol=1e-12)
+        _,shrunk,_=rolling_return_estimates(rows.tolist(),["A","B","C"],shrinkage=.25)
+        np.testing.assert_allclose(shrunk,.75*np.asarray(raw)+.25*np.diag(np.diag(raw)),atol=1e-12)
+        _,weighted,meta=rolling_return_estimates(rows.tolist(),["A","B","C"],
+                                                shrinkage=.25,half_life_sessions=10)
+        _validate_covariance(weighted,3)
+        self.assertLess(meta["effective_observations"],60)
+        self.assertFalse(meta["historical_mean_is_forecast"])
+        with self.assertRaises(ValueError):
+            rolling_return_estimates([[0.,0.],[.1,.1],[float("nan"),.1]],["A","B"])
+
     def test_reports_why_incompatible_caps_skip_the_trade(self):
         import numpy as np
 

@@ -57,6 +57,70 @@ def annualized_sample_covariance(rows, means):
     return covariance
 
 
+def rolling_return_estimates(rows, symbols, *, shrinkage=0., half_life_sessions=None,
+                             diagonal_floor=0.):
+    """Annualized past-window arithmetic estimates with optional decay.
+
+    Rows must be chronological, aligned, one-session simple returns. This
+    kernel cannot certify the upstream calendar, identity or adjustment
+    conventions. Diagonal shrinkage preserves the estimated marginal
+    variances; the optional floor is an explicit additive regularizer.
+    No mandatory scientific dependency and no second covariance warehouse.
+    """
+    from math import exp, log
+    from atlaspm.engine.contracts import finite
+    n,p=len(rows),len(symbols)
+    if (not 3<=n<=10000 or not 1<=p<=256 or len(set(symbols))!=p
+            or any(not isinstance(s,str) or not s for s in symbols)):
+        raise ValueError("INVALID_ROLLING_RISK_ESTIMATION_SCOPE")
+    shrink=finite(shrinkage,"covariance_shrinkage",minimum=0)
+    floor=finite(diagonal_floor,"covariance_diagonal_floor",minimum=0)
+    if shrink>1 or floor>1:
+        raise ValueError("INVALID_COVARIANCE_REGULARIZATION")
+    for row in rows:
+        if len(row)!=p or any(not isfinite(v) or v<=-1 for v in row):
+            raise ValueError("INVALID_ALIGNED_RETURN_ROW")
+    if half_life_sessions is None:
+        means=[fmean(row[i] for row in rows) for i in range(p)]
+        cov=annualized_sample_covariance(rows,means)
+        effective=float(n)
+    else:
+        half=finite(half_life_sessions,"covariance_half_life_sessions",minimum=1)
+        if half>10000:
+            raise ValueError("INVALID_COVARIANCE_HALF_LIFE")
+        raw=[exp(-log(2)*(n-1-i)/half) for i in range(n)]
+        total=sum(raw)
+        weights=[v/total for v in raw]
+        concentration=sum(w*w for w in weights)
+        effective=1/concentration
+        if effective<3:
+            raise ValueError("INSUFFICIENT_EFFECTIVE_COVARIANCE_OBSERVATIONS")
+        means=[sum(w*row[i] for w,row in zip(weights,rows)) for i in range(p)]
+        scale=TRADING_DAYS_PER_YEAR/(1-concentration)
+        cov=[[0.]*p for _ in range(p)]
+        for i in range(p):
+            for j in range(i,p):
+                value=scale*sum(w*(row[i]-means[i])*(row[j]-means[j])
+                                for w,row in zip(weights,rows))
+                cov[i][j]=cov[j][i]=value
+    for i in range(p):
+        cov[i][i]+=floor
+        for j in range(i):
+            cov[i][j]*=1-shrink
+            cov[j][i]=cov[i][j]
+    if any(not isfinite(v) for row in cov for v in row):
+        raise ValueError("NONFINITE_ROLLING_COVARIANCE")
+    expected={s:means[i]*TRADING_DAYS_PER_YEAR for i,s in enumerate(symbols)}
+    if any(not isfinite(v) for v in expected.values()):
+        raise ValueError("NONFINITE_ROLLING_MEAN")
+    return expected,cov,{"method":"sample" if half_life_sessions is None else "exponentially_weighted",
+                         "return_observations":n,"effective_observations":effective,
+                         "half_life_sessions":half_life_sessions,"diagonal_shrinkage":shrink,
+                         "diagonal_floor":floor,"annualization_sessions":TRADING_DAYS_PER_YEAR,
+                         "historical_mean_is_forecast":False,
+                         "calendar_and_source_independently_verified":False}
+
+
 def estimate_from_prices(path: Path, min_observations: int = 60) -> dict[str, Any]:
     """Compute aligned daily simple returns and sample annualized covariance.
 

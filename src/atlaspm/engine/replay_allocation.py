@@ -1,7 +1,7 @@
 """Synthetic rolling allocation adapter; no fitted AI or real data approval."""
 from atlaspm.engine.allocation import METHODS, optimize_target
 from atlaspm.engine.contracts import Account, Holding
-from atlaspm.engine.backtest import _sample_estimates
+from atlaspm.data.historical import rolling_return_estimates
 
 
 def rolling_target(candidates, history, holdings, cash, unsettled, config):
@@ -9,7 +9,7 @@ def rolling_target(candidates, history, holdings, cash, unsettled, config):
     if method not in METHODS:
         raise ValueError("UNSUPPORTED_REPLAY_OPTIMIZER")
     lookback = config.get("lookback_sessions", 60)
-    if type(lookback) is not int or lookback < 3:
+    if type(lookback) is not int or not 3<=lookback<=10000:
         raise ValueError("INVALID_REPLAY_LOOKBACK")
     if method == "cvar" and lookback < 20:
         raise ValueError("CVAR_REQUIRES_20_PAST_RETURNS")
@@ -23,10 +23,10 @@ def rolling_target(candidates, history, holdings, cash, unsettled, config):
         raise ValueError("ROLLING_HISTORY_COVERAGE_INCOMPLETE")
     returns = [[right[1][s]/left[1][s]-1 for s in symbols]
                for left,right in zip(window,window[1:])]
-    mu,cov = _sample_estimates(returns,symbols)
-    # Small explicit diagonal regularization for zero variance/collinearity.
-    for i in range(len(symbols)):
-        cov[i][i] += 1e-8
+    mu,cov,risk = rolling_return_estimates(
+        returns,symbols,shrinkage=config.get("covariance_shrinkage",0.),
+        half_life_sessions=config.get("covariance_half_life_sessions"),
+        diagonal_floor=1e-8)
     prices = window[-1][1]
     sectors = {c.symbol:c.sector for c in candidates}
     account = Account("SYN:REPLAY","cash",cash+unsettled,0.,0.,
@@ -38,4 +38,5 @@ def rolling_target(candidates, history, holdings, cash, unsettled, config):
                              expected_returns=mu,scenario_returns=returns),constraints)
     return dict(weights=result["weights"], method=method,
                 estimation_first_date=window[0][0], estimation_last_date=window[-1][0],
-                return_observations=len(returns), modeled_variance=result["modeled_variance"])
+                return_observations=len(returns), modeled_variance=result["modeled_variance"],
+                risk_estimation=risk)

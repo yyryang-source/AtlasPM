@@ -51,6 +51,20 @@ class RollingAllocationTests(unittest.TestCase):
         self.assertEqual(full["curve"][:24],short["curve"])
         self.assertEqual(full["allocations"][:1],short["allocations"])
 
+    def test_decayed_shrunk_risk_is_prefix_invariant(self):
+        p=rolling_fixture("mean_variance")
+        p["optimizer"].update(covariance_shrinkage=.35,covariance_half_life_sessions=8)
+        full=replay(p)
+        self.assertTrue(full["allocations"])
+        risk=full["allocations"][0]["risk_estimation"]
+        self.assertEqual(risk["method"],"exponentially_weighted")
+        self.assertEqual(risk["diagonal_shrinkage"],.35)
+        self.assertLess(risk["effective_observations"],20)
+        p["sessions"]=p["sessions"][:24]
+        short=replay(p)
+        self.assertEqual(full["allocations"][:len(short["allocations"])],short["allocations"])
+        self.assertFalse(full["approved_for_model_training"])
+
     def test_no_trades_during_warmup(self):
         out = replay(rolling_fixture("equal_weight"))
         self.assertTrue(all(not x["holdings"] for x in out["curve"][:21]))

@@ -17,6 +17,8 @@ class StockAllocationSettings:
     turnover_limit: float = 2.0
     risk_aversion: float = 2.0
     rank_tilt: float = .02
+    covariance_shrinkage: float = .25
+    covariance_half_life_sessions: float | None = None
 
     def __post_init__(self) -> None:
         if type(self.lookback_sessions) is not int or not 20 <= self.lookback_sessions <= 252:
@@ -27,6 +29,12 @@ class StockAllocationSettings:
             raise ValueError("Quant sector cap must be in (0, 1]")
         if not (isfinite(self.risk_aversion) and self.risk_aversion > 0 and 0 <= self.rank_tilt <= 1):
             raise ValueError("Quant risk aversion must be positive and rank tilt must be in [0, 1]")
+        from atlaspm.engine.contracts import finite
+        if finite(self.covariance_shrinkage,"covariance_shrinkage",minimum=0)>1:
+            raise ValueError("INVALID_COVARIANCE_SHRINKAGE")
+        if self.covariance_half_life_sessions is not None:
+            if finite(self.covariance_half_life_sessions,"covariance_half_life_sessions",minimum=1)>10000:
+                raise ValueError("INVALID_COVARIANCE_HALF_LIFE")
 
 
 @dataclass(frozen=True)
@@ -58,12 +66,17 @@ def prepare_stock_allocation(
                     or any(day not in prices[symbol] for symbol in symbols for day in lookback)):
         return None
     if symbols:
+        from atlaspm.data.historical import rolling_return_estimates
+        if any(a>=b for a,b in zip(lookback,lookback[1:])):
+            raise ValueError("INVALID_STOCK_ALLOCATION_DATE_ORDER")
         closes = np.array([[prices[symbol][day] for day in lookback] for symbol in symbols])
-        daily = closes[:, 1:] / closes[:, :-1] - 1
-        covariance = np.atleast_2d(np.cov(daily, ddof=1)) * 252
-        covariance = .75 * covariance + .25 * np.diag(np.diag(covariance))
-        if not np.all(np.isfinite(covariance)):
-            raise ValueError("Non-finite Quant covariance")
+        if not np.isfinite(closes).all() or (closes<=0).any():
+            raise ValueError("INVALID_STOCK_ALLOCATION_PRICE")
+        daily = (closes[:,1:]/closes[:,:-1]-1).T
+        _,cov,_=rolling_return_estimates(
+            daily.tolist(),symbols,shrinkage=settings.covariance_shrinkage,
+            half_life_sessions=settings.covariance_half_life_sessions)
+        covariance=np.asarray(cov)
     else:
         covariance = np.empty((0, 0))
     return StockAllocationSignal(symbols, tuple(row["score"] for row in selected),
