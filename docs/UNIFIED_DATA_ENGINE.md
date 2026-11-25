@@ -299,3 +299,31 @@ nor the whole archive. Use identical workloads/cache conditions and record
 hardware before performance comparisons. Latest-head CI and actual local
 results are still required before final release review. No merge based on
 the old green workflows.
+
+
+### Local real research data preparation
+
+Inventory first (presence only, no downloads or writes):
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.research.data_admission inventory
+~~~
+
+Select a contiguous locally available range with sufficient calendar sessions
+and warmup months. Plan without writes, then add `--execute` when the same
+partitions are not being modified by another process:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.research.data_admission prepare --start-month 2000-01 --end-month 2000-07 --warmup-months 2 --memory 256MB --threads 1
+~~~
+
+Dates above are examples, not observed local availability. Execution calls
+existing offline conversion/QC/factor maintenance, V6 sample builder with
+mandatory lineage, and exact feature-source/label/fold checks. Output
+includes dataset ID, fold sample minima and missing-session blockers.
+The 24-target-month bound and 2-month default warmup constrain the initial
+preparation; this is not a complete 36-month factor-history guarantee.
+Missing source months or impossible fold calendar stop before maintenance.
+This entry point serializes its own writers; stop other direct builders or
+downloaders modifying these inputs. A stale lock requires operator review.
+No trainer or independent data/model approval is invoked.
