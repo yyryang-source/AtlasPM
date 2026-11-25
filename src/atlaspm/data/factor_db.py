@@ -205,9 +205,9 @@ def _sqlite_month_fingerprint(database: Path, month: str) -> str:
 
 
 def _projection_current(meta, month):
-    evidence = meta.get("session_projection")
-    if evidence is None:
+    if "session_projection" not in meta:
         return True
+    evidence = meta["session_projection"]
     from atlaspm.data.hf_stock5m_session_v4 import calendar_digest
     if not isinstance(evidence, dict):
         return False
@@ -231,20 +231,22 @@ def _materialize_daily(con, month: str, source: str, session: str,
     # Never silently revert an existing projected daily partition.
     projection = source == "hf" and (nyse_projection or
                  (meta is not None and "session_projection" in meta))
+    evidence = None
+    if projection:
+        from atlaspm.data.hf_stock5m_session_v4 import install_early_close_projection
+        _, evidence = install_early_close_projection(con, month)
+        if _fingerprint([source_path]) != input_fp:
+            raise ValueError("EARLY_CLOSE_SOURCE_CHANGED")
     if (not refresh and dest.is_file() and meta and meta.get("input_fingerprint") == input_fp
-            and (not projection or (meta.get("session_projection") is not None
+            and (not projection or (meta.get("session_projection") == evidence
                                     and _projection_current(meta, month)))):
         return dest, meta
     dest.parent.mkdir(parents=True, exist_ok=True)
     stage = private_path(dest.with_suffix(".parquet.part"))
     csv_stage = private_path(ROOT / "tmp" / f"sqlite_{month}.csv.part")
     try:
-        evidence = None
         if source == "hf":
             _check_hf(con, source_path)
-            if projection:
-                from atlaspm.data.hf_stock5m_session_v4 import install_early_close_projection
-                _, evidence = install_early_close_projection(con, month)
             sql = _daily_sql_hf(source_path, projection=projection)
         else:
             n = _sqlite_temp_csv(month, source_path, csv_stage)
