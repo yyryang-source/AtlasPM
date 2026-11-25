@@ -50,6 +50,19 @@ class MultiHorizonTests(unittest.TestCase):
                   "model_registry_admission","live_execution_enabled"):
             self.assertFalse(r[k])
 
+    def test_locked_winners_with_matured_monitor_and_fixed_baseline(self):
+        p=panel()
+        r=a.research(p,**settings(),monitoring={"window_dates":6,"minimum_dates":3})
+        self.assertFalse(r["automatic_retrain_on_drift_enabled"])
+        for report in r["horizons"].values():
+            winner=report["selection"]["selected_model"]
+            self.assertEqual(report["holdout_candidates_evaluated"],[winner])
+            m=report["monitoring"]
+            self.assertEqual(set(m["model_review"]),{"historical_mean",winner})
+            self.assertFalse(m["automatic_promotion_enabled"])
+            self.assertFalse(m["training_started_by_monitor"])
+            self.assertTrue(all(q["date"]>=r["holdout_start"] for q in m["retrain_review_requests"]))
+
     def test_holdout_changes_do_not_change_selection_lock(self):
         p=panel()
         r=a.research(p,**settings())
@@ -98,6 +111,14 @@ class GuardTests(unittest.TestCase):
         rows[0]["label_end_date"]=dates[4]
         with self.assertRaisesRegex(ValueError,"LABEL_MATURITY"):
             a._holdout_diagnostics(rows,dates,expected,2,1)
+
+    def test_invalid_monitor_policy_rejected_before_fit(self):
+        for policy in ({"baseline":"other"},{"minimum_dates":1},{"drift_ratio":1},
+                       {"patience":True},{"coverage":float("nan")}):
+            with self.subTest(policy=policy),patch.object(a.tournament,"train") as train:
+                with self.assertRaises(ValueError):
+                    a.research(panel(),**settings(),monitoring=policy)
+                train.assert_not_called()
 
     def test_budget_rejected_before_fit(self):
         with patch.object(a,"MAX_FOLD_FITS",1),patch.object(a.tournament,"train") as train:

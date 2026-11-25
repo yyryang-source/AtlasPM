@@ -15,6 +15,7 @@ from atlaspm.research import training_tournament as tournament
 from atlaspm.research.training_dataset import HORIZONS, validate_panel_metadata, validated_sessions
 from atlaspm.research.training_engine import _fingerprint, _metrics
 from atlaspm.research.training_registry import FLAGS, digest
+from atlaspm.engine.contracts import finite
 
 SCHEMA = "atlaspm_multi_horizon_alpha_research_v1"
 MAX_ROWS = 200000
@@ -120,13 +121,42 @@ def _holdout_diagnostics(rows, dates, expected, horizon, start):
     }
 
 
+def _monitor_policy(raw):
+    """Freeze the existing chronological monitor policy before any fitting."""
+    if not isinstance(raw,dict) or set(raw)-{"window_dates","minimum_dates","coverage",
+            "drift_ratio","minimum_improvement","patience","cooldown_dates"}:
+        raise ValueError("INVALID_MULTI_HORIZON_MONITOR_POLICY")
+    policy={"window_dates":20,"minimum_dates":5,"coverage":.9,"drift_ratio":1.5,
+            "minimum_improvement":.05,"patience":3,"cooldown_dates":10,**raw}
+    w,m=policy["window_dates"],policy["minimum_dates"]
+    if type(w) is not int or type(m) is not int or not 2<=m<=w<=252:
+        raise ValueError("INVALID_MULTI_HORIZON_MONITOR_WINDOW")
+    if not (.5<finite(policy["coverage"],"coverage")<1
+            and finite(policy["drift_ratio"],"drift_ratio")>1
+            and 0<=finite(policy["minimum_improvement"],"minimum_improvement")<1):
+        raise ValueError("INVALID_MULTI_HORIZON_MONITOR_THRESHOLDS")
+    for k in ("patience","cooldown_dates"):
+        if type(policy[k]) is not int or not 1<=policy[k]<=252:
+            raise ValueError("INVALID_MULTI_HORIZON_REVIEW_SCHEDULE")
+    return policy
+
+
 def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
-             candidates=None, selection_metric="mae", replay_payload=None, rank_weights=None, strategy_review=False):
+             candidates=None, selection_metric="mae", replay_payload=None, rank_weights=None, strategy_review=False,
+             monitoring=None):
     config = {} if config is None else config
     candidates = [{"model":"historical_mean"},{"model":"ridge"}] if candidates is None else candidates
     names, configs, planned_fits = _plan(payload,horizons,config,candidates,
                                          holdout_start,selection_metric)
     sessions = payload["sessions"]
+    monitor_policy=None if monitoring is None else _monitor_policy(monitoring)
+    if monitor_policy is not None:
+        # One additional historical-mean baseline per fold in the full fit,
+        # even when a selected model is already that baseline. Conservative.
+        planned_fits+=sum((len(sessions)+cfg["test_sessions"]-1)//cfg["test_sessions"]
+                          for cfg in configs.values())
+        if planned_fits>MAX_FOLD_FITS:
+            raise ValueError("MULTI_HORIZON_FOLD_FIT_BUDGET")
     if (replay_payload is None)!=(rank_weights is None):
         raise ValueError("ALPHA_REPLAY_REQUIRES_PAYLOAD_AND_WEIGHTS")
     if type(strategy_review) is not bool or (strategy_review and replay_payload is None):
@@ -149,7 +179,8 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
         if selected["holdout_evaluated"] is not False:
             raise ValueError("MULTI_HORIZON_SELECTION_CONTRACT")
         locks[h] = selected
-    lock_sha = digest({"prefix_sha256":_fingerprint(prefix),"locks":locks})
+    lock_sha = digest({"prefix_sha256":_fingerprint(prefix),"locks":locks,
+                       **({"monitor_policy":monitor_policy} if monitor_policy is not None else {})})
     # Only now validate/consume holdout features and outcomes. No candidate
     # replacement or re-selection is allowed after this point.
     dates = []
@@ -161,8 +192,14 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
     reports = {}
     for h,locked in locks.items():
         winner = locked["selected_model"]
+        opts=dict(locked["selected_config"])
+        if monitor_policy is not None:
+            opts["models"]=[winner] if winner=="historical_mean" else ["historical_mean",winner]
+            opts["monitoring"]={k:v for k,v in monitor_policy.items()
+                                if k not in ("patience","cooldown_dates")}
+            opts["monitoring"].update(baseline="historical_mean",minimum_label_fraction=1.)
         final = tournament.train(tournament.project_features(payload,locked["selected_features"]),
-                                 **locked["selected_config"])
+                                 **opts)
         day = dates[holdout_start]
         if day not in {f["test_start"] for f in final["folds"]}:
             raise ValueError("MULTI_HORIZON_REFIT_BOUNDARY_MISMATCH")
@@ -181,6 +218,17 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
             "status":"DIAGNOSTIC_COMPLETE" if diagnostics["coverage_complete"]
                      else "INCOMPLETE_COHORT_REVIEW_REQUIRED",
         }
+        if monitor_policy is not None:
+            from atlaspm.research.training_autonomy import review_schedule
+            report=final["monitoring"]
+            reports[str(h)]["monitoring"]={"baseline":"historical_mean",
+                "selected_model":winner,"latest":report["daily"][-1],
+                "model_review":report["model_review"],
+                "coverage_as_of_last_prediction":report["coverage_as_of_last_prediction"],
+                "pending_unmatured_dates":report["pending_unmatured_dates"],
+                "retrain_review_requests":review_schedule(report,holdout_start=day,
+                    patience=monitor_policy["patience"],cooldown_dates=monitor_policy["cooldown_dates"]),
+                "training_started_by_monitor":False,"automatic_promotion_enabled":False}
         del rows,final
     return {
         "schema":SCHEMA, **FLAGS,
@@ -189,6 +237,8 @@ def research(payload, *, holdout_start, horizons=(1,5,21), config=None,
         "holdout_start":dates[holdout_start],
         "holdout_mode":"all_horizons_locked_before_any_holdout_training",
         "selection_metric":selection_metric,
+        **({"monitor_policy":monitor_policy,"automatic_retrain_on_drift_enabled":False}
+           if monitor_policy is not None else {}),
         "horizons":reports, "planned_fold_fits_upper_bound":planned_fits,
         "all_nonoverlapping_cohorts_complete":all(
             r["nonoverlapping_diagnostic"]["coverage_complete"] for r in reports.values()),

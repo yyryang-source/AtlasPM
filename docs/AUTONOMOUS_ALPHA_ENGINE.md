@@ -168,3 +168,15 @@ explicit common European cash-settled expiry. No short execution or
 settlement is implemented: the short legs are terminal payoff assumptions,
 not trade drafts. Premium credits cannot fund debits. Explicit scenarios
 are not probabilities or real historical strategy evidence.
+
+Multi-horizon research optionally accepts monitoring (window_dates,
+minimum_dates, coverage, drift_ratio, minimum_improvement, patience,
+cooldown_dates). The policy is bound into the selection lock. A fixed
+historical-mean baseline is fit for diagnostics only, not another candidate
+selection. The existing matured-label monitor and review scheduler are
+reused separately per horizon; only complete matured cohorts are used and
+review requests cannot launch retraining or promotion. The additional
+baseline fits count toward the resource budget. Default behavior is unchanged.
+The hedge scenario module has a read-only CLI using local_data inputs:
+`python -m atlaspm.strategies.options.hedge_scenarios --contracts ... --quotes ... --settlements ... --plan ...`.
+The plan is the explicit JSON keyword arguments of compare_expiry_hedges.

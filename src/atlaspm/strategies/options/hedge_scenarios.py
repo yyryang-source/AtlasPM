@@ -108,3 +108,30 @@ def compare_expiry_hedges(history, *, as_of, spot, spot_available_at, shares,
             "short_option_execution_supported":False,"broker_margin_verified":False,
             "winner_selected":False,"terminal_spot_is_declared_scenario":True,
             "warning":"Terminal payoff only; assumes same reference for stock liquidation and cash settlement, excludes dividends, interest, closing costs and timing/assignment risk. No actual fills, executable hedge, or probability estimate."}
+
+
+def main():
+    """Bounded JSON parameter file and existing normalized quote CSVs."""
+    import argparse
+    import json
+    from pathlib import Path
+    from atlaspm.data.market_db import private_path
+    from atlaspm.data.option_history import OptionHistory
+    parser=argparse.ArgumentParser(description=__doc__)
+    for name in ("contracts","quotes","settlements","plan"):
+        parser.add_argument("--"+name,type=Path,required=True)
+    args=parser.parse_args()
+    path=private_path(args.plan,exists=True)
+    with path.open("rb") as handle:
+        raw=handle.read(65537)
+    if len(raw)>65536:
+        raise ValueError("HEDGE_PLAN_BYTE_BUDGET")
+    from atlaspm.data.api_gateway import _strict_json
+    plan=_strict_json(raw)
+    history=OptionHistory(*(private_path(p,exists=True)
+                             for p in (args.contracts,args.quotes,args.settlements)))
+    print(json.dumps(compare_expiry_hedges(history,**plan),indent=2,allow_nan=False))
+
+
+if __name__=="__main__":
+    main()
