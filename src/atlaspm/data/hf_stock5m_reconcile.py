@@ -120,9 +120,17 @@ def _hf_days(month: str, symbols: list[str]) -> list[tuple]:
                 sum(volume_shares) AS day_volume,
                 min(timestamp_ms) AS first_ms, max(timestamp_ms) AS last_ms,
                 count(*) AS five_minute_bars,
-                count(*) FILTER (WHERE source_minute_bars < 5) AS partial_bars,
-                arg_min(source_minute_bars,timestamp_ms) AS first_minutes,
-                arg_max(source_minute_bars,timestamp_ms) AS last_minutes
+                count(*) FILTER (WHERE source_minute_bars IS DISTINCT FROM 5
+                    OR unique_source_minutes IS DISTINCT FROM 5) AS partial_bars,
+                arg_min(CASE WHEN source_minute_bars=5 AND unique_source_minutes=5 THEN 5 ELSE 0 END,
+                    timestamp_ms) AS first_minutes,
+                arg_max(CASE WHEN source_minute_bars=5 AND unique_source_minutes=5 THEN 5 ELSE 0 END,
+                    timestamp_ms) AS last_minutes,
+                count(DISTINCT timestamp_ms) AS unique_buckets,
+                count(*) FILTER (WHERE timestamp_ms IS NULL OR timestamp_ms % 300000 <> 0
+                    OR close IS NULL OR NOT isfinite(close) OR close <= 0
+                    OR volume_shares IS NULL OR NOT isfinite(volume_shares)
+                    OR volume_shares < 0) AS invalid_bars
             FROM candles
             WHERE symbol IN ({marks}) AND
                   CAST(trade_date_et AS VARCHAR) >= ? AND CAST(trade_date_et AS VARCHAR) < ?
@@ -164,6 +172,9 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         close_mismatches = 0
         volume_mismatches = 0
         partial_volume_days = 0
+        invalid_local_days = 0
+        volume_compared = 0
+        zero_reference_volume_mismatches = 0
         for day in days:
             row = local.get((symbol,day))
             if row is None:
@@ -178,7 +189,15 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                 if len(missing_edges)<40:
                     missing_edges.append({"symbol":symbol,"date":day,"reason":"NON_NYSE_DAY"})
                 continue
-            (sym,dt,op,high,low,close,vol,first,last,n,partial,first_min,last_min) = row
+            (sym,dt,op,high,low,close,vol,first,last,n,partial,first_min,last_min,
+             unique_buckets,invalid_bars) = row
+            if invalid_bars or unique_buckets!=n:
+                invalid_local_days += 1
+                if len(missing_edges)<40:
+                    missing_edges.append({"symbol":symbol,"date":day,
+                                          "reason":"INVALID_OR_DUPLICATE_LOCAL_BARS",
+                                          "observed_bars":int(n)})
+                continue
             if (int(first)!=opening or int(last)!=closing-300_000 or
                     int(first_min)!=5 or int(last_min)!=5):
                 edge_skipped += 1
@@ -194,6 +213,19 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                 partial_volume_days += 1
             volume_diff = (100*abs(float(vol)-ref_volume)/ref_volume
                            if complete_rth and ref_volume>0 else None)
+            if complete_rth:
+                if ref_volume==0:
+                    if float(vol)==0:
+                        volume_diff=0.0
+                    else:
+                        zero_reference_volume_mismatches+=1
+                        if len(high_volume)<40:
+                            high_volume.append({"symbol":symbol,"date":day,
+                                                "hf_volume":float(vol),"reference_volume":0,
+                                                "pct_difference":None,
+                                                "reason":"ZERO_REFERENCE_NONZERO_LOCAL_VOLUME"})
+                if volume_diff is not None:
+                    volume_compared+=1
             compared += 1
             max_close=max(max_close,diff)
             if volume_diff is not None:
@@ -217,6 +249,9 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                                 for sym,day in local)
         results.append({"symbol":symbol,"reference_days":len(days),
                         "compared_days":compared,
+                        "volume_compared_days":volume_compared,
+                        "invalid_local_bar_days":invalid_local_days,
+                        "zero_reference_volume_mismatches":zero_reference_volume_mismatches,
                         "missing_hf_days":missing_hf,
                         "local_days_without_reference":missing_reference,
                         "skipped_incomplete_daily_boundaries":edge_skipped,
@@ -224,15 +259,19 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
                         "volume_outliers":volume_mismatches,
                         "incomplete_rth_volume_days":partial_volume_days,
                         "max_close_difference_pct":round(max_close,4) if compared else None,
-                        "max_volume_difference_pct":round(max_volume,4) if compared else None})
+                        "max_volume_difference_pct":round(max_volume,4) if volume_compared else None})
     compared_total = sum(x["compared_days"] for x in results)
     issues = []
     if not compared_total:
         issues.append("NO_COMPARABLE_DAYS")
     if any(x["close_outliers"] for x in results):
         issues.append("REFERENCE_CLOSE_DIVERGENCE")
-    if any(x["volume_outliers"] for x in results):
+    if any(x["volume_outliers"] or x["zero_reference_volume_mismatches"] for x in results):
         issues.append("REFERENCE_VOLUME_DIVERGENCE")
+    if any(not x["compared_days"] for x in results):
+        issues.append("REQUESTED_SYMBOL_WITHOUT_COMPARABLE_DAYS")
+    if any(x["invalid_local_bar_days"] for x in results):
+        issues.append("INVALID_OR_DUPLICATE_LOCAL_BARS")
     if any(x["incomplete_rth_volume_days"] for x in results):
         issues.append("PARTIAL_RTH_VOLUME_NOT_COMPARABLE")
     if any(x["skipped_incomplete_daily_boundaries"] for x in results):
@@ -246,6 +285,7 @@ def reconcile(month: str, *, symbols: list[str] | None = None,
         "reference_basis":"UNVERIFIED_SPLIT_ADJUSTMENT_MAY_DIFFER",
         "selected_symbols":symbols,"per_symbol":results,
         "compared_symbol_days":compared_total,
+        "volume_compared_symbol_days":sum(x["volume_compared_days"] for x in results),
         "close_tolerance_pct":close_tolerance_pct,
         "volume_tolerance_pct":volume_tolerance_pct,
         "close_outlier_examples":high_close,

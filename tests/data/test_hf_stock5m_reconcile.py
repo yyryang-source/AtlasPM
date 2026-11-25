@@ -31,7 +31,7 @@ class ReconcileTests(unittest.TestCase):
         os.chdir(self.prev)
         self.temp.cleanup()
 
-    def seed(self, *, close=105, missing_end=False, missing_middle=False):
+    def seed(self, *, close=105, missing_end=False, missing_middle=False, mutation=None):
         cx=duckdb.connect()
         count=77 if missing_end else 78
         where="WHERE i <> 15" if missing_middle else ""
@@ -51,6 +51,8 @@ class ReconcileTests(unittest.TestCase):
                    5::BIGINT AS unique_source_minutes
             FROM range({count}) t(i) {where}
         """)
+        if mutation:
+            cx.execute(mutation)
         cx.execute(f"COPY rows TO '{hf_stock5m._quote(self.source)}' (FORMAT PARQUET)")
         cx.close()
 
@@ -102,6 +104,67 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(1,report["per_symbol"][0]["incomplete_rth_volume_days"])
         self.assertIn("PARTIAL_RTH_VOLUME_NOT_COMPARABLE",report["review_reasons"])
         self.assertEqual(0,report["per_symbol"][0]["volume_outliers"])
+
+    def test_missing_requested_symbol_blocks_otherwise_matching_sample(self):
+        self.seed()
+        self.write([{"date":"2026-03-02","symbol":"SPY","close":105,"volume":780}])
+        r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY","QQQ"],
+                                        reference_csv=self.reference,save=False)
+        self.assertEqual(r["compared_symbol_days"],1)
+        self.assertIn("REQUESTED_SYMBOL_WITHOUT_COMPARABLE_DAYS",r["review_reasons"])
+        self.assertFalse(r["reference_prices_reconciled"])
+
+    def test_duplicate_bucket_masks_missing_bucket(self):
+        self.seed(mutation="UPDATE rows SET timestamp_ms=timestamp_ms-300000 WHERE timestamp_ms=(SELECT min(timestamp_ms)+600000 FROM rows)")
+        self.write([{"date":"2026-03-02","symbol":"SPY","close":105,"volume":780}])
+        r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY"],
+                                        reference_csv=self.reference,save=False)
+        self.assertIn("INVALID_OR_DUPLICATE_LOCAL_BARS",r["review_reasons"])
+        self.assertEqual(r["compared_symbol_days"],0)
+        self.assertFalse(r["reference_prices_reconciled"])
+
+    def test_bad_interior_values_or_off_grid_bucket_block(self):
+        for sql in ("UPDATE rows SET timestamp_ms=timestamp_ms+1 WHERE timestamp_ms=(SELECT min(timestamp_ms)+600000 FROM rows)",
+                    "UPDATE rows SET close='NaN'::DOUBLE WHERE timestamp_ms=(SELECT min(timestamp_ms)+600000 FROM rows)",
+                    "UPDATE rows SET volume_shares=-1 WHERE timestamp_ms=(SELECT min(timestamp_ms)+600000 FROM rows)"):
+            with self.subTest(sql=sql):
+                if self.source.exists():
+                    self.source.unlink()
+                self.seed(mutation=sql)
+                self.write([{"date":"2026-03-02","symbol":"SPY","close":105,"volume":780}])
+                r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY"],
+                                                reference_csv=self.reference,save=False)
+                self.assertIn("INVALID_OR_DUPLICATE_LOCAL_BARS",r["review_reasons"])
+                self.assertFalse(r["reference_prices_reconciled"])
+
+    def test_distinct_source_minutes_are_required(self):
+        self.seed(mutation="UPDATE rows SET unique_source_minutes=4 WHERE timestamp_ms=(SELECT min(timestamp_ms)+600000 FROM rows)")
+        self.write([{"date":"2026-03-02","symbol":"SPY","close":105,"volume":780}])
+        r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY"],
+                                        reference_csv=self.reference,save=False)
+        self.assertEqual(r["compared_symbol_days"],1)
+        self.assertEqual(r["volume_compared_symbol_days"],0)
+        self.assertIsNone(r["per_symbol"][0]["max_volume_difference_pct"])
+        self.assertIn("PARTIAL_RTH_VOLUME_NOT_COMPARABLE",r["review_reasons"])
+        self.assertFalse(r["reference_prices_reconciled"])
+
+    def test_zero_reference_volume_not_silently_skipped(self):
+        self.seed()
+        self.write([{"date":"2026-03-02","symbol":"SPY","close":105,"volume":0}])
+        r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY"],
+                                        reference_csv=self.reference,save=False)
+        self.assertIn("REFERENCE_VOLUME_DIVERGENCE",r["review_reasons"])
+        self.assertEqual(r["per_symbol"][0]["zero_reference_volume_mismatches"],1)
+        self.assertEqual(r["volume_compared_symbol_days"],0)
+        self.assertIsNone(r["per_symbol"][0]["max_volume_difference_pct"])
+        self.assertFalse(r["reference_prices_reconciled"])
+        self.source.unlink()
+        self.seed(mutation="UPDATE rows SET volume_shares=0")
+        r=hf_stock5m_reconcile.reconcile("2026-03",symbols=["SPY"],
+                                        reference_csv=self.reference,save=False)
+        self.assertEqual(r["volume_compared_symbol_days"],1)
+        self.assertEqual(r["per_symbol"][0]["max_volume_difference_pct"],0)
+        self.assertTrue(r["reference_prices_reconciled"])
 
     def test_duplicate_reference_days_fail_closed(self):
         self.seed()
