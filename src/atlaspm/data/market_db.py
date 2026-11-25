@@ -265,6 +265,10 @@ def register_parser(sub):
     actions = p.add_subparsers(dest='db_action',required=True)
     actions.add_parser('init')
     actions.add_parser('status')
+    actions.add_parser('infrastructure-status',help='Read-only data adapter and schema inventory')
+    q=actions.add_parser('reference-lookup',help='Current stored reference terms by exact identifier')
+    q.add_argument('--dataset',choices=('option_contracts','bond_terms'),required=True)
+    q.add_argument('--identifier',action='append',required=True)
     t = actions.add_parser('fetch-treasury', help='Download official US Treasury auction CSV pages')
     t.add_argument('--max-pages', type=int, default=0, help='0=all pages, otherwise limit download')
     t.add_argument('--refresh', action='store_true')
@@ -486,6 +490,12 @@ def register_parser(sub):
             q.add_argument('--as-of',default=None)
 
 def run(args):
+    if args.db_action == 'infrastructure-status':
+        from atlaspm.data.infrastructure import inspect
+        return inspect(database=args.db)
+    if args.db_action == 'reference-lookup':
+        from atlaspm.data.unified import read_reference
+        return read_reference(args.dataset,identifiers=args.identifier,database=args.db)
     if args.db_action == 'factor-v3-analyze':
         from atlaspm.data import factor_v3
         return factor_v3.analyze(

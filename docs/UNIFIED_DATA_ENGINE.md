@@ -465,3 +465,32 @@ Affected signal months are not a security's effective interval. Missing
 feature history may require longer warmup or data repair, and visible
 actions may require continued exclusion. Prioritize authentic independent
 source acquisition; do not generate claim files from this queue.
+
+
+### Data infrastructure inventory and current reference lookup
+
+Run python -m atlaspm.data.infrastructure status to inspect the existing
+SQLite schema, date-range reader catalog, current reference routes,
+specialized data adapters and provider configuration/health. The command
+does not download, create a database, scan a historical archive or assert
+coverage. A table schema can exist while its contents are empty.
+
+Use python -m atlaspm.data.infrastructure reference --dataset option_contracts
+--identifier OPTION_SYMBOL (repeat --identifier up to 128 times), or
+--dataset bond_terms --identifier CUSIP. The API is unified.read_reference.
+This is an exact current stored reference lookup, distinct from iter_batches:
+expiration and maturity dates are not observation dates. Missing identifiers
+and null optional fields are reported. As-of, training and formal backtest
+requests are denied; the existing upserted tables are not versioned security
+master history. No new store or changes to canonical market files.
+IBKR L1, FRED date-vintage, licensed news/report intake and specialized feeds
+retain their existing consent/rights boundaries and entry points. Inventory
+does not invoke them. JSON transport also rejects duplicate object keys,
+overflowed float values and sanitizes truncated HTTP responses.
+
+The same functions are available through the stable main CLI:
+`atlaspm market-db infrastructure-status` and
+`atlaspm market-db reference-lookup --dataset bond_terms --identifier CUSIP`.
+The status report additionally distinguishes configured credentials from
+rights syntax, paid-feed request budgets, required bearer token, external AI
+opt-in and open-circuit blockers. No reported readiness is authorization.
