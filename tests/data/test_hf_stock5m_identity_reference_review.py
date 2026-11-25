@@ -90,6 +90,21 @@ class ReferenceTests(unittest.TestCase):
                 self.assertEqual(out["point_status_counts"], {expected: 1})
                 self.assertEqual(out["prior_known_declared_overlap_symbol_days"], 0)
 
+    def test_cross_symbol_source_key_overlap_and_cutoff(self):
+        a = self.row()
+        b = self.row(reference_id="r2", symbol="OTHER")
+        out = self.review(reference_file=self.write(a, b))
+        self.assertEqual(out["point_status_counts"], {"REFERENCE_SOURCE_KEY_OVERLAP": 1})
+        self.assertEqual(out["prior_known_declared_overlap_symbol_days"], 0)
+        b["known_date"] = "2000-04-02"
+        out = self.review(reference_file=self.write(a, b))
+        self.assertEqual(out["point_status_counts"], {"REFERENCE_SOURCE_KEY_OVERLAP": 1})
+        self.assertEqual(out["prior_known_declared_overlap_symbol_days"], 1)
+        b["valid_from"] = "2000-04-01"
+        b["valid_to"] = None
+        out = self.review(reference_file=self.write(a, b))
+        self.assertEqual(out["point_status_counts"], {"DECLARED_CIK_SYMBOL_MIC_AGREEMENT": 1})
+
     def test_cik_reuse_no_day_double_count_and_future_sec(self):
         f = self.write(self.row())
         out = self.review([candidate(), candidate()], reference_file=f)
@@ -113,6 +128,7 @@ class ReferenceTests(unittest.TestCase):
     def test_reject_bad_hash_sec_sources_duplicate_and_pipeline_artifact(self):
         rows = [self.row(evidence_sha256="0"*64),
                 self.row(source_url="https://www.sec.gov/a"),
+                self.row(source_url="https://www.sec.gov./a"),
                 self.row(source_url="https://user@example.org/a"),
                 self.row(valid_to="2000-03-01"),
                 self.row(cik="1")]

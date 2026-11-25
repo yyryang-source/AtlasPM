@@ -47,7 +47,7 @@ def _url(value):
     if not isinstance(value, str) or len(value) > 2048 or any(c.isspace() for c in value):
         raise ValueError("Invalid reference HTTPS URL")
     u = urlsplit(value)
-    host = u.hostname
+    host = u.hostname.rstrip(".") if u.hostname else None
     if (u.scheme != "https" or not host or "." not in host
             or u.username is not None or u.password is not None or u.fragment
             or host == "sec.gov" or host.endswith(".sec.gov")):
@@ -147,7 +147,7 @@ def _effective(rows, day, cutoff):
             and (r["valid_to"] is None or day < r["valid_to"])]
 
 
-def _classify(candidate, effective, competing):
+def _classify(candidate, effective, competing, *, day, cutoff, by_key):
     if competing:
         return "SEC_CIK_COLLISION_REVIEW_REQUIRED"
     if not effective:
@@ -165,6 +165,14 @@ def _classify(candidate, effective, competing):
         return "SEC_EXCHANGE_UNRESOLVED"
     if {r["exchange"] for r in effective} != {mic}:
         return "REFERENCE_EXCHANGE_CONFLICT"
+    # A source-local security identifier is not a globally stable ID.
+    # Contradictory simultaneous assignments are review blockers, including
+    # cross-symbol cases that a symbol-only join would otherwise miss.
+    for r in effective:
+        simultaneous = _effective(by_key[(r["source_family"], r["source_security_key"])],
+                                  day, cutoff)
+        if len({(x["cik"], x["symbol"], x["exchange"]) for x in simultaneous}) > 1:
+            return "REFERENCE_SOURCE_KEY_OVERLAP"
     return "DECLARED_CIK_SYMBOL_MIC_AGREEMENT"
 
 
@@ -177,26 +185,39 @@ def review(candidates, observed_days, *, as_of, reference_file=None, scan_comple
     """
     as_of = _date(as_of)
     references, manifest = load_reference(reference_file) if reference_file else ([], None)
-    by_symbol, claims = defaultdict(list), defaultdict(set)
+    by_symbol, by_key = defaultdict(list), defaultdict(list)
     for r in references:
         by_symbol[r["symbol"]].append(r)
+        key = (r["source_family"], r["source_security_key"])
+        by_key[key].append(r)
+        if len(by_key[key]) > MAX_PER_SYMBOL:
+            raise ValueError("Too many intervals for one source security key; use a scoped batch")
+    # Earliest dated evidence per symbol/CIK makes collision checks constant
+    # time per observed day, rather than scanning the entire candidate page.
+    first_filed = defaultdict(dict)
     for c in candidates:
         if c["filed_date"] < as_of:
-            claims[c["symbol"]].add(c["cik"])
+            previous = first_filed[c["symbol"]].get(c["cik"], c["filed_date"])
+            first_filed[c["symbol"]][c["cik"]] = min(previous, c["filed_date"])
+    second_filed = {}
+    for symbol, dates in first_filed.items():
+        ordered = sorted(dates.values())
+        if len(ordered) > 1:
+            second_filed[symbol] = ordered[1]
     points, queues = [], []
     point_counts = Counter()
     day_outcomes = defaultdict(set)
     for c in candidates:
         symbol = c["symbol"]
         anchor = _anchor(c)
-        competing = len(claims[symbol]) > 1
+        competing = symbol in second_filed
         rows = by_symbol[symbol]
         visible = _effective(rows, anchor, as_of)
         if c["filed_date"] >= as_of or anchor >= as_of:
             status = "SEC_LEAD_NOT_VISIBLE_AT_REVIEW_CUTOFF"
             visible = []
         else:
-            status = _classify(c, visible, competing)
+            status = _classify(c, visible, competing, day=anchor, cutoff=as_of, by_key=by_key)
         points.append({
             "cik": c["cik"], "symbol": symbol, "kind": c["kind"],
             "anchor_calendar_date": anchor, "anchor_is_not_effective_date": True,
@@ -228,9 +249,9 @@ def review(candidates, observed_days, *, as_of, reference_file=None, scan_comple
                 day_outcomes[key].add("SEC_NOT_PRIOR_KNOWN")
                 continue
             # Do not project a later SEC claim about a reused code backwards.
-            prior_ciks = {x["cik"] for x in candidates
-                          if x["symbol"] == symbol and x["filed_date"] < day}
-            day_outcomes[key].add(_classify(c, _effective(rows, day, day), len(prior_ciks) > 1))
+            competing_on_day = symbol in second_filed and second_filed[symbol] < day
+            day_outcomes[key].add(_classify(c, _effective(rows, day, day), competing_on_day,
+                                           day=day, cutoff=day, by_key=by_key))
     day_counts = Counter()
     for outcomes in day_outcomes.values():
         considered = outcomes - {"SEC_NOT_PRIOR_KNOWN"}

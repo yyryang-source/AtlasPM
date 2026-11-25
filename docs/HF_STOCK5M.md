@@ -1000,3 +1000,9 @@ source-key conflicts block agreement; lack of agreement is not proof of
 nonmembership. This module never writes the V5.3 reviewed ledger, grants
 backtest/training authorization, or modifies raw bars. Independently
 verified evidence and manual review remain required.
+
+A source-local key with contradictory simultaneously effective and visible
+symbol/CIK/venue assignments also blocks agreement. Later-known conflicts
+are not used in earlier daily statistics. A source key is never promoted
+to an AtlasPM global security ID. At most 100 normalized rows may share a
+source family/key in a batch.
