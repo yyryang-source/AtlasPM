@@ -43,12 +43,14 @@ class DataPreparationTests(unittest.TestCase):
                 os.chdir(folder)
                 rows=[_row("2000-01")]
                 counts={str(h):{"fold_count":2,"folds_meeting_sample_minimum":1,
-                                "labeled_feature_complete_rows":200} for h in (1,5,21)}
+                                "labeled_feature_complete_rows":200,
+                                "folds_meeting_closing_path_sample_minimum":0} for h in (1,5,21)}
                 checked={"status":"STRUCTURAL_PREFLIGHT_COMPLETE_TRAINING_BLOCKED",
                          "dataset_id":"a"*64,"lineage_id":"b"*64,
                          "label_paths_reconciled":True,"feature_source_reconciled":True,
                          "observed_rows":300,"feature_complete_rows":200,"calendar_sessions":180,
-                         "sessions_without_observations":0,"horizons":counts,"blockers":["DATA_RIGHTS_UNVERIFIED"]}
+                         "sessions_without_observations":0,"rows_missing_session_closing_bar":2,
+                         "horizons":counts,"blockers":["DATA_RIGHTS_UNVERIFIED"]}
                 with patch.object(admission,"_archive_inventory",return_value=rows), \
                      patch("atlaspm.research.real_dataset_v6._calendar",return_value=[(f"day-{i}",0,0) for i in range(180)]), \
                      patch("atlaspm.research.real_dataset_v6._folds",return_value=[{},{}]), \
@@ -68,6 +70,8 @@ class DataPreparationTests(unittest.TestCase):
                     self.assertEqual(result["status"],"RESEARCH_DATASET_PREPARED_TRAINING_BLOCKED")
                     self.assertFalse(result["all_folds_meet_sample_minimum"])
                     self.assertIn("INSUFFICIENT_FOLD_SAMPLE_COUNTS:21",result["blockers"])
+                    self.assertFalse(result["all_folds_meet_closing_path_minimum"])
+                    self.assertIn("INSUFFICIENT_CLOSING_PATH_FOLD_SAMPLES:21",result["blockers"])
                     self.assertFalse(result["approved_for_model_training"])
                     self.assertFalse(result["model_registry_admission"])
                     self.assertFalse(Path("local_data/training/v6/.prepare.lock").exists())

@@ -24,7 +24,7 @@ class RealDatasetTests(unittest.TestCase):
         self.addCleanup(os.chdir,old)
         Path("local_data").mkdir()
 
-    def seed(self,duplicate=False):
+    def seed(self,duplicate=False,early_close_observation=False):
         try:
             import duckdb
         except ImportError:
@@ -40,7 +40,7 @@ class RealDatasetTests(unittest.TestCase):
                 for i,(d,o,c) in enumerate(CAL):
                     if not d.startswith(month):
                         continue
-                    rows.append(("ABC",d,10+i,c-300000,.1 if i else None))
+                    rows.append(("ABC",d,10+i,c-(600000 if early_close_observation and i==3 else 300000),.1 if i else None))
                     if i!=2:
                         rows.append(("GAP",d,20+i,c-300000,.2))
                 if duplicate:
@@ -136,6 +136,26 @@ class RealDatasetTests(unittest.TestCase):
         self.assertEqual(report["models_fitted"],0)
         self.assertFalse(report["approved_for_model_training"])
         self.assertFalse(report["live_execution_enabled"])
+
+    def test_closing_path_excludes_early_observation_across_label_window(self):
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        # A missing closing bar at an otherwise present session must not
+        # disappear from the original observed-price sample. Instead it
+        # excludes paths crossing that session from stricter sample counts.
+        self.seed(early_close_observation=True)
+        r=self.build()
+        with patch.object(v,"_calendar",return_value=CAL):
+            report=pre.run(r["dataset_id"],minimum_train_rows=1,minimum_test_rows=1)
+        self.assertEqual(report["observed_rows"],11)
+        self.assertEqual(report["rows_missing_session_closing_bar"],1)
+        one=report["horizons"]["1"]
+        self.assertEqual(one["rows_excluded_by_closing_path"],2)
+        self.assertEqual(one["closing_path_labeled_feature_complete_rows"],
+                         one["labeled_feature_complete_rows"]-2)
+        # Original observed-price labels and publication guards are unchanged.
+        self.assertTrue(report["label_paths_reconciled"])
+        self.assertFalse(report["approved_for_model_training"])
+        self.assertFalse(report["model_registry_admission"])
 
     def test_preflight_rejects_rehashed_incorrect_label(self):
         from atlaspm.research import real_dataset_preflight_v61 as pre

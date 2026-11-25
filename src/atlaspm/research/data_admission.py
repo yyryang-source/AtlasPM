@@ -192,18 +192,24 @@ def prepare_real_research(start_month,end_month,*,execute=False,warmup_months=2,
         if set(checked["horizons"])!=set(expected_folds):
             raise ValueError("DATA_PREPARATION_HORIZON_MISMATCH")
         counts_ok=True
+        closing_counts_ok=True
         for h,counts in checked["horizons"].items():
             if counts["fold_count"]!=expected_folds[h]:
                 raise ValueError("DATA_PREPARATION_FOLD_COUNT_MISMATCH")
             if not counts["fold_count"] or counts["folds_meeting_sample_minimum"]!=counts["fold_count"]:
                 counts_ok=False
                 blockers.add("INSUFFICIENT_FOLD_SAMPLE_COUNTS:"+h)
+            if not counts["fold_count"] or counts["folds_meeting_closing_path_sample_minimum"]!=counts["fold_count"]:
+                closing_counts_ok=False
+                blockers.add("INSUFFICIENT_CLOSING_PATH_FOLD_SAMPLES:"+h)
         blockers.add("INDEPENDENT_REAL_TRAINING_ADMISSION_REQUIRED")
         result.update(status="RESEARCH_DATASET_PREPARED_TRAINING_BLOCKED",
                       observed_rows=checked["observed_rows"],feature_complete_rows=checked["feature_complete_rows"],
                       calendar_sessions=checked["calendar_sessions"],
                       sessions_without_observations=checked["sessions_without_observations"],
                       horizon_sample_counts=checked["horizons"],all_folds_meet_sample_minimum=counts_ok,
+                      all_folds_meet_closing_path_minimum=closing_counts_ok,
+                      rows_missing_session_closing_bar=checked["rows_missing_session_closing_bar"],
                       feature_source_reconciled=True,label_paths_reconciled=True,
                       structural_preflight_complete=True,blockers=sorted(blockers))
         return result

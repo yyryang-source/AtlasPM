@@ -48,23 +48,38 @@ def _check_partition(cx,path,month,features,horizons):
 
 
 def _check_labels(cx,paths,month,horizons):
-    """Recompute labels from sample price paths, not from stored label flags."""
+    """Recompute observed-price labels and count stricter closing-bar paths.
+
+    A last observed intraday bar is not necessarily the session close.
+    Reuse the existing window pass to count complete closing-bar paths
+    (including every intermediate session), without changing stored labels.
+    A closing bar is still not proof of vendor completeness or availability.
+    """
     src=factor._files_sql(paths)
     # Count the rows in the exact calendar range, independently of LEAD.
     # A duplicate key is rejected before this query runs.
     expr=[]
     for h in horizons:
         expr.extend([f"count(*) OVER (PARTITION BY symbol ORDER BY session_index RANGE BETWEEN CURRENT ROW AND {h} FOLLOWING) AS n{h}",
-                     f"last_value(close) OVER (PARTITION BY symbol ORDER BY session_index RANGE BETWEEN CURRENT ROW AND {h} FOLLOWING) AS p{h}"])
+                     f"last_value(close) OVER (PARTITION BY symbol ORDER BY session_index RANGE BETWEEN CURRENT ROW AND {h} FOLLOWING) AS p{h}",
+                     f"count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms) OVER (PARTITION BY symbol ORDER BY session_index RANGE BETWEEN CURRENT ROW AND {h} FOLLOWING) AS close_n{h}"])
     checks=[]
     for h in horizons:
         expected=f"CASE WHEN n{h}={h+1} AND isfinite(p{h}/close) THEN p{h}/close-1 END"
         checks.append(f"label_{h}d IS DISTINCT FROM ({expected})")
-    mismatch=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
-        SELECT count(*) FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
-        AND ({" OR ".join(checks)})""",[month]).fetchone()[0]
+    # Only aggregate integer counts per session in Python. The independent
+    # partition check already verified assumed feature time against calendar.
+    strict=", ".join(f"count(*) FILTER (WHERE features_complete AND label_{h}d IS NOT NULL AND close_n{h}={h+1})" for h in horizons)
+    counts=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
+        SELECT session_index,count(*) FILTER (WHERE {" OR ".join(checks)}),
+               count(*) FILTER (WHERE last_bar_available_at_ms=earliest_assumed_feature_time_ms),{strict}
+        FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
+        GROUP BY session_index ORDER BY session_index""",[month]).fetchall()
+    mismatch=sum(row[1] for row in counts)
     if mismatch:
         raise ValueError(f"Label path reconciliation failed for {month}: {mismatch} rows")
+    return [(int(i),int(close_count),*[int(n) for n in strict_counts])
+            for i,_,close_count,*strict_counts in counts]
 
 
 def _source_inputs(manifest):
@@ -117,6 +132,8 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
     horizon_counts={h:[0]*len(calendar) for h in c["horizons"]}
     pred=[0]*len(calendar)
     observed=[0]*len(calendar)
+    closing_observed=[0]*len(calendar)
+    close_path_counts={h:[0]*len(calendar) for h in c["horizons"]}
     try:
         dataset._install_calendar(cx,calendar)
         for month,p in paths.items():
@@ -124,7 +141,10 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             _check_feature_source(cx,p,source_paths[month],c["features"])
         for month,p in paths.items():
             window=dataset._window(month,months,calendar,max(c["horizons"]))
-            _check_labels(cx,[paths[k] for k in window],month,c["horizons"])
+            for i,closing,*counts in _check_labels(cx,[paths[k] for k in window],month,c["horizons"]):
+                closing_observed[i]=closing
+                for h,count in zip(c["horizons"],counts,strict=True):
+                    close_path_counts[h][i]=count
             src=factor._files_sql([p])
             cols=", ".join(f"count(*) FILTER (WHERE features_complete AND label_{h}d IS NOT NULL)" for h in c["horizons"])
             for row in cx.execute(f"""SELECT session_index,count(*),count(*) FILTER (WHERE features_complete),{cols}
@@ -148,20 +168,34 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
     totals={}
     for h,counts in horizon_counts.items():
         prefix=_prefix(counts)
+        strict_prefix=_prefix(close_path_counts[h])
+        if any(a>b for a,b in zip(close_path_counts[h],counts,strict=True)):
+            raise ValueError("Closing-bar label count exceeds observed label count")
         rows=[]
         for f in dataset._folds(calendar,h,c["minimum_train_sessions"],c["test_sessions"],c["embargo_sessions"]):
             train=_sum(prefix,f["train_start_index"],f["train_end_index"])
             test=_sum(prefix,f["test_start_index"],f["test_end_index"])
             predictions=_sum(prediction_prefix,f["test_start_index"],f["test_end_index"])
+            strict_train=_sum(strict_prefix,f["train_start_index"],f["train_end_index"])
+            strict_test=_sum(strict_prefix,f["test_start_index"],f["test_end_index"])
             rows.append({**f,"train_labeled_rows":train,"test_labeled_rows":test,
                          "test_feature_complete_rows":predictions,"test_missing_labels":predictions-test,
-                         "sample_count_pass":train>=minimum_train_rows and test>=minimum_test_rows})
+                         "sample_count_pass":train>=minimum_train_rows and test>=minimum_test_rows,
+                         "closing_path_train_rows":strict_train,"closing_path_test_rows":strict_test,
+                         "closing_path_sample_count_pass":strict_train>=minimum_train_rows and strict_test>=minimum_test_rows})
         folds[str(h)]=rows
         totals[str(h)]={"labeled_feature_complete_rows":sum(counts),"fold_count":len(rows),
-                        "folds_meeting_sample_minimum":sum(f["sample_count_pass"] for f in rows)}
+                        "folds_meeting_sample_minimum":sum(f["sample_count_pass"] for f in rows),
+                        "closing_path_labeled_feature_complete_rows":sum(close_path_counts[h]),
+                        "rows_excluded_by_closing_path":sum(counts)-sum(close_path_counts[h]),
+                        "folds_meeting_closing_path_sample_minimum":sum(f["closing_path_sample_count_pass"] for f in rows)}
     report={"schema":SCHEMA,**v4.GUARDS,"dataset_id":dataset_id,
             "status":"STRUCTURAL_PREFLIGHT_COMPLETE_TRAINING_BLOCKED",
             "observed_rows":sum(observed),"feature_complete_rows":sum(pred),
+            "observed_session_closing_bar_rows":sum(closing_observed),
+            "rows_missing_session_closing_bar":sum(observed)-sum(closing_observed),
+            "closing_path_rule":"All h+1 observed bars end at their session close; features complete; observed label present",
+            "closing_path_counts_are_diagnostic":True,
             "calendar_sessions":len(calendar),"sessions_without_observations":sum(n==0 for n in observed),
             "minimum_train_rows":minimum_train_rows,"minimum_test_rows":minimum_test_rows,
             "label_paths_reconciled":True,"feature_source_reconciled":True,

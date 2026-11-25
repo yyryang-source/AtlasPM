@@ -327,3 +327,15 @@ Missing source months or impossible fold calendar stop before maintenance.
 This entry point serializes its own writers; stop other direct builders or
 downloaders modifying these inputs. A stale lock requires operator review.
 No trainer or independent data/model approval is invoked.
+
+
+The dataset preflight additionally reports strict closing-bar-path sample
+counts per horizon and fold. An otherwise valid observed-price label is
+excluded from those counts if any session in its h+1-session path lacks
+a last bar ending exactly at the calendar session close (including early
+closes). Original research partitions and observed-price labels are unchanged.
+This is a conservative structural filter, not verification of completeness
+within the session, historical identity, adjustments, vendor availability
+or rights. The preparation pipeline reports a separate blocker if strict
+fold sample minima fail. Aggregation reuses the existing label window pass;
+no second sample warehouse or model fitting is introduced.
