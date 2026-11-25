@@ -318,9 +318,15 @@ PAPER_MARKET_RESERVATION = Path("local_data/ibkr_paper_market_reservation.json")
 def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                      include_history=False, output=None, research_assets=None,
                      research_seen=None, event_threshold=None, portfolio_review=False,
-                     runtime_review=False):
+                     runtime_review=False, alpha_ingest=False):
     """Short, local Paper-only probe. No data retention without separate rights."""
-    local_rights("ibkr", retention=output is not None)
+    if type(alpha_ingest) is not bool or (alpha_ingest and research_assets is None):
+        raise ValueError("Alpha ingestion requires reviewed research assets")
+    local_rights("ibkr", retention=output is not None or alpha_ingest)
+    if alpha_ingest:
+        import os
+        if os.environ.get("ATLASPM_IBKR_LOCAL_AI_RIGHTS") != "1":
+            raise ValueError("IBKR local AI rights required")
     if type(polls) is not int or not 2 <= polls <= 3:
         raise ValueError("Symbol probe requires 2..3 polls (first is preflight)")
     if (type(available_lines) is not int or not 1 <= available_lines <= 100
@@ -450,6 +456,13 @@ def run_symbol_probe(symbols, *, available_lines, dedicated_session, polls=3,
                                         "research_contract": None, "fusion": None,
                                         "execution_price_eligible": False,
                                         "portfolio_mark_eligible": False}
+            if alpha_ingest:
+                from atlaspm.research.alpha_sources import market_observation
+                result["alpha_evidence_added"] = sum(
+                    market_observation(identity, histories[symbol], by_id[identity["conid"]],
+                                       asset_type=research_assets[symbol], as_of=cutoff)
+                    for symbol, identity in identities.items()
+                    if research[symbol]["status"] == "DESCRIPTIVE_RESEARCH_COMPLETED")
             result["research"] = {}
             for symbol, row in research.items():
                 checked = row["research_contract"]
@@ -505,6 +518,7 @@ def main():
     parser.add_argument("--history", action="store_true", help="Symbol probe: request 1d/5min history")
     parser.add_argument("--research-asset", action="append", default=[],
                         help="Reviewed SYMBOL=stock or SYMBOL=etf; requires --history for all symbols")
+    parser.add_argument("--alpha-ingest", action="store_true", help="Send descriptive market evidence to unified local AI inbox")
     parser.add_argument("--save-local", action="store_true", help="Symbol probe: requires separate local retention rights")
     parser.add_argument("--available-lines", type=int, required=True)
     parser.add_argument("--dedicated-session", action="store_true")
@@ -530,7 +544,7 @@ def main():
                                       dedicated_session=args.dedicated_session, polls=args.polls,
                                       include_history=args.history,
                                       output=True if args.save_local else None,
-                                      research_assets=research_assets)
+                                      research_assets=research_assets, alpha_ingest=args.alpha_ingest)
             print(json.dumps(result, indent=2))
         except (OSError, ValueError, TypeError, KeyError) as exc:
             # Market rights and safe identity failures are actionable. Do not
@@ -542,7 +556,7 @@ def main():
                 parser.exit(1, "IBKR market probe failed: " + str(exc) + "\n")
             parser.exit(1, "IBKR market probe failed; verify local profile and session\n")
         return
-    if args.history or args.save_local or args.research_asset:
+    if args.history or args.save_local or args.research_asset or args.alpha_ingest:
         parser.error("--history, --save-local and --research-asset require --symbol")
     local_rights("ibkr")
     transport = LocalGatewayTransport(args.gateway_url, ca_file=args.ca_file)
