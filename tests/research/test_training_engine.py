@@ -109,6 +109,28 @@ class TrainTests(unittest.TestCase):
         self.assertEqual(a["predictions"]["ridge"][:20],b["predictions"]["ridge"][:20])
 
 
+    def test_blocked_ridge_matches_dense_reference(self):
+        import numpy as np
+        from atlaspm.research.training_models import fit_standardized_ridge, _predict_tabular_fold
+        from atlaspm.research.training_memory import standardize_training_features
+        rng=np.random.default_rng(42)
+        x=rng.normal(size=(9001,5))
+        x[:,4]=7.
+        y=rng.normal(size=len(x))
+        standardize_training_features(x)
+        intercept=float(y.mean())
+        alpha=.7
+        expected=np.linalg.solve(x.T@x+alpha*np.eye(x.shape[1]),x.T@(y-intercept))
+        coef=fit_standardized_ridge(x,y,alpha,intercept)
+        np.testing.assert_allclose(coef,expected,rtol=1e-11,atol=1e-12)
+        test=x[:8200]
+        values,settings=_predict_tabular_fold("ridge",None,None,test,42,
+            test_count=len(test),coef=coef,intercept=intercept,alpha=alpha)
+        np.testing.assert_allclose(values,test@expected+intercept,rtol=1e-11,atol=1e-12)
+        self.assertEqual(settings,{"alpha":alpha})
+        self.assertTrue(np.isfinite(y).all())
+        self.assertEqual(coef[-1],0.)
+
     def test_incremental_ridge_matches_full_refit(self):
         p=fixture()
         options=dict(minimum_train_sessions=10,test_sessions=5)

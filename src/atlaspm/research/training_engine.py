@@ -9,7 +9,9 @@ from statistics import fmean
 from itertools import groupby
 from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for, validate_panel_metadata
 from atlaspm.engine.contracts import finite
-from atlaspm.research.training_models import MODELS, versions, fit_predict, validate_parameters
+from atlaspm.research.training_models import (
+    MODELS, versions, validate_parameters, fit_standardized_ridge, _predict_tabular_fold,
+)
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 from atlaspm.research.training_memory import (
     FoldArrays, standardize_training_features, apply_feature_standardization,
@@ -154,7 +156,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
                        test_sessions=test_sessions,embargo_sessions=embargo_sessions,training_window_sessions=training_window_sessions)
     try:
-        import numpy as np
+        import numpy  # noqa: F401 - explicit dependency check
     except ImportError as exc:
         raise ValueError("TRAINING_REQUIRES_PORTFOLIO_EXTRA") from exc
     samples=panel["prediction_samples"]
@@ -247,7 +249,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             fold_predictions={m:[] for m in models}
             train_rows=IndexedRows(samples,fold["train"])
             test_rows=IndexedRows(samples,fold["test"])
-            x=y=z=block=test=ridge=mean=scale=coef=None
+            x=y=z=test=mean=scale=coef=None
             if incremental is not None:
                 mean,scale,coef,intercept=incremental.solve(alpha)
             else:
@@ -258,23 +260,15 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     mean,scale=standardize_training_features(x)
                     z=x
                     if ridge_required:
-                        coef=np.linalg.solve(z.T@z+alpha*np.eye(z.shape[1]),z.T@(y-intercept))
+                        coef=fit_standardized_ridge(z,y,alpha,intercept)
             if tabular_required:
                 test=arrays.rows(test_rows,(len(test_rows),len(panel["feature_names"])),lambda r:r["x"])
                 apply_feature_standardization(test,mean,scale)
-                if ridge_required:
-                    ridge=test@coef+intercept
             sequence_train=sequence_test=None
             artifact_ids={}
             for name in models:
                 saved_weights={}
-                if name=="ridge":
-                    values=ridge
-                    settings={"alpha":alpha}
-                elif name=="historical_mean":
-                    values=np.full(len(test_rows),intercept)
-                    settings={}
-                elif name in SEQUENCE_MODELS:
+                if name in SEQUENCE_MODELS:
                     if sequence_train is None:
                         def materialize(rows):
                             return arrays.rows(rows.metadata(),(len(rows),sequence_length,len(panel["feature_names"])),lambda row:sequence_for(panel,row))
@@ -290,8 +284,10 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                                                  capture_weights=saved_weights.update if artifact_store is not None else None,
                                                  epoch_store=epoch_store)
                 else:
-                    values,settings=fit_predict(name,z,y,test,seed,
-                                                parameters=model_parameters.get(name),capture_weights=saved_weights.update if artifact_store is not None else None)
+                    values,settings=_predict_tabular_fold(name,z,y,test,seed,
+                        test_count=len(test_rows),coef=coef,intercept=intercept,alpha=alpha,
+                        parameters=model_parameters.get(name),
+                        capture_weights=saved_weights.update if artifact_store is not None else None)
                 if artifact_store is not None:
                     if name in SEQUENCE_MODELS:
                         weights=saved_weights
@@ -341,7 +337,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 else:
                     archive.append(name,rows)
             # Release references to fold arrays before allocating the next fold.
-            del x,y,z,test,ridge,sequence_train,sequence_test,block
+            del x,y,z,test,sequence_train,sequence_test
     ensemble_audit=None
     if ensemble is not None:
         if not isinstance(ensemble,dict):

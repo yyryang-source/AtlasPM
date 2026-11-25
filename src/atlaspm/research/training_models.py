@@ -107,6 +107,71 @@ def fit_predict(name, x, y, test, seed, *, capture_weights=None, parameters=None
     return predicted, json_parameters(model.get_params())
 
 
+def fit_standardized_ridge(x,y,alpha,intercept,*,batch_rows=4096):
+    """Solve the existing regularized objective using bounded Gram updates.
+
+    x must already be standardized with training-only statistics. Only a
+    block of centered targets is allocated, including for disk-backed arrays.
+    This numerical kernel does not provide a data admission or training API.
+    """
+    import numpy as np
+    if (x.ndim!=2 or y.ndim!=1 or len(x)!=len(y) or not len(x) or not x.shape[1]
+            or x.dtype!=np.dtype("float64") or y.dtype!=np.dtype("float64")
+            or not isfinite(alpha) or alpha<=0 or not isfinite(intercept)
+            or type(batch_rows) is not int or not 1<=batch_rows<=65536):
+        raise ValueError("INVALID_RIDGE_FOLD_INPUT")
+    p=x.shape[1]
+    gram=np.zeros((p,p),dtype=np.float64)
+    cross=np.zeros(p,dtype=np.float64)
+    for start in range(0,len(x),batch_rows):
+        block=x[start:start+batch_rows]
+        target=y[start:start+batch_rows]-intercept
+        if not np.isfinite(block).all() or not np.isfinite(target).all():
+            raise ValueError("NONFINITE_RIDGE_FOLD_INPUT")
+        gram+=block.T@block
+        cross+=block.T@target
+    gram.flat[::p+1]+=alpha
+    if not np.isfinite(gram).all() or not np.isfinite(cross).all():
+        raise ValueError("NONFINITE_RIDGE_SUFFICIENT_STATISTICS")
+    coef=np.linalg.solve(gram,cross)
+    if not np.isfinite(coef).all():
+        raise ValueError("NONFINITE_RIDGE_COEFFICIENTS")
+    return coef
+
+
+def _predict_tabular_fold(name,x,y,test,seed,*,test_count,coef,intercept,alpha,
+                          capture_weights=None,parameters=None):
+    """Internal dispatch for already-admitted standardized tabular folds.
+
+    Baseline statistics are shared by the full-refit and incremental modes.
+    The caller owns dataset admission, temporal splits and model artifacts.
+    Test targets are deliberately not accepted by this function.
+    """
+    import numpy as np
+    if name not in MODELS or type(test_count) is not int or test_count<0:
+        raise ValueError("INVALID_TABULAR_FOLD_MODEL")
+    if name=="historical_mean":
+        values=np.full(test_count,intercept)
+        settings={}
+    elif name=="ridge":
+        if test is None or coef is None or test.ndim!=2 or coef.shape!=(test.shape[1],):
+            raise ValueError("INVALID_RIDGE_PREDICTION_INPUT")
+        values=np.empty(test_count,dtype=np.float64)
+        if len(test)!=test_count:
+            raise ValueError("INVALID_TABULAR_TEST_COUNT")
+        for start in range(0,test_count,4096):
+            values[start:start+4096]=test[start:start+4096]@coef+intercept
+        settings={"alpha":alpha}
+    else:
+        if x is None or y is None or test is None or len(test)!=test_count:
+            raise ValueError("INVALID_TABULAR_FOLD_ARRAYS")
+        values,settings=fit_predict(name,x,y,test,seed,
+                                     capture_weights=capture_weights,parameters=parameters)
+    if values.shape!=(test_count,) or not np.isfinite(values).all():
+        raise ValueError("INVALID_TABULAR_FOLD_OUTPUT:"+name)
+    return values,settings
+
+
 def export_estimator(name,model):
     """Store numeric sklearn estimators and library-native tree formats."""
     if name=="elastic_net":
