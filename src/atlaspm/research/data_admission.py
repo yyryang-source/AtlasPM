@@ -227,6 +227,9 @@ def main():
     parser.add_argument("action",choices=("inventory","prepare","identity-review"))
     parser.add_argument("--dataset-id")
     parser.add_argument("--as-of",help="Explicit retrospective evidence cutoff YYYY-MM-DD")
+    parser.add_argument("--matrix-horizon",type=int)
+    parser.add_argument("--matrix-fold",type=int,help="Zero-based canonical fold index")
+    parser.add_argument("--array-budget-mib",type=int,default=16)
     parser.add_argument("--start-month")
     parser.add_argument("--end-month")
     parser.add_argument("--execute",action="store_true")
@@ -239,12 +242,17 @@ def main():
     parser.add_argument("--minimum-train-rows",type=int,default=1000)
     parser.add_argument("--minimum-test-rows",type=int,default=100)
     args=parser.parse_args()
+    matrix_requested=args.matrix_horizon is not None or args.matrix_fold is not None
+    if matrix_requested and (args.action!="identity-review" or args.matrix_horizon is None or args.matrix_fold is None):
+        parser.error("matrix review requires identity-review and both --matrix-horizon and --matrix-fold")
     if args.action=="identity-review":
         if args.execute or not args.dataset_id or not args.as_of or args.start_month or args.end_month:
             parser.error("identity-review requires --dataset-id and --as-of; no --execute or month flags")
         out=inspect_research_dataset(args.dataset_id,memory=args.memory,threads=args.threads,
               minimum_train_rows=args.minimum_train_rows,minimum_test_rows=args.minimum_test_rows,
-              identity_as_of=args.as_of)
+              identity_as_of=args.as_of,
+              matrix_request={"horizon":args.matrix_horizon,"fold_index":args.matrix_fold,
+                              "array_budget_mib":args.array_budget_mib} if matrix_requested else None)
     elif args.dataset_id or args.as_of:
         parser.error("--dataset-id and --as-of are scoped to identity-review")
     elif args.action=="inventory":

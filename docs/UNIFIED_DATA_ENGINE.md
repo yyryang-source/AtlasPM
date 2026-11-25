@@ -378,3 +378,26 @@ revised; feature lookback identity and vendor adjustment semantics remain
 unverified. No model permission or official data certification is issued.
 The review uses temporary DuckDB rows and a separate identity preflight
 report in the existing dataset directory, with a 550-session budget.
+
+
+### Real fold-array handoff check (no model fitting)
+
+The identity-review command can optionally materialize one canonical fold
+using the existing scoped FoldArrays allocator:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m atlaspm.research.data_admission identity-review --dataset-id FULL_DATASET_ID --as-of YYYY-MM-DD --matrix-horizon 1 --matrix-fold 0 --array-budget-mib 16
+~~~
+
+The horizon and zero-based fold index must exist in the dataset. The
+closing-bar, stable-identity and visible-action exclusion predicate is
+shared with the label count audit. Only rows in the canonical purged train
+and test ranges are copied into a temporary DuckDB table; the feature
+matrix and target vector are allocated separately and read in bounded
+batches. Shapes, deterministic row digests and scoped array/spill byte
+counts are reported; the arrays and spill files are discarded. NumPy
+(existing native extra) is required. The array budget is not a total
+process RAM limit. This is a retrospective labeled subset, not a
+prediction universe or unbiased performance evaluation. Feature-lookback
+identity, adjustments, rights and independent admission remain unverified.
+No estimator, model artifact or registry promotion is invoked.

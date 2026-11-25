@@ -183,6 +183,35 @@ class RealDatasetTests(unittest.TestCase):
         self.assertFalse(report["identity_path_review"]["feature_identity_history_verified"])
         self.assertFalse(report["approved_for_model_training"])
 
+    def test_reviewed_fold_arrays_use_purged_boundaries_and_separate_targets(self):
+        from importlib.util import find_spec
+        if not find_spec("numpy"):
+            self.skipTest("Install native extras")
+        from atlaspm.research import real_dataset_preflight_v61 as pre
+        self.seed()
+        r=self.build()
+        identities=[{"symbol":s,"security_id":s.lower(),"valid_from":"2020-01-01","valid_to":None}
+                    for s in ("ABC","GAP")]
+        def snapshot(*,as_of,trade_date):
+            return {"identities":identities,"members":identities,"unresolved":[],"actions":[]}
+        with patch.object(v,"_calendar",return_value=CAL), \
+             patch("atlaspm.data.quality_review._ledger_digest",return_value="a"*64), \
+             patch("atlaspm.data.unified.review_security",side_effect=snapshot):
+            report=pre.run(r["dataset_id"],minimum_train_rows=1,minimum_test_rows=1,
+                           identity_as_of="2020-02-07",
+                           matrix_request={"horizon":1,"fold_index":1,"array_budget_mib":1})
+        review=report["fold_array_review"]
+        self.assertEqual(review["status"],"FOLD_ARRAYS_REVIEWED")
+        self.assertEqual(review["feature_names"],["mom_5d"])
+        self.assertEqual(review["splits"]["train"]["x_shape"],[1,1])
+        self.assertEqual(review["splits"]["train"]["y_shape"],[1])
+        self.assertEqual(review["splits"]["test"]["x_shape"],[2,1])
+        self.assertEqual(review["splits"]["test"]["y_shape"],[2])
+        self.assertEqual(review["array_bytes_allocated"],48)
+        self.assertFalse(review["arrays_retained"])
+        self.assertFalse(review["prediction_universe_defined"])
+        self.assertFalse(report["approved_for_model_training"])
+
     def test_preflight_rejects_rehashed_incorrect_label(self):
         from atlaspm.research import real_dataset_preflight_v61 as pre
         self.seed()

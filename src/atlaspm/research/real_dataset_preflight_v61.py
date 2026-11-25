@@ -127,7 +127,12 @@ def _install_identity_review(cx,calendar,as_of):
             "feature_identity_history_verified":False,"adjustment_applied":False}
 
 
-def _check_labels(cx,paths,month,horizons,*,identity_review=False):
+def _identity_path_condition(h):
+    return (f"features_complete AND label_{h}d IS NOT NULL AND close_n{h}={h+1}"
+            f" AND id_n{h}={h+1} AND id_min{h}=id_max{h}")
+
+
+def _check_labels(cx,paths,month,horizons,*,identity_review=False,matrix=None):
     """Recompute observed-price labels and count stricter closing-bar paths.
 
     A last observed intraday bar is not necessarily the session close.
@@ -163,7 +168,7 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False):
     strict=", ".join(f"count(*) FILTER (WHERE features_complete AND label_{h}d IS NOT NULL AND close_n{h}={h+1})" for h in horizons)
     if identity_review:
         for h in horizons:
-            condition=f"features_complete AND label_{h}d IS NOT NULL AND close_n{h}={h+1} AND id_n{h}={h+1} AND id_min{h}=id_max{h}"
+            condition=_identity_path_condition(h)
             strict+=f",count(*) FILTER (WHERE {condition}),count(*) FILTER (WHERE {condition} AND act_n{h}=0)"
     counts=cx.execute(f"""WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
         SELECT session_index,count(*) FILTER (WHERE {" OR ".join(checks)}),
@@ -173,6 +178,25 @@ def _check_labels(cx,paths,month,horizons,*,identity_review=False):
     mismatch=sum(row[1] for row in counts)
     if mismatch:
         raise ValueError(f"Label path reconciliation failed for {month}: {mismatch} rows")
+    if matrix is not None:
+        # The same retrospective eligibility predicate as the counts above.
+        # Partition filtering is AFTER window evaluation, including when
+        # label maturity falls in the next month. No labels in feature columns.
+        h=matrix["horizon"]
+        f=matrix["fold"]
+        if not identity_review or h not in horizons:
+            raise ValueError("FOLD_MATRIX_IDENTITY_REVIEW_REQUIRED")
+        lo,hi,tl,th=(f[k] for k in ("train_start_index","train_end_index","test_start_index","test_end_index"))
+        if any(lo<=i<=hi or tl<=i<=th for i,*_ in counts):
+            cols=", ".join(matrix["features"])
+            cx.execute(f"""INSERT INTO v6_fold_matrix
+                WITH recalculated AS (SELECT *,{", ".join(expr)} FROM {src})
+                SELECT CASE WHEN session_index BETWEEN ? AND ? THEN 'train' ELSE 'test' END,
+                       session_index,review_security_id,{cols},label_{h}d,label_end_index_{h}d
+                FROM recalculated WHERE strftime(trade_date,'%Y-%m')=?
+                    AND ((session_index BETWEEN ? AND ?) OR (session_index BETWEEN ? AND ?))
+                    AND {_identity_path_condition(h)} AND act_n{h}=0""",
+                [lo,hi,month,lo,hi,tl,th])
     return [(int(i),int(close_count),*[int(n) for n in strict_counts])
             for i,_,close_count,*strict_counts in counts]
 
@@ -200,11 +224,116 @@ def _check_feature_source(cx,sample,source,features):
         raise ValueError("Dataset feature/source reconciliation failed")
 
 
+def _matrix_request(cx,calendar,config,request):
+    """Select one canonical purged fold, never caller-supplied date boundaries."""
+    if (not isinstance(request,dict) or set(request)!={"horizon","fold_index","array_budget_mib"}
+            or type(request["horizon"]) is not int or request["horizon"] not in config["horizons"]
+            or type(request["fold_index"]) is not int or request["fold_index"]<0
+            or type(request["array_budget_mib"]) is not int or not 1<=request["array_budget_mib"]<=256):
+        raise ValueError("INVALID_FOLD_MATRIX_REQUEST")
+    h=request["horizon"]
+    folds=dataset._folds(calendar,h,config["minimum_train_sessions"],config["test_sessions"],
+                         config["embargo_sessions"])
+    if request["fold_index"]>=len(folds):
+        raise ValueError("FOLD_MATRIX_INDEX_OUT_OF_RANGE")
+    f=folds[request["fold_index"]]
+    if (f["latest_training_label_end_index"]>=f["test_start_index"]-config["embargo_sessions"]
+            or f["test_end_index"]+h>=len(calendar)):
+        raise ValueError("FOLD_MATRIX_TEMPORAL_ISOLATION")
+    cols=", ".join(f"{name} DOUBLE" for name in config["features"])
+    cx.execute(f"""CREATE OR REPLACE TEMP TABLE v6_fold_matrix(
+        split VARCHAR,session_index INTEGER,security_id VARCHAR,{cols},
+        target DOUBLE,label_end_index INTEGER)""")
+    return {**request,"fold":f,"features":config["features"]}
+
+
+def _review_matrix_arrays(cx,matrix,expected_train,expected_test):
+    """Exercise the existing scoped array allocator on real selected fold rows.
+
+    Feature and target arrays are separate, never passed to a fitting API.
+    Hash rows in deterministic order, not arbitrary memory layout or temp paths.
+    Only bounded batches enter Python, and spilled arrays are deleted on exit.
+    """
+    import hashlib
+    import struct
+    from math import isfinite
+    from atlaspm.research.training_memory import FoldArrays
+    from atlaspm.data.market_db import private_path
+    import numpy as np
+
+    feature_names=matrix["features"]
+    cols=", ".join(feature_names)
+    h=matrix["horizon"]
+    f=matrix["fold"]
+    # Refuse duplicate security/session rows even if two provider symbols
+    # unexpectedly mapped to the same security.
+    duplicate=cx.execute("""SELECT 1 FROM v6_fold_matrix
+        GROUP BY split,session_index,security_id HAVING count(*)>1 LIMIT 1""").fetchone()
+    if duplicate:
+        raise ValueError("FOLD_MATRIX_DUPLICATE_SECURITY_SESSION")
+    sizes=dict(cx.execute("SELECT split,count(*) FROM v6_fold_matrix GROUP BY split").fetchall())
+    if set(sizes)-{"train","test"} or sizes.get("train",0)!=expected_train or sizes.get("test",0)!=expected_test:
+        raise ValueError("FOLD_MATRIX_COUNTS_MISMATCH")
+    root=private_path(Path("local_data/training/v6/matrix_spill"))
+    # Do not allow a single fold to fill arbitrary amounts of storage.
+    bytes_required=(expected_train+expected_test)*(len(feature_names)+1)*8
+    if bytes_required>2*1024**3:
+        raise ValueError("FOLD_MATRIX_BYTE_LIMIT")
+    result={}
+    with FoldArrays(matrix["array_budget_mib"],root) as arrays:
+        for split,n,lo,hi in (("train",expected_train,f["train_start_index"],f["train_end_index"]),
+                              ("test",expected_test,f["test_start_index"],f["test_end_index"])):
+            if not n:
+                result[split]={"x_shape":[0,len(feature_names)],"y_shape":[0],
+                               "ordered_rows_sha256":hashlib.sha256().hexdigest()}
+                continue
+            x=arrays.allocate((n,len(feature_names)))
+            y=arrays.allocate((n,))
+            pos=0
+            digest=hashlib.sha256()
+            cur=cx.execute(f"""SELECT session_index,security_id,{cols},target,label_end_index
+                FROM v6_fold_matrix WHERE split=? ORDER BY session_index,security_id""",[split])
+            while batch:=cur.fetchmany(2048):
+                if pos+len(batch)>n:
+                    raise ValueError("FOLD_MATRIX_ROW_BUDGET")
+                for i,row in enumerate(batch):
+                    ordinal,sid,*values,end=row
+                    if (not isinstance(sid,str) or not sid or not lo<=ordinal<=hi
+                            or end!=ordinal+h or not all(isfinite(v) for v in values)
+                            or values[-1]<-1):
+                        raise ValueError("FOLD_MATRIX_INVALID_ROW")
+                    digest.update(dataset._digest([ordinal,sid,end]).encode())
+                    digest.update(struct.pack("<"+"d"*len(values),*values))
+                    x[pos+i]=values[:-1]
+                    y[pos+i]=values[-1]
+                if not np.isfinite(x[pos:pos+len(batch)]).all() or not np.isfinite(y[pos:pos+len(batch)]).all():
+                    raise ValueError("FOLD_MATRIX_NONFINITE_ARRAY")
+                pos+=len(batch)
+            if pos!=n:
+                raise ValueError("FOLD_MATRIX_ROW_COUNT_CHANGED")
+            result[split]={"x_shape":[n,len(feature_names)],"y_shape":[n],
+                           "ordered_rows_sha256":digest.hexdigest()}
+            del x,y
+        result["array_bytes_allocated"]=arrays.resident+arrays.spilled
+        result["array_bytes_spilled"]=arrays.spilled
+    return {"status":"FOLD_ARRAYS_REVIEWED" if expected_train and expected_test else "FOLD_ARRAYS_EMPTY_SPLIT",
+            "horizon":h,"fold_index":matrix["fold_index"],"feature_names":feature_names,
+            "fold":f,"splits":{k:result[k] for k in ("train","test")},
+            "array_bytes_allocated":result["array_bytes_allocated"],
+            "array_bytes_spilled":result["array_bytes_spilled"],
+            "array_budget_mib":matrix["array_budget_mib"],
+            "retrospective_subset_only":True,"prediction_universe_defined":False,
+            "feature_history_identity_verified":False,"arrays_retained":False,
+            "models_fitted":0,"training_started":False,"approved_for_model_training":False}
+
+
 def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",threads=2,
-        require_lineage=False,identity_as_of=None):
+        require_lineage=False,identity_as_of=None,matrix_request=None):
     for n in (minimum_train_rows,minimum_test_rows):
         if type(n) is not int or n<1:
             raise ValueError("Minimum sample counts must be positive integers")
+    if matrix_request is not None and identity_as_of is None:
+        raise ValueError("FOLD_MATRIX_REQUIRES_IDENTITY_CUTOFF")
     m=dataset.inspect(dataset_id)
     if require_lineage and not m.get("lineage_id"):
         raise ValueError("Dataset lacks unified factor lineage; rebuild through canonical bridge")
@@ -233,8 +362,12 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
     identity_counts={h:[0]*len(calendar) for h in c["horizons"]}
     action_free_counts={h:[0]*len(calendar) for h in c["horizons"]}
     identity=None
+    matrix=None
+    matrix_report=None
     try:
         dataset._install_calendar(cx,calendar)
+        if matrix_request is not None:
+            matrix=_matrix_request(cx,calendar,c,matrix_request)
         if identity_as_of is not None:
             identity=_install_identity_review(cx,calendar,identity_as_of)
         for month,p in paths.items():
@@ -243,7 +376,7 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
         for month,p in paths.items():
             window=dataset._window(month,months,calendar,max(c["horizons"]))
             for i,closing,*counts in _check_labels(cx,[paths[k] for k in window],month,c["horizons"],
-                                                     identity_review=identity is not None):
+                                                     identity_review=identity is not None,matrix=matrix):
                 closing_observed[i]=closing
                 size=len(c["horizons"])
                 for j,h in enumerate(c["horizons"]):
@@ -259,6 +392,12 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
                 pred[i]=int(pred_n)
                 for h,count in zip(c["horizons"],counts):
                     horizon_counts[h][i]=int(count)
+        if matrix is not None:
+            f=matrix["fold"]
+            prefix=_prefix(action_free_counts[matrix["horizon"]])
+            matrix_report=_review_matrix_arrays(cx,matrix,
+                _sum(prefix,f["train_start_index"],f["train_end_index"]),
+                _sum(prefix,f["test_start_index"],f["test_end_index"]))
     finally:
         cx.close()
     if dataset.inspect(dataset_id)!=m:
@@ -342,7 +481,13 @@ def run(dataset_id,*,minimum_train_rows=1000,minimum_test_rows=100,memory="2GB",
             if not counts["fold_count"] or counts["folds_meeting_reviewed_identity_action_free_minimum"]!=counts["fold_count"]:
                 blockers.add("INSUFFICIENT_REVIEWED_IDENTITY_ACTION_FREE_SAMPLES:"+h)
         report["blockers"]=sorted(blockers)
-    path=dataset.BASE/dataset_id[:24]/("identity_preflight.json" if identity is not None else "preflight.json")
+    if matrix_report is not None:
+        report["fold_array_review"]=matrix_report
+        if matrix_report["status"]!="FOLD_ARRAYS_REVIEWED":
+            report["blockers"]=sorted(set(report["blockers"])|{"EMPTY_REVIEWED_FOLD_ARRAY_SPLIT"})
+    filename=("fold_array_preflight.json" if matrix_report is not None else
+              "identity_preflight.json" if identity is not None else "preflight.json")
+    path=dataset.BASE/dataset_id[:24]/filename
     report["report_path"]=str(private_path(path))
     ev._json(path,report)
     return report
