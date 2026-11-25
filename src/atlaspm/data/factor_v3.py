@@ -142,10 +142,13 @@ def _normalize(con, config: dict) -> list[dict]:
         stage = f"v3_stage_{idx}"
         tail = config["winsor_tail"]
         min_group = config["min_group_size"]
-        group = (
-            f"CASE WHEN group_size >= {min_group} "
-            "THEN clipped - industry_mean END"
-            if config["neutralize_industry"] else "clipped"
+        residual_sql = (
+            f"""SELECT symbol,trade_date,
+                CASE WHEN count(*) OVER grp >= {min_group}
+                     THEN clipped - avg(clipped) OVER grp END AS residual
+                FROM clipped WINDOW grp AS (PARTITION BY trade_date,industry)"""
+            if config["neutralize_industry"] else
+            "SELECT symbol,trade_date,clipped AS residual FROM clipped"
         )
         con.execute(f"""
         CREATE TEMP TABLE {stage} AS
@@ -159,13 +162,8 @@ def _normalize(con, config: dict) -> list[dict]:
         ), clipped AS (
             SELECT src.*, greatest(bounds.lo,least(src.val,bounds.hi)) AS clipped
             FROM src JOIN bounds USING (trade_date)
-        ), sectors AS (
-            SELECT *,
-                count(*) OVER (PARTITION BY trade_date,industry) AS group_size,
-                avg(clipped) OVER (PARTITION BY trade_date,industry) AS industry_mean
-            FROM clipped
         ), residuals AS (
-            SELECT symbol,trade_date,{group} AS residual FROM sectors
+            {residual_sql}
         ), scaled AS (
             SELECT *,
               count(residual) OVER (PARTITION BY trade_date) AS n,
@@ -205,7 +203,7 @@ def _daily_corr(con, a: str, b: str, c: dict) -> list[dict]:
     result = con.execute(f"""
     WITH paired AS (
       SELECT trade_date,z_{a} AS a,z_{b} AS b FROM v3_norm
-      WHERE trade_date >= ? AND trade_date < ?
+      WHERE trade_date BETWEEN ? AND ? AND trade_date < ?
         AND z_{a} IS NOT NULL AND z_{b} IS NOT NULL
     ), ranks AS (
       SELECT trade_date,
@@ -218,7 +216,7 @@ def _daily_corr(con, a: str, b: str, c: dict) -> list[dict]:
     SELECT trade_date,count(*) AS n,corr(ra,rb) AS rho FROM ranks
     GROUP BY trade_date HAVING count(*) >= {c['min_symbols']}
     ORDER BY trade_date
-    """, [c["start"], c["holdout_start"] or "9999-12-31"])
+    """, [c["start"], c["end"], c["holdout_start"] or "9999-12-31"])
     return [{"date": str(day), "n": int(n), "rho": factor_eval._as_number(rho)}
             for day, n, rho in result.fetchall()]
 
@@ -232,35 +230,14 @@ def _daily_ic(con, field: str, horizon: int, table: str, c: dict) -> list[dict]:
         raise ValueError("Invalid evaluation horizon")
     if field != "composite_score" and field not in {f"z_{f}" for f in c["factors"]}:
         raise ValueError("Invalid evaluation field")
-    # Dates come from the complete factor-lake price calendar (not from the
-    # subset of stocks surviving quality filters), preventing next-session drift.
+    # Forward labels were materialized once using the complete raw calendar,
+    # and the same quality-eligible entry/exit rows for every factor.
     result = con.execute(f"""
-    WITH days0 AS (
-      SELECT trade_date,lag(trade_date) OVER (ORDER BY trade_date) AS prior
-      FROM (SELECT DISTINCT trade_date FROM v3_raw)
-    ), calendar AS (
-      SELECT trade_date,
-        row_number() OVER (ORDER BY trade_date)-1 AS seq,
-        lead(trade_date,1) OVER (ORDER BY trade_date) AS entry_day,
-        lead(trade_date,{horizon+1}) OVER (ORDER BY trade_date) AS exit_day,
-        sum(CASE WHEN prior IS NOT NULL
-                    AND date_diff('day',prior,trade_date)>7 THEN 1 ELSE 0 END)
-          OVER (ORDER BY trade_date ROWS BETWEEN 1 FOLLOWING AND
-                {horizon+1} FOLLOWING) AS future_gaps
-      FROM days0
-    ), labeled AS (
-      SELECT s.symbol,s.trade_date,d.exit_day AS label_exit,
-        s.{field}::DOUBLE AS val, ex.close/en.close-1 AS forward_ret
-      FROM {table} s
-      JOIN calendar d ON s.trade_date=d.trade_date
-      JOIN v3_base en ON en.symbol=s.symbol AND en.trade_date=d.entry_day
-      JOIN v3_base ex ON ex.symbol=s.symbol AND ex.trade_date=d.exit_day
-      WHERE s.trade_date BETWEEN ? AND ?
-        AND d.seq % {horizon}=0
-        AND d.entry_day IS NOT NULL AND d.exit_day IS NOT NULL
-        AND d.future_gaps=0
-        AND s.{field} IS NOT NULL AND isfinite(s.{field})
-        AND en.close>0 AND ex.close>0
+    WITH labeled AS (
+      SELECT s.symbol,s.trade_date,d.label_exit,
+        s.{field}::DOUBLE AS val,d.forward_ret
+      FROM {table} s JOIN factor_forward_labels d USING (symbol,trade_date)
+      WHERE s.{field} IS NOT NULL AND isfinite(s.{field})
     ), ranks AS (
       SELECT *,
         rank() OVER (PARTITION BY trade_date ORDER BY val)
@@ -274,7 +251,7 @@ def _daily_ic(con, field: str, horizon: int, table: str, c: dict) -> list[dict]:
     FROM ranks GROUP BY trade_date
     HAVING count(*) >= {c['min_symbols']}
     ORDER BY trade_date
-    """, [c["start"], c["end"]])
+    """)
     return [{"date": str(day), "label_exit": str(exit_day),
              "n": int(n), "rank_ic": factor_eval._as_number(ic)}
             for day, exit_day, n, ic in result.fetchall()]
@@ -466,7 +443,7 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
     con = factor_db._db(memory, threads)
     try:
         con.execute(f"CREATE TEMP TABLE v3_raw AS SELECT symbol,trade_date,close,"
-                    f"observed_5m_bars,observed_1m_bars,{','.join(factor_db.FEATURES)} "
+                    f"observed_5m_bars,observed_1m_bars,{','.join(c['factors'])} "
                     f"FROM {factor_db._files_sql(paths)}")
         invalid = con.execute("""SELECT count(*) FROM v3_raw WHERE symbol IS NULL
             OR trade_date IS NULL OR close IS NULL OR close<=0 OR NOT isfinite(close)""").fetchone()[0]
@@ -478,6 +455,7 @@ def analyze(*, start: str, end: str, source: str = "hf", session: str = "rth",
             raise ValueError("V1 materialized input has duplicate symbol/trade_date")
         funnel = _base(con, c, industry_rows)
         coverage = _normalize(con, c)
+        factor_eval._materialize_forward_labels(con, horizon, c, version='v3')
         correlations = _correlations(con, c)
         diagnostics = []
         for name in c["factors"]:

@@ -113,6 +113,34 @@ class FactorEvaluationIntegration(FactorEvaluationContracts):
         self.assertIsNone(constant["rank_ic_mean"])
         self.assertIsNotNone(by_name["mom_5d", 1]["chronological_diagnostic"]["holdout"])
 
+    def test_materialized_labels_preserve_pairwise_factor_missingness(self):
+        self._write()
+        cfg=factor_eval._config(start="2026-01-05",end="2026-02-20",
+            source="hf",session="rth",factors=["mom_5d","intraday_range"],
+            horizons=[1,5],holdout_start=None,min_symbols=5,min_dates=2,
+            min_bars=60,min_minute_fraction=.85,cost_bps_per_leg_roundtrip=20)
+        con=factor_db._db("256MB",1)
+        try:
+            paths,_=factor_eval._inputs(cfg)
+            con.execute("CREATE TEMP TABLE eval_prices AS SELECT * FROM "+factor_db._files_sql(paths))
+            con.execute("UPDATE eval_prices SET mom_5d=NULL WHERE symbol='TEST1'")
+            con.execute("UPDATE eval_prices SET observed_1m_bars=0 WHERE symbol='TEST2' AND trade_date=DATE '2026-01-09'")
+            for h in (1,5):
+                factor_eval._materialize_forward_labels(con,h,cfg,version="v2")
+                for name in cfg["factors"]:
+                    direct=con.execute(factor_eval._dated_sql(name,h,cfg),[cfg["start"],cfg["end"]]).fetchall()
+                    cached=con.execute(factor_eval._dated_sql(name,h,cfg,materialized=True)).fetchall()
+                    self.assertEqual(len(direct),len(cached))
+                    for x,y in zip(direct,cached):
+                        self.assertEqual(x[:2],y[:2])
+                        for a,b in zip(x[2:],y[2:]):
+                            if a is None or b is None:
+                                self.assertIs(a,b)
+                            else:
+                                self.assertAlmostEqual(a,b,places=12)
+        finally:
+            con.close()
+
     def test_unsupported_source_metadata_is_rejected(self):
         self._write(months=("2026-01",))
         path = factor_db._path("2026-01", "hf", "rth", "factors")

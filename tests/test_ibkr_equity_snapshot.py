@@ -4,7 +4,7 @@ import unittest
 from copy import deepcopy
 from datetime import datetime, timezone
 
-from atlaspm.ibkr_equity_snapshot import collect_cash_equity_snapshot
+from atlaspm.execution.ibkr_equity_snapshot import collect_cash_equity_snapshot
 from atlaspm.execution.ibkr_gateway import FixtureGatewayTransport
 
 

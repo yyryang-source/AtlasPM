@@ -59,6 +59,8 @@ class SecurityMasterTests(unittest.TestCase):
         self.assertEqual(len(m.snapshot("2020-06-02")["members"]),1)
         self.assertEqual(m.snapshot("2020-06-03")["members"],[])
         self.assertEqual(len(m.snapshot("2020-06-03","2020-05-31")["members"]),1)
+        self.assertEqual(m.snapshot("2020-06-03","2020-05-31",read_only=True),
+                         m.snapshot("2020-06-03","2020-05-31"))
 
     def test_conflict_retraction_and_same_source_tie(self):
         rows=self.pair("listing1",self.identity())
@@ -89,6 +91,24 @@ class SecurityMasterTests(unittest.TestCase):
         Path("local_data/B.txt").write_text("tampered",encoding="utf-8")
         self.assertEqual(m.snapshot("2020-01-02")["unresolved"][0]["reason"],"EVIDENCE_HASH_MISMATCH")
 
+    def test_ledger_metadata_tampering_before_date_filter(self):
+        from contextlib import closing
+        self.ingest(self.pair("listing",self.identity()))
+        with closing(m._db()) as cx,cx:
+            cx.execute("UPDATE claims SET known_date='2030-01-01'")
+        with self.assertRaisesRegex(ValueError,"ledger integrity failure"):
+            m.snapshot("2020-01-02")
+
+    def test_derived_report_cannot_be_primary_evidence(self):
+        path=m.ROOT/"identity_v56"/"latest.json"
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_text("derived report",encoding="utf-8")
+        claim=self.claim("listing",self.identity(),"A")
+        claim.update(evidence_path=str(path),evidence_sha256=ev._sha(path.read_bytes()))
+        with self.assertRaisesRegex(ValueError,"not primary source evidence"):
+            self.ingest([claim])
+        self.assertEqual(m.inventory()["claim_counts"],{})
+
     def test_atomic_rejection(self):
         bad=self.claim("bad",self.identity(),"B")
         bad["evidence_sha256"]="0"*64
@@ -109,6 +129,25 @@ class SecurityMasterTests(unittest.TestCase):
         self.assertEqual(len(m.snapshot("2020-04-01")["unresolved"]),2)
         with self.assertRaises(ValueError):
             m.adjustment("ID1","2020-02-01","2020-04-01",raw_unadjusted=True)
+
+    def test_visible_returns_uses_actual_ledger(self):
+        from atlaspm.data import hf_stock5m_visible_returns_v59 as returns
+        self.ingest(self.pair("listing",self.identity())+
+                    self.pair("split",self.action(),known="2020-02-20",kind="ACTION"))
+        path=Path("local_data/marks.jsonl")
+        path.write_text(json.dumps(dict(security_id="ID1",start_date="2020-02-01",
+            end_date="2020-03-31",start_symbol="ABC",end_symbol="ABC",
+            start_close="100",end_close="55")),encoding="utf-8")
+        with self.assertRaises(ValueError):
+            returns.run(path,"2020-04-01")
+        result=returns.run(path,"2020-04-01",raw_unadjusted=True)
+        self.assertEqual(result["rows_computed"],1)
+        self.assertEqual(result["results"][0]["visible_action_return_no_reinvestment"],"0.1")
+        self.assertFalse(result["approved_for_model_training"])
+        self.ingest([self.claim("conflict",self.identity("ID2"),"A")])
+        blocked=returns.run(path,"2020-04-01",raw_unadjusted=True)
+        self.assertEqual(blocked["rows_computed"],0)
+        self.assertEqual(blocked["results"][0]["reason"],"UNRESOLVED_VISIBLE_LEDGER_CLAIMS")
 
     def test_cash_exit_and_unknown_identity(self):
         self.ingest(self.pair("listing",self.identity(end="2020-03-01"))+

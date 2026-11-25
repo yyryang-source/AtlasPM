@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from array import array
 from bisect import bisect_left
+from collections import deque
 from atlaspm.research.training_compact import CompactSamples, IndexedRows, IndexPrefix
 from atlaspm.engine.contracts import finite, timestamp
 
@@ -13,7 +14,8 @@ def validate_panel_metadata(payload,horizon,sequence_length):
     if type(sequence_length) is not int or not 1<=sequence_length<=252:
         raise ValueError("INVALID_SEQUENCE_LENGTH")
     if payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True:
-        raise ValueError("REAL_TRAINING_DATA_NOT_APPROVED")
+        from atlaspm.research.data_admission import require_real_training_admission
+        require_real_training_admission()
     if type(horizon) is not int or horizon not in HORIZONS:
         raise ValueError("INVALID_LABEL_HORIZON")
     features=payload["feature_names"]
@@ -92,45 +94,93 @@ class MarketRegimes:
         self.states[day]=state
 
 
-def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None):
+def label_span(horizon,entry_lag_sessions):
+    if type(entry_lag_sessions) is not int or entry_lag_sessions not in (0,1):
+        raise ValueError('INVALID_ENTRY_LAG_SESSIONS')
+    return horizon+entry_lag_sessions
+
+
+class WindowLabels:
+    """Generate matured labels in one pass over the global session sequence.
+
+    A current consecutive-presence count of h+1 proves that every required
+    future session exists. Eligibility is frozen at the signal session, before
+    any future close is observed. Retain only h+1 raw sessions.
+    """
+    def __init__(self,horizon,length,entry_lag_sessions=0):
+        self.horizon=label_span(horizon,entry_lag_sessions)
+        self.entry_lag_sessions=entry_lag_sessions
+        self.length=length
+        self.window=deque(maxlen=self.horizon+1)
+        self.streak={}
+        self.missing=0
+        self.incomplete=0
+        self.peak=0
+
+    def observe(self,index,marks):
+        previous=self.streak
+        self.streak={sid:previous.get(sid,0)+1 for sid in marks}
+        eligible=({sid for sid,n in self.streak.items() if n>=self.length}
+                  if self.length>1 else None)
+        self.window.append((marks,eligible))
+        self.peak=max(self.peak,len(self.window))
+        if index<self.horizon:
+            return
+        signal,eligible=self.window[0]
+        i=index-self.horizon
+        for sid,(price,x) in sorted(signal.items()):
+            if eligible is not None and sid not in eligible:
+                self.incomplete+=1
+                continue
+            if self.streak.get(sid,0)<self.horizon+1:
+                y=None
+                self.missing+=1
+            else:
+                entry_price=self.window[self.entry_lag_sessions][0][sid][0] if self.entry_lag_sessions else price
+                y=finite(marks[sid][0]/entry_price-1,"forward_return")
+            yield sid,i,x,y
+
+
+def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_column=None, regime_config=None, next_session=None, entry_lag_sessions=0):
     if feature_column is not None and not compact:
         raise ValueError('DISK_FEATURES_REQUIRE_COMPACT_PANEL')
     features=validate_panel_metadata(payload,horizon,sequence_length)
     tracker=MarketRegimes(**regime_config) if regime_config is not None else None
     dates,observations=[],[]
-    for day,marks in validated_sessions(payload["sessions"],features):
-        dates.append(day)
-        observations.append(marks)
-        if tracker is not None:
-            tracker.observe(day,marks)
-    samples, prediction_samples, missing, incomplete_sequences = [], [], 0, 0
+    keep_observations=not compact or sequence_length>1
+    labels=WindowLabels(horizon,sequence_length,entry_lag_sessions)
+    horizon=labels.horizon
+    samples,prediction_samples=[],[]
     if compact:
         prediction_samples=CompactSamples(dates,horizon,len(features),feature_column)
         valid_indices=array('Q')
-    for i in range(max(0,len(observations)-horizon)):
-        marks=observations[i]
-        for sid,(price,x) in sorted(marks.items()):
-            # Eligibility for prediction depends only on the trailing feature window.
-            if i+1 < sequence_length or any(sid not in observations[j]
-                    for j in range(i-sequence_length+1,i+1)):
-                incomplete_sequences += 1
-                continue
-            sequence = None if compact else [observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
-            missing_path = any(sid not in observations[j] for j in range(i+1,i+horizon+1))
-            y = None if missing_path else observations[i+horizon][sid][0]/price-1
+    def observations_with_cutoff():
+        last=None
+        for day,marks in validated_sessions(payload["sessions"],features):
+            last=day
+            yield day,marks
+        if next_session is not None:
+            if horizon!=1 or last is None or not isinstance(next_session,str) or date.fromisoformat(next_session).isoformat()!=next_session or next_session<=last:
+                raise ValueError("INVALID_AS_OF_NEXT_SESSION")
+            yield next_session,{}
+
+    for k,(day,marks) in enumerate(observations_with_cutoff()):
+        dates.append(day)
+        if keep_observations:
+            observations.append(marks)
+        if tracker is not None and marks:
+            tracker.observe(day,marks)
+        for sid,i,x,y in labels.observe(k,marks):
             if compact:
                 prediction_samples.append(sid,i,x,y)
-                if missing_path:
-                    missing+=1
-                else:
+                if y is not None:
                     valid_indices.append(len(prediction_samples)-1)
                 continue
-            sample = dict(security_id=sid,signal_index=i,label_end_index=i+horizon,
-                          date=dates[i],label_end_date=dates[i+horizon],x=x,sequence=sequence,y=y)
+            sequence=[observations[j][sid][1] for j in range(i-sequence_length+1,i+1)]
+            sample=dict(security_id=sid,signal_index=i,label_end_index=k,date=dates[i],
+                        label_end_date=dates[k],x=x,sequence=sequence,y=y)
             prediction_samples.append(sample)
-            if missing_path:
-                missing += 1
-            else:
+            if y is not None:
                 samples.append(sample)
     if compact:
         if feature_column is not None:
@@ -140,8 +190,8 @@ def build_panel(payload, horizon, sequence_length=1, *, compact=False, feature_c
                 prediction_samples=prediction_samples,sequence_length=sequence_length,
                 **({'observations':observations} if compact and sequence_length>1 else {}),
                 market_regimes=tracker.states if tracker is not None else None,
-                incomplete_sequences=incomplete_sequences,
-                missing_label_paths=missing,unmatured_final_sessions=min(horizon,len(dates)),
+                incomplete_sequences=labels.incomplete,
+                missing_label_paths=labels.missing,unmatured_final_sessions=min(horizon,len(dates)),
                 research_only=True,approved_for_model_training=False,
                 historical_security_identity_verified=False,live_execution_enabled=False)
 
@@ -160,10 +210,12 @@ def sequence_for(panel,row):
     return [panel["observations"][j][sid][1] for j in range(i-length+1,i+1)]
 
 
-def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0):
+def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_sessions=0, training_window_sessions=None):
     for v,lo in ((minimum_train_sessions,1),(test_sessions,1),(embargo_sessions,0)):
         if type(v) is not int or v<lo:
             raise ValueError("INVALID_FOLD_CONFIG")
+    if training_window_sessions is not None and (type(training_window_sessions) is not int or not minimum_train_sessions<=training_window_sessions<=5000):
+        raise ValueError("INVALID_TRAINING_WINDOW")
     horizon=panel["horizon"]
     samples=panel.get("prediction_samples",panel["samples"])
     end=len(panel["dates"])-horizon
@@ -184,12 +236,15 @@ def iter_purged_folds(panel, *, minimum_train_sessions, test_sessions, embargo_s
         raise ValueError("INSUFFICIENT_SESSIONS_FOR_FOLDS")
     for start in range(first,end,test_sessions):
         stop=min(start+test_sessions,end)
-        cutoff=offsets[max(0,start-embargo_sessions-horizon)]
+        cutoff_session=max(0,start-embargo_sessions-horizon)
+        cutoff=offsets[cutoff_session]
+        lower=offsets[max(0,cutoff_session-training_window_sessions)] if training_window_sessions is not None else 0
         if isinstance(samples,CompactSamples) and isinstance(panel['samples'],IndexedRows):
             valid=panel['samples'].indices
-            train=IndexPrefix(valid,bisect_left(valid,cutoff))
+            lo=bisect_left(valid,lower)
+            train=IndexPrefix(valid,bisect_left(valid,cutoff)-lo,start=lo)
         else:
-            train=[i for i in range(cutoff) if samples[i]['y'] is not None]
+            train=[i for i in range(lower,cutoff) if samples[i]['y'] is not None]
         test=range(offsets[start],offsets[stop])
         if not train or not test:
             raise ValueError("EMPTY_PURGED_FOLD")

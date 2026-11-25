@@ -11,8 +11,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from atlaspm.close_drafts import draft_after_close
-from atlaspm.market_close import approved_inputs, prepare_close
+from atlaspm.execution.close_drafts import draft_after_close
+from atlaspm.execution.market_close import approved_inputs, prepare_close
 from atlaspm.rebalance_workbench import Policy, RunStore, _json, exchange_window
 
 
@@ -144,7 +144,7 @@ class ClosePipelineTests(unittest.TestCase):
             return self.prepare(additional_quotes=symbols)
 
         refreshed = snapshot | {"positions": {"CCC": 3}}
-        with patch("atlaspm.close_drafts.collect_cash_equity_snapshot", side_effect=[snapshot, refreshed]) as read:
+        with patch("atlaspm.execution.close_drafts.collect_cash_equity_snapshot", side_effect=[snapshot, refreshed]) as read:
             args = {"account_id": snapshot["account_id"], "policy": Policy(), "now": observed,
                     "prepare_account_marks": account_marks}
             self.assertEqual(draft_after_close(market, partial, store, object(), **args)["status"], "market_blocked")
@@ -166,7 +166,7 @@ class ClosePipelineTests(unittest.TestCase):
         snapshot = {"positions": {"CCC": 1}, "open_orders": []}
         new_order = snapshot | {"open_orders": [{"symbol": "DDD"}]}
         ready = self.prepare()
-        with patch("atlaspm.close_drafts.collect_cash_equity_snapshot", side_effect=[snapshot, new_order]):
+        with patch("atlaspm.execution.close_drafts.collect_cash_equity_snapshot", side_effect=[snapshot, new_order]):
             result = draft_after_close(
                 market, ready, store, object(), account_id="DU0000000", policy=Policy(), now=observed,
                 prepare_account_marks=lambda _, symbols: self.prepare(additional_quotes=symbols),
@@ -193,7 +193,7 @@ class ClosePipelineTests(unittest.TestCase):
         with closing(sqlite3.connect(market / "draft_handoffs.sqlite3")) as db, db:
             db.execute("CREATE TABLE handoffs (id TEXT PRIMARY KEY, run_id TEXT NOT NULL)")
             db.execute("INSERT INTO handoffs VALUES (?, ?)", (legacy, existing))
-        with patch("atlaspm.close_drafts.collect_cash_equity_snapshot", return_value=snapshot) as read:
+        with patch("atlaspm.execution.close_drafts.collect_cash_equity_snapshot", return_value=snapshot) as read:
             args = {"account_id": snapshot["account_id"], "now": observed,
                     "prepare_account_marks": lambda *_: self.fail("unexpected missing quotes")}
             old = draft_after_close(market, ready, store, object(), policy=default, **args)

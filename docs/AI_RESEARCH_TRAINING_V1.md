@@ -155,3 +155,353 @@ so appending other models does not pin a full-run SQLite WAL read transaction.
 All model snapshots retain the panel's trailing-window eligibility length,
 including tabular estimators that consume only the final feature row. Ensemble
 and monitoring share one aligned chronological forecast validation contract.
+
+
+## V6 real research dataset bridge (not approved for training)
+
+The existing synthetic trainer, streaming loader, fold engine, models,
+checkpoint and artifact code remain unchanged. V6 builds separate
+real-unverified-research Parquet samples from the HF RTH factor mart,
+without converting tickers to synthetic or certified security IDs.
+
+~~~powershell
+$py = ".\.venv\Scripts\python.exe"
+& $py -m atlaspm.cli market-db training-dataset-v6 --start-month 2020-01 --end-month 2020-06 --plan-only
+& $py -m atlaspm.cli market-db training-dataset-v6 --start-month 2020-01 --end-month 2020-06 --horizons 1 5 21 --memory 2GB --threads 2
+~~~
+
+Build missing factor partitions separately using the existing factor CLI.
+The plan does not run the calendar or read prices. Materialization checks
+factor manifests, calendar membership, positive prices, unique keys and
+last observed full-slot availability. A historical partial final bucket
+or non-NYSE date blocks the partition; do not silently repair it.
+Underlying factor derivation and vendor availability remain unverified.
+
+Labels use observed close-to-close price change at exact NYSE session
+offsets 1, 5, 10, 21 or 63. Missing intermediate sessions and end-of-range
+censoring produce null labels; features with missing or nonfinite values
+remain in the research dataset with features_complete=false. These are
+not trade-executable or total-return labels, and ticker reuse, unverified
+corporate actions and delisting missingness can materially bias them.
+The close timestamp is only an earliest assumed feature availability time,
+not independently proven vendor delivery. No sample is eligible for
+formal model training.
+
+Each month reads only the signal month and the necessary future months,
+under the existing bounded DuckDB memory configuration. Content-addressed
+registry IDs bind the selected configuration, calendar digest and input
+file hashes; cached output partitions are verified before reuse.
+The manifest includes counts and expanding-window folds with strict
+label-end purge and embargo. Folds are calendar plans, not proof that
+every fold contains sufficient valid samples. A short range may have no
+folds. No model fitting takes place.
+
+Registry output: local_data/training/v6/<dataset ID prefix>/manifest.json,
+monthly Parquet partitions, and local_data/training/v6/latest.json.
+Use the full dataset ID with training-dataset-inspect-v6 --dataset-id
+to check registry identity and output hashes. Hashes establish local
+integrity, not source authenticity; the manifest is not signed.
+Run one writer at a time. Source data stays local.
+
+V5 historical identity, action completeness, price adjustment, rights,
+and feature availability gates remain unresolved. Synthetic trainer
+validation rejects V6 manifests. Do not relabel the data to bypass
+the guard. Future certified sample adapters must enforce the actual
+evidence and time-aware security identity rather than trusting boolean
+flags in a user-editable manifest.
+
+
+## V6.1 real research preflight
+
+Run after a successful V6 materialization:
+
+~~~powershell
+$m = Get-Content local_data/training/v6/latest.json -Raw | ConvertFrom-Json
+& $py -m atlaspm.cli market-db training-preflight-v61 --dataset-id $m.dataset_id --minimum-train-rows 1000 --minimum-test-rows 100
+~~~
+
+Preflight verifies registry and partition hashes, recomputes the calendar,
+validates keys, price and feature completeness flags, observed bar timing,
+label end offsets and independently recalculates labels using exact
+calendar-range row counts and terminal prices. Monthly windows are
+bounded to the relevant future months. It then counts actual
+feature-complete labeled training and test rows in each purged fold,
+and retains prediction candidates with unavailable labels in the test
+coverage statistics. Empty dates and insufficient folds are reported.
+It rebuilds the fold plan from configuration rather than trusting stored
+fold counts. The default minimum row counts are diagnostic thresholds,
+not statistical validity claims.
+
+Output: preflight.json beside the dataset manifest. No model fitting,
+automated model selection, training approval or trade permission occurs.
+The checks detect local structural inconsistencies, not true source
+authenticity, historical identity, independent action completeness,
+data-use rights or actual publication delays. Price-path labels remain
+unadjusted-semantics-unverified research observations. Model promotion
+must remain blocked until external certification is complete.
+
+
+## V6.2 unified synthetic model tournament
+
+The existing model zoo already contains ridge, historical mean, ElasticNet,
+random forest, LightGBM, XGBoost, CatBoost, MLP, LSTM, GRU and Transformer.
+The tournament reuses their existing implementations instead of adding
+duplicate estimators. Run:
+
+~~~powershell
+& $py -m atlaspm.research.training_tournament --file local_data/tournament.json
+~~~
+
+The JSON request has payload (existing synthetic panel contract), config
+(shared horizon, fold settings, sequence length, seed and resource options),
+candidates (2–32 objects with model and optional ridge_alpha or
+sequence_epochs), holdout_start (zero-based session index on a refit
+boundary) and optional selection_metric (mae, rmse, mean_daily_rank_ic
+or mean_daily_ic). Use identical shared horizon, sequence length and
+fold settings for every candidate. Missing optional model dependencies
+fail explicitly rather than silently changing the candidate set.
+
+Candidates are trained on only the pre-holdout prefix, with identical
+validation prediction keys and actuals checked by SHA-256. Undefined
+metrics are ineligible; ties use input order. Only the winner is run
+on the complete panel; its holdout uses rolling refits with matured
+past labels. Holdout scores are not used to select a model. Candidate
+predictions are discarded after scoring; per-trial metrics and dependency
+versions are retained. This is synthetic research only and does not
+demonstrate actual market alpha or authorize real model training.
+The existing fixed-model experiment, model artifact registry and
+ensemble implementations remain intact.
+
+
+## V6.3–V6.5 unified synthetic search and lifecycle
+
+Use training_autonomy with a single JSON request:
+
+~~~powershell
+& $py -m atlaspm.research.training_autonomy --file local_data/autonomy.json
+~~~
+
+Example request structure (payload is the existing explicitly synthetic
+panel object, not a real-data V6 manifest):
+
+~~~json
+{
+  "config": {"horizon": 5, "minimum_train_sessions": 20,
+             "test_sessions": 5, "embargo_sessions": 1},
+  "spaces": [
+    {"model": "historical_mean", "grid": {}},
+    {"model": "ridge", "grid": {"ridge_alpha": [0.1, 1, 10]}},
+    {"model": "random_forest", "grid": {"n_estimators": [32, 64],
+                                       "max_depth": [3, 5]}}
+  ],
+  "holdout_start": 46,
+  "budget": 8,
+  "search_seed": 42,
+  "selection_metric": "mean_daily_rank_ic",
+  "ensemble": {"window_dates": 20, "minimum_dates": 5},
+  "regime_ensemble": {"market": {"lookback": 20}, "weights": {}},
+  "monitoring": {"window_dates": 20, "minimum_dates": 5},
+  "patience": 3,
+  "cooldown_dates": 10
+}
+~~~
+
+Include payload before execution, with enough sessions for the specified
+holdout and label horizon. Grid keys features (list of feature-name
+lists), ridge_alpha and sequence_epochs select explicit candidates;
+other keys are model-specific bounded parameters from training_models.
+The search is deterministic, model-balanced finite-grid sampling, at
+most 4096 raw combinations and 32 evaluated candidates. It is not Bayesian
+optimization. Feature selection is limited to explicit subsets, compared
+using the same pre-holdout prediction universe. The seed is fixed, not
+tuned. The estimator architecture and single-thread controls remain fixed.
+
+The pipeline selects using prefix-only trials, then evaluates the selected
+estimator and historical mean in one full-panel walk-forward pass. The
+existing adaptive and optional regime-conditioned ensemble only use
+matured errors. Monitoring and ensemble settings are fixed before the
+holdout, not selected using holdout outcomes. The monitor reports coverage,
+error drift and research champion candidates. Repeated drift can emit
+review requests with patience and cooldown; it does not autonomously
+change live models or execute a new drift-triggered fit. Scheduled
+walk-forward refits are actual research fits. Existing incremental Ridge,
+artifact and checkpoint APIs remain available separately.
+
+The output keeps summaries, model configuration, selected features,
+holdout metrics, weight history and retraining review requests rather
+than duplicate prediction arrays. The V6 real dataset is still blocked
+from this synthetic runner. Full certification, economic strategy
+evaluation and deployment controls are separate prerequisites.
+
+
+## Synthetic forecast-to-strategy closed loop (V7 integration)
+
+Run the integrated model selection, portfolio policy competition and
+next-open cash replay with:
+
+~~~powershell
+& $py -m atlaspm.research.strategy_closed_loop --file local_data/closed_loop.json
+~~~
+
+Request keys: payload (existing synthetic training panel); market (mode
+synthetic, synthetic_fixture true, sectors mapping, sessions containing
+date, open_at, close_at, source synthetic, open/close symbol-price
+maps and optional volume); model_config; model_candidates (existing
+tournament candidates); model_selection_end and strategy_holdout_start
+(zero-based session indices); strategies (2–32 distinct dictionaries
+with top_k, rebalance_sessions, cash_reserve and optional optimizer);
+execution (initial_cash, optional fee_bps, slippage_bps,
+settlement_sessions and execution_policy). Optional selection_metric,
+signal_model (selected or adaptive_ensemble), ensemble and
+max_validation_drawdown. Use the same explicitly synthetic fixed
+universe of at most 20 names and identical closing marks in both
+inputs. No externally supplied signals are accepted.
+
+The three stages are model selection on the first prefix, strategy
+competition on a subsequent validation interval and selected policy
+only on the final holdout. Strategy trials use actual simulated net
+returns and a validation drawdown cap, choosing maximum zero-risk-free
+Sharpe among eligible trials. Cash starts fresh for every evaluation.
+The chosen forecast is converted to close-available synthetic signals,
+then executed at the next supplied open. Costs, settlement, integer
+shares and rolling allocation use existing replay code. Empty forecast
+sessions explicitly hold existing positions; this is necessary because
+the trainer censors final horizon sessions. The original replay default
+still rejects empty signals. A price-only fractional equal-weight
+buy-and-hold benchmark is aligned to the evaluation window. No final
+liquidation is assumed. The drawdown cap is a selection filter, not
+a guaranteed future loss limit.
+
+No candidate strategy uses holdout returns to select its parameters.
+Only the selected policy runs on the final interval. A failed holdout
+does not trigger a fallback search. The existing seven rolling allocation
+methods may be requested subject to their input and feasibility checks.
+This cash-only synthetic integration does not connect to the
+institutional OMS, enable leverage or independently verify broker margin.
+It demonstrates an offline research loop, not live autonomous trading
+or real-data profitability. Real model training, verified identity,
+corporate actions, data rights and deployment approval remain blocked.
+
+
+## Closed-loop risk circuit breaker and hypothetical financing
+
+Optional execution.risk_policy applies one fixed cash-only policy to
+every strategy trial and the final holdout:
+
+~~~json
+{"max_drawdown": 0.20, "max_gross_leverage": 1.0,
+ "equity_shock": 0.20, "max_stress_loss_fraction": 0.15}
+~~~
+
+Each synthetic close reuses the existing OMS marked-exposure risk
+calculation. A breach permanently latches a halt for the run: no new
+risk, sell-only targets at subsequent opens, with normal participation,
+cost and settlement rules. Residual shares are retried; no same-close
+or guaranteed liquidation is assumed. The halt and remaining positions
+are explicit. Candidate strategies that halt during validation are
+ineligible; a holdout halt is reported, not used to select another
+strategy. The local close-risk journal reuses the OMS hash-chain helper;
+this is not a signed broker audit or an integration with its actual
+order journal. With no risk policy, previous replay behavior remains.
+
+Optional top-level leverage_scenarios requests a separate static
+financing envelope. Example scenario:
+
+~~~json
+{"shock": 0.20, "maintenance_fraction": 0.25,
+ "initial_fraction": 0.50, "apr": 0.06, "days": 30,
+ "min_excess_fraction": 0.10, "max_equity_loss": 0.50}
+~~~
+
+Starting equity is the assumed initial cash, not verified broker
+net liquidation. The envelope solves simultaneous assumed initial
+margin, stressed maintenance buffer, equity loss, financing APR
+budget and gross ceiling constraints for a fully invested uniform
+long-equity shock. If even 1x fails, no feasible fully-invested
+ceiling is returned. It reports hypothetical principal, interest,
+stressed equity and static zero-excess boundary per scenario.
+The existing reverse-stress boundary helper is reused. These are
+not IBKR margin requirements or liquidation prices. The report
+does not modify simulated cash trades, permit borrowing, choose
+leverage or transmit orders. Actual broker margin, order-bound
+What-If, position identity and collateral need independent review.
+
+
+## Consolidated synthetic acceptance and local OMS recovery
+
+From the checkout root, with the existing portfolio and research extras:
+
+~~~powershell
+& $py -m atlaspm.research.training_acceptance
+~~~
+
+This runs a generated synthetic panel through model and strategy selection,
+cash execution, the fixed risk policy and hypothetical financing. Separately
+it runs the existing institutional synthetic OMS example with partial fills
+and a duplicate event, persists its result and verifies idempotent retrieval.
+The smoke checks actual outputs and fails on missing reconciliation,
+audit-chain corruption or unexpected execution permission. The fixture
+does not read real history or use the network. Temporary receipt files are
+cleaned up. GitHub CI invokes the smoke on Windows and Linux. A smoke PASS
+does not substitute for the full regression suite or certify real data.
+
+To persist an explicit synthetic OMS simulation result locally:
+
+~~~powershell
+& $py -m atlaspm.execution.synthetic_oms_receipts --db local_data/paper/receipts.sqlite3 --request-id SYN:example-001 --file examples/unified_portfolio_synthetic.json
+& $py -m atlaspm.execution.synthetic_oms_receipts --db local_data/paper/receipts.sqlite3 --request-id SYN:example-001
+~~~
+
+The same request ID and identical canonical payload return the committed
+report; a changed payload under that ID fails. SQLite serializes the
+local transaction. An interrupted uncommitted simulation can be repeated
+because it has no external side effects. The result is checked against
+the existing portfolio safety and reconciliation contract. This is a
+local synthetic receipt, not a broker idempotency key or exactly-once
+external execution mechanism. Local hashes are unsigned; a malicious
+editor capable of rewriting both data and digests is outside this
+integrity check. No new borrowing, real training or broker order route
+is enabled. The institutional example and the historical cash replay
+remain separate acceptance stages, not a continuous live order bridge.
+
+
+## Opt-in assumed-margin session replay
+
+Cash-only replay remains the default. An explicit synthetic replay or
+closed-loop execution request may include:
+
+~~~json
+{"margin_policy":{"target_gross":1.5,"initial_fraction":0.5,
+                  "maintenance_fraction":0.3,"annual_apr":0.06},
+ "risk_policy":{"max_gross_leverage":2,"max_drawdown":0.25,
+                "equity_shock":0.2,"max_stress_loss_fraction":0.5}}
+~~~
+
+For the standalone replay set cash_reserve to zero. For the closed loop
+every candidate strategy must set cash_reserve to zero; optimizer
+configurations are rejected for this assumed-margin mode. The target
+gross is a fixed research policy, not automatically selected from the
+static leverage envelope. All candidates use the same financing policy.
+No broker margin or external order APIs are used.
+
+The ledger tracks principal, accrued interest, cumulative borrow/repay
+and interest paid. Simple ACT/365 interest accrues on the prior close's
+principal over elapsed calendar days, including weekends. Settled cash
+repays accrued interest then principal before new orders. Unsettled
+receivables are excluded from equity used to fund additional purchases.
+Conservative cost-aware gross and debt bounds cap purchase outlays.
+Opening risk breaches cancel additions and attempt sell-only execution
+at the supplied opening mark; close breaches latch a reduction for the
+following open. Partial fills may leave exposure and debt outstanding.
+Insolvency at open or close raises an explicit error; it does not model
+bankruptcy or an actual broker liquidation auction. Daily attribution
+subtracts financing interest as well as execution cost.
+
+The resulting execution model is synthetic_next_open_assumed_margin.
+A completed leveraged closed loop reports SYNTHETIC_MARGIN_CLOSED_LOOP_COMPLETE.
+Completion is not a guarantee of a positive return or broker approval.
+The fixed hypothetical long-only margin fractions, daily accrual convention,
+zero-reserve rank weighting and no portfolio-margin offsets are intentional
+research limitations. Cash optimizer constraints and the institutional OMS
+remain separate. The historical synthetic replay and new margin regressions
+are covered by the existing test_training*.py CI discovery.

@@ -62,7 +62,7 @@ as compatibility aliases. See [complete source map](docs/CODE_LAYOUT.md).
 This code organization does **not** implement portfolio/hedging/options/bonds
 engines or enable live broker execution.
 
-Legacy import aliases such as `atlaspm.backtest` remain temporarily for compatibility with existing tests and external scripts. **New code should use `atlaspm.quant.*` and `atlaspm.selection.*`.**
+39 unused-in-tree deprecated import paths have been retired; 59 compatibility aliases remain. **Use canonical domain imports** (for example, `atlaspm.engine.backtest` instead of `atlaspm.backtest`). The CLI is unchanged. See the [retirement inventory and migration guidance](docs/maintenance/SHIM_USAGE_STAGE3.md).
 
 ## Local market database
 
@@ -101,6 +101,15 @@ permissions are implied. Start with `market-db factor-catalog` and
 
 **Current evidence limits:** The expanded current-listed US dataset has about 5,830 cached symbols, but it is not a historical point-in-time universe; it is vulnerable to survivorship bias. In the first full-market LightGBM V2 experiment, held-out Rank IC was **-0.01774** versus **+0.11176** for a simple momentum baseline, and Top-10 scores tied across decision dates. This model is **not eligible for automatic trading**. The separate RiskNet/FusionNet historical results have also been examined repeatedly and require independent validation.
 
+## Complete trading lifecycle (seven-phase integration framework)
+
+The [complete trading lifecycle](docs/TRADING_LIFECYCLE.md) maps the seven
+phases from investment mandate through data, strategy, risk, execution,
+position management and exit, to attribution and model review. Inspect its
+21-step offline review contract with `python -m atlaspm.framework.trading_lifecycle`.
+The framework does not execute trades or verify declared evidence; existing
+manual Paper behavior and the eight-stage research registry are unchanged.
+
 ## Standard quantitative workflow (research specification)
 
 The target architecture is **Data & governance → Alpha research →
@@ -133,3 +142,8 @@ research and deployment boundaries. Separate historical option, Treasury, and he
 Market data, brokerage snapshots, credentials, training outputs and model artifacts must remain in ignored local folders such as `local_data/`; do **not** commit them. The Git repository contains only code, synthetic fixtures, reproducible tests, documented assumptions and approved small research manifests.
 
 Run `python -m unittest discover -s tests -v` before proposing changes. GitHub Actions runs Linux and Windows checks; no live broker access is needed. Changes to ranking, margin risk or order-preflight behavior must preserve fail-closed defaults. MIT licensed; see [LICENSE](LICENSE).
+
+
+## Autonomous Alpha research (stage 4, incremental)
+
+See [Autonomous Alpha Engine](docs/AUTONOMOUS_ALPHA_ENGINE.md) for implemented synthetic research, safety boundaries, CLI and remaining validation. Run `python -m atlaspm.cli autonomous-alpha --file local_data/alpha_request.json`. Production admission and live execution remain disabled.

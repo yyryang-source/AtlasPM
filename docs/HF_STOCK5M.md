@@ -788,3 +788,111 @@ knowledge. Primary-form regex matching misses many legitimate events;
 dividend, merger, exit and ticker-change terms need separate validation.
 No full-history completeness, source independence, price adjustment
 semantics, rights, training or trading authorization is inferred.
+
+
+## V5.6 historical SEC cover observations
+
+Use the completed V5.2 index without rebuilding or downloading index files.
+This reader samples one latest original 8-K or 6-K per historical CIK per
+quarter in a requested year. It does not consult a current ticker directory.
+Start with a bounded explicit issuer sample:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_identity_v56 --year 2020 --ciks 320193 789019 1045810 --max-requests 12 --fetch
+~~~
+
+Omit --fetch to inspect only cached bodies without network requests. Use
+the same existing SEC contact User-Agent and shared V5.2 body cache.
+Request budgets count network attempts only; a failed network request
+stops further downloads. For a broad sample omit --ciks, use
+--max-issuers (1..100), and continue with --after-cik only once
+page_advance_allowed is true and more_issuers is true. Repeat the same page
+to finish missing cached bodies. A cache error requires review rather
+than silent replacement. The cursor is lexical over padded historical
+CIKs, not a guarantee of historical listed-security coverage.
+
+The parser verifies accession, issuer CIK and filed date headers, selects
+one primary form, and accepts explicit DEI security title, trading symbol
+and exchange facts only in the same table row and XBRL context. Unknown
+exchange names, cross-context joins and conflicting ticker observations
+are rejected or marked for review. A filing-date observation is not an
+effective interval or a stable share-class identity. Older filings
+without inline DEI cover facts remain unresolved. The current module does not resolve historical ticker reuse, certify
+corporate actions or import V5.3 claims.
+
+Reports: local_data/stock_5m/huggingface/quality/certification_v5/identity_v56/latest.json
+and bounded page reports. Body references retain raw SHA-256. No
+historical identity, data rights or training permission is granted.
+
+
+### V5.7–V5.8 legacy cover and lifecycle leads
+
+For documents without inline XBRL tags, the extractor accepts an untagged
+HTML table only when the first row has the exact title-of-class, trading
+symbol and registered-exchange column headers. Each subsequent row must
+have exactly three cells; nested tables, merged cells and inline tagged
+tables are not accepted by this fallback. A two-column pre-ticker-disclosure
+table or a narrative ticker mention does not establish a mapping. Older
+filings frequently lack explicit ticker columns, so this is a limited
+legacy HTML fallback, not a complete 2000–2018 parser. Tagged documents
+never fall back to untagged text to evade context validation.
+
+Historical issuer pages now include CIKs with only registration, exit or
+merger filing leads, even when no 8-K/6-K cover sample is available.
+The additional index query is offline and bounded to 10,000 leads per
+page; use a smaller issuer page if truncated. The report distinguishes
+exit, registration and merger registration forms and exposes
+issuers_without_sampled_cover_filing. All effective dates and stable
+security IDs remain null. Filing dates are not actual listing/delisting
+dates. A registration filing may never become effective, and a Form 15
+does not necessarily establish exchange delisting. No automatic ticker
+change or action certification is attempted.
+
+page_advance_allowed is false for missing index quarters, truncated
+event leads, missing bodies or collection/cache errors. Use this flag
+rather than page_complete alone before advancing a cursor. Reuse the
+same historical SEC index and raw body cache; no index rebuild needed.
+
+
+### V5.9 reviewed evidence integrity and visible-action return reconciliation
+
+The reviewed V5.3 ledger now validates canonical claim JSON, claim SHA-256
+and indexed metadata before applying the as-of filter, including before
+append. This detects accidental edits, not a malicious rewrite of every
+digest. Inside the pipeline evidence tree only original content-addressed
+collector objects or filing bodies can be cited; generated hints, reports,
+queues and manifests cannot be primary evidence. Visible evidence bytes
+are rehashed. Two declared source families and distinct bytes are still
+only declared corroboration, not independently authenticated sources.
+
+With reviewed V5.3 claims and explicit local endpoint marks, use:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_visible_returns_v59 --file local_data/marks.jsonl --as-of 2020-04-01 --raw-unadjusted
+~~~
+
+Each JSONL object contains exactly security_id, start_date, end_date,
+start_symbol, end_symbol, start_close, end_close. Prices are positive
+decimal strings. For example (illustrative only):
+
+~~~json
+{"security_id":"ID1","start_date":"2020-02-01","end_date":"2020-03-31","start_symbol":"ABC","end_symbol":"ABC","start_close":"100","end_close":"55"}
+~~~
+
+The snapshot is retrospective at the given as-of date, strictly after
+the return endpoint; it is not a per-decision training feature snapshot.
+Intervals must continuously cover the requested dates, and ticker changes
+must reconcile with explicit reviewed actions. Exchange transitions,
+identity gaps, unresolved visible claims, mergers, delistings, cash exits
+and same-day split/dividend share-basis ambiguity block calculation.
+Visible splits change shares and cash dividends accrue per then-current
+share count; no reinvestment, tax, payment timing or execution costs are
+modeled. Outputs are split-adjusted price return and visible economic
+entitlement return. Raw marks are caller-declared and hashed, not
+independently verified; no calendar/session coverage or adjustment
+completeness is proven. Limit: 1,000 rows and 4 MiB input, one snapshot per
+run. Output is returns_v59/latest.json under certification_v5.
+No source market parquet is modified, no formal label is published and no
+real training or execution permission is granted. The missing independent
+historical sources, full corporate-action coverage, vendor price semantics
+and rights remain external blockers.

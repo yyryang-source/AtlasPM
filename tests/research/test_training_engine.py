@@ -19,6 +19,18 @@ def fixture():
 
 
 class PanelTests(unittest.TestCase):
+    def test_training_rejects_external_prepared_panel(self):
+        from atlaspm.research.training_engine import _train, train_parquet
+        panel=build_panel(fixture(),5,compact=True)
+        for fn in (train,_train):
+            with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+                fn({"mode":"real_unverified_research","synthetic_fixture":False},prepared_panel=panel)
+        with self.assertRaisesRegex(ValueError,"EXTERNAL_PREPARED_PANEL_NOT_ALLOWED"):
+            train(fixture(),prepared_panel=panel)
+        with self.assertRaisesRegex(ValueError,"REAL_TRAINING_DATA_NOT_APPROVED"):
+            train_parquet(None,{"mode":"historical","synthetic_fixture":False},feature_cache_dir=None)
+
+
     def test_horizons(self):
         for h in (1,5,10,21):
             p=build_panel(fixture(),h)
@@ -43,6 +55,32 @@ class PanelTests(unittest.TestCase):
         out=build_panel(p,5)
         self.assertGreater(out["missing_label_paths"],0)
         self.assertFalse(any(r["security_id"]=="SYN:1" and r["signal_index"]==0 for r in out["samples"]))
+
+    def test_consecutive_presence_matches_naive_reference(self):
+        from random import Random
+        rng=Random(18)
+        p=fixture()
+        for session in p["sessions"]:
+            session["assets"]=[a for a in session["assets"] if a["security_id"]=="SYN:1" or rng.random()>.2]
+        marks=[{a["security_id"]:a for a in s["assets"]} for s in p["sessions"]]
+        for h,length in ((1,1),(5,3),(10,7),(21,2)):
+            expected=[]
+            missing=incomplete=0
+            for i in range(len(marks)-h):
+                for sid,a in sorted(marks[i].items()):
+                    if i+1<length or any(sid not in marks[j] for j in range(i-length+1,i+1)):
+                        incomplete+=1
+                        continue
+                    y=None
+                    if all(sid in marks[j] for j in range(i+1,i+h+1)):
+                        y=marks[i+h][sid]["close"]/a["close"]-1
+                    else:
+                        missing+=1
+                    expected.append((i,sid,y))
+            out=build_panel(p,h,length,compact=True)
+            self.assertEqual(expected,[(r["signal_index"],r["security_id"],r["y"]) for r in out["prediction_samples"]])
+            self.assertEqual(missing,out["missing_label_paths"])
+            self.assertEqual(incomplete,out["incomplete_sequences"])
 
     def test_real_data_blocked(self):
         p=fixture()

@@ -370,9 +370,9 @@ def _audit_file(con, path: Path, month: str) -> dict[str, Any]:
     # isfinite(NULL) is NULL; coalesce makes missing warmup legitimate.
     rows, symbols, invalid, filled = con.execute(f"""
        SELECT count(*), count(DISTINCT symbol),
-       count(*) FILTER (WHERE symbol IS NULL OR trade_date IS NULL
+       count(*) FILTER (WHERE symbol IS NULL OR length(trim(symbol)) = 0 OR trade_date IS NULL
           OR cast(trade_date AS VARCHAR) NOT LIKE '{month}-%'
-          OR close <= 0 OR NOT isfinite(close)
+          OR NOT coalesce(close > 0 AND isfinite(close), false)
           OR coalesce({validity}, false)),
        { ' + '.join(f'count({c})' for c in FEATURES) }
        FROM {s}

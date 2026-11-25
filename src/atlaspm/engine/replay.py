@@ -1,4 +1,4 @@
-"""Cash-only synthetic session replay. No broker or training permissions."""
+"""Synthetic session replay: cash by default, optional assumed margin. No broker permissions."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +8,7 @@ from math import floor, isclose
 from pathlib import Path
 
 from atlaspm.engine.contracts import finite, timestamp, validate_candidates
+from atlaspm.execution.oms_controls import chain_audit_events, post_fill_risk_snapshot
 
 
 def replay(payload):
@@ -25,6 +26,31 @@ def replay(payload):
     for value in (top, cadence, lag):
         if type(value) is not int or value < 1:
             raise ValueError("INVALID_INTEGER_CONFIGURATION")
+    missing_policy=payload.get("missing_signal_policy","reject")
+    if missing_policy not in ("reject","hold"):
+        raise ValueError("INVALID_MISSING_SIGNAL_POLICY")
+    margin=None
+    if "margin_policy" in payload:
+        from atlaspm.engine.replay_funding import MarginFunding
+        margin=MarginFunding.from_policy(payload["margin_policy"])
+        if reserve!=0 or payload.get("optimizer") is not None:
+            raise ValueError("SYNTHETIC_MARGIN_REQUIRES_ZERO_RESERVE_AND_RANK_WEIGHTS")
+        if payload.get("risk_policy") is None:
+            raise ValueError("SYNTHETIC_MARGIN_REQUIRES_RISK_POLICY")
+    risk_policy=payload.get("risk_policy")
+    risk_events=[]
+    halted=False
+    if risk_policy is not None:
+        if not isinstance(risk_policy,dict) or set(risk_policy)-{"max_drawdown","max_gross_leverage","equity_shock","max_stress_loss_fraction"}:
+            raise ValueError("INVALID_REPLAY_RISK_POLICY")
+        drawdown_limit=finite(risk_policy.get("max_drawdown",.25),"max_drawdown",minimum=0)
+        gross_limit=finite(risk_policy.get("max_gross_leverage",1.),"max_gross_leverage",minimum=0)
+        shock=finite(risk_policy.get("equity_shock",.2),"equity_shock",minimum=0)
+        stress_limit=finite(risk_policy.get("max_stress_loss_fraction",.25),"max_stress_loss_fraction",minimum=0)
+        if not 0<drawdown_limit<=1 or not 0<gross_limit<=(margin.initial_gross_cap if margin else 1) or shock>1 or stress_limit>1:
+            raise ValueError("INVALID_REPLAY_RISK_LIMIT")
+        if margin and margin.target_gross>gross_limit:
+            raise ValueError("MARGIN_TARGET_EXCEEDS_RISK_CAP")
     sessions = payload["sessions"]
     if not isinstance(sessions, list) or len(sessions) < 2:
         raise ValueError("REQUIRES_TWO_SESSIONS")
@@ -58,6 +84,10 @@ def replay(payload):
     prior_holdings = {}
     prior_equity = peak = initial
     total_cost = 0.
+    def liability():
+        return margin.liability if margin else 0.
+    def marked_gross(marks):
+        return sum(q*marks[s] for s,q in holdings.items())
     for i, row in enumerate(sessions):
         day = date.fromisoformat(row["date"])
         opening = timestamp(row["open_at"], "open_at")
@@ -72,9 +102,32 @@ def replay(payload):
         cl = {s: finite(v, "close", minimum=.000001) for s,v in row["close"].items()}
         if not op or set(op) != set(cl) or not set(holdings) <= set(op):
             raise ValueError("MISSING_MARK_OR_UNSUPPORTED_CORPORATE_ACTION")
+        financing_today=margin.accrue((day-prior_day).days) if margin and prior_day is not None else 0.
         cash += sum(amount for due, amount in pending if due <= i)
         pending = [(due, amount) for due, amount in pending if due > i]
-        opening_equity = cash + sum(v for _,v in pending) + sum(q*op[s] for s,q in holdings.items())
+        if margin:
+            cash=margin.repay(cash)
+        opening_equity = cash + sum(v for _,v in pending) + marked_gross(op)-liability()
+        if margin:
+            if opening_equity<=0:
+                raise ValueError("SYNTHETIC_MARGIN_INSOLVENCY_AT_OPEN")
+            gross=marked_gross(op)
+            breaches=[]
+            if margin.snapshot(gross,opening_equity)["maintenance_breach"]:
+                breaches.append("ASSUMED_MAINTENANCE_BREACH")
+            if gross/opening_equity>gross_limit+1e-8:
+                breaches.append("REPLAY_GROSS_LIMIT")
+            if gross*shock/opening_equity>stress_limit+1e-8:
+                breaches.append("REPLAY_STRESS_LIMIT")
+            if 1-opening_equity/peak>drawdown_limit:
+                breaches.append("REPLAY_DRAWDOWN_LIMIT")
+            if breaches:
+                halted=True
+                risk_events.append({"date":str(day),"timestamp":row["open_at"],
+                    "kind":"SYNTHETIC_OPEN_MARGIN_RISK_CHECK","breaches":breaches,
+                    "halt_latched":True,"remaining_positions":dict(holdings)})
+            if halted:
+                targets=(str(prior_day),prior_close,{}) if holdings else None
         cost_today = 0.
         if targets is not None:
             signal_day, signal_close, weights = targets
@@ -99,28 +152,37 @@ def replay(payload):
                     trades.append(dict(date=str(day), signal_date=signal_day, symbol=s, side="SELL", shares=qty, reference_price=op[s], cost=cost))
             for s in sorted(desired):
                 unit = op[s]*(1+slip)*(1+fee)
-                qty = min(max(0, desired[s]-holdings.get(s,0)), max(0, floor((cash-opening_equity*reserve)/unit)))
+                budget=max(0,cash-opening_equity*reserve)
+                if margin:
+                    # Worst allowed execution impact is 500 bps, plus base slip/fee.
+                    k=(1+slip+(.05 if policy is not None else 0))*(1+fee)-1
+                    budget=margin.buy_budget(cash=cash,pending=sum(v for _,v in pending),
+                        gross=marked_gross(op),equity=opening_equity-cost_today,
+                        adverse_cost_ratio=k,gross_limit=gross_limit)
+                qty = min(max(0, desired[s]-holdings.get(s,0)), max(0, floor(budget/unit)))
                 if policy is not None:
                     requested = max(0, desired[s]-holdings.get(s,0))
                     if requested:
-                        order = submit(s, "BUY", requested, op[s], max(0,cash-opening_equity*reserve), day)
+                        order = submit(s, "BUY", requested, op[s], budget, day)
                         qty = order["filled"]
                         unit = order["price"]*(1+fee)
                 if qty:
-                    cash -= qty*unit
+                    cash=margin.pay_purchase(cash,qty*unit) if margin else cash-qty*unit
                     holdings[s] = holdings.get(s,0)+qty
                     cost = qty*(unit-op[s])
                     cost_today += cost
                     trades.append(dict(date=str(day), signal_date=signal_day, symbol=s, side="BUY", shares=qty, reference_price=op[s], cost=cost))
             holdings = {s:q for s,q in holdings.items() if q}
-            after = cash+sum(v for _,v in pending)+sum(q*op[s] for s,q in holdings.items())
+            after = cash+sum(v for _,v in pending)+marked_gross(op)-liability()
             if cash < -1e-8 or not isclose(after, opening_equity-cost_today, abs_tol=1e-7):
                 raise ValueError("LEDGER_RECONCILIATION_FAILED")
         targets = None
         overnight = sum(q*(op[s]-prior_prices[s]) for s,q in prior_holdings.items()) if i else 0.
         intraday = sum(q*(cl[s]-op[s]) for s,q in holdings.items())
-        equity = cash+sum(v for _,v in pending)+sum(q*cl[s] for s,q in holdings.items())
-        if not isclose(equity-prior_equity, overnight+intraday-cost_today, abs_tol=1e-7):
+        equity = cash+sum(v for _,v in pending)+marked_gross(cl)-liability()
+        if margin and equity<=0:
+            raise ValueError("SYNTHETIC_MARGIN_INSOLVENCY_AT_CLOSE")
+        if not isclose(equity-prior_equity, overnight+intraday-cost_today-financing_today, abs_tol=1e-7):
             raise ValueError("DAILY_ATTRIBUTION_FAILED")
         peak = max(peak,equity)
         total_cost += cost_today
@@ -128,19 +190,44 @@ def replay(payload):
                           unsettled_cash=sum(v for _,v in pending), holdings=dict(holdings),
                           daily_return=equity/prior_equity-1, drawdown=equity/peak-1,
                           overnight_pnl=overnight, intraday_pnl=intraday, trade_cost=cost_today))
+        if margin:
+            curve[-1].update(financing_interest_today=financing_today,**margin.snapshot(marked_gross(cl),equity))
         if policy is not None:
             raw_volume = row.get("volume")
             if not isinstance(raw_volume, dict) or set(raw_volume) != set(cl):
                 raise ValueError("MISSING_COMPLETED_SESSION_VOLUME")
             prior_volume = {s:finite(v,"volume",minimum=0) for s,v in raw_volume.items()}
         history.append((str(day), cl))
-        if i % cadence == 0:
+        if risk_policy is not None:
+            positions=[{"type":"equity","market_value":q*cl[s],"gross_notional":q*cl[s]}
+                       for s,q in sorted(holdings.items())]
+            snapshot=post_fill_risk_snapshot(positions,marked_net_liquidation=equity,
+                settled_cash=cash,unsettled_payable=0.,margin_debt=margin.principal if margin else 0.,account_type="margin" if margin else "cash",
+                max_gross_leverage=gross_limit,max_stress_loss_fraction=stress_limit,
+                equity_decline_fraction=shock,treasury_decline_fraction=0.)
+            breaches=list(snapshot["breaches"])
+            if margin and margin.snapshot(marked_gross(cl),equity)["maintenance_breach"]:
+                breaches.append("ASSUMED_MAINTENANCE_BREACH")
+            if 1-equity/peak>drawdown_limit:
+                breaches.append("REPLAY_DRAWDOWN_LIMIT")
+            halted=halted or bool(breaches)
+            risk_events.append({"date":str(day),"timestamp":row["close_at"],
+                "kind":"SYNTHETIC_CLOSE_RISK_CHECK","breaches":breaches,
+                "halt_latched":halted,"gross_to_equity":snapshot["gross_to_net_liquidation"],
+                "stress_loss_fraction":snapshot["conservative_stress_loss_fraction"],
+                "drawdown":equity/peak-1,"remaining_positions":dict(holdings),
+                "next_open_action":"SELL_ONLY" if halted and holdings else "NO_NEW_RISK" if halted else "NORMAL"})
+            if halted and holdings:
+                # No new buys after a breach. Retry any residual shares next
+                # open under the existing execution/participation constraints.
+                targets=(str(day),closing,{})
+        if not halted and i % cadence == 0 and not (missing_policy=="hold" and row.get("signals")==[]):
             candidates = validate_candidates(row["signals"], as_of=closing, max_age_seconds=86400)
             if not all(c.symbol in cl for c in candidates):
                 raise ValueError("SIGNAL_MARK_MISSING")
             chosen = sorted(candidates,key=lambda c:(-c.score,c.symbol))[:top]
             if optimizer is None:
-                targets = (str(day), closing, {c.symbol:(1-reserve)/len(chosen) for c in chosen})
+                targets = (str(day), closing, {c.symbol:(margin.target_gross if margin else 1-reserve)/len(chosen) for c in chosen})
             else:
                 # Retain held names in the optimization universe; no silent discard.
                 selected = [c for c in candidates if c in chosen or c.symbol in holdings]
@@ -151,12 +238,16 @@ def replay(payload):
                     targets = (str(day), closing, result["weights"])
         prior_day, prior_close, prior_prices, prior_equity = day, closing, cl, equity
         prior_holdings = dict(holdings)
+    risk_chain,risk_root=chain_audit_events(risk_events) if risk_policy is not None else ([],None)
     return dict(research_only=True, live_execution_enabled=False,
                 approved_for_model_training=False, historical_security_identity_verified=False,
-                broker_order_submission_enabled=False, execution_model="synthetic_next_open_cash_only",
+                broker_order_submission_enabled=False, execution_model="synthetic_next_open_assumed_margin" if margin else "synthetic_next_open_cash_only",
                 curve=curve, trades=trades, allocations=allocations, orders=orders, total_cost=total_cost,
                 total_return=prior_equity/initial-1, max_drawdown=min(p["drawdown"] for p in curve),
-                unexecuted_final_signal=targets is not None)
+                unexecuted_final_signal=targets is not None,
+                risk_halt_latched=halted,risk_audit=risk_chain,risk_audit_root=risk_root,
+                remaining_positions_after_halt=dict(holdings) if halted else {},
+                **(margin.totals() if margin else {}))
 
 
 def main():

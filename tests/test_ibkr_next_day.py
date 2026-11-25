@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-from atlaspm.ibkr_next_day import next_day_review
+from atlaspm.execution.ibkr_next_day import next_day_review
 from atlaspm.rebalance_workbench import Policy
 
 
@@ -69,7 +69,7 @@ class NextDayTests(unittest.TestCase):
         self.transport = NextDayGateway(self.snapshot, int(self.now.timestamp() * 1000))
 
     def run_next_day(self, now=None, **kwargs):
-        with patch("atlaspm.ibkr_next_day.collect_cash_equity_snapshot", return_value=self.snapshot):
+        with patch("atlaspm.execution.ibkr_next_day.collect_cash_equity_snapshot", return_value=self.snapshot):
             return next_day_review(self.transport, self.original, self.snapshot["account_id"], {},
                                    now=now or self.now, **kwargs)
 
@@ -107,7 +107,7 @@ class NextDayTests(unittest.TestCase):
 
     def test_pending_order_during_whatif_blocks_the_next_day_draft(self):
         updated = self.snapshot | {"open_orders": [{"symbol": "XYZ", "side": "BUY", "remaining": 2}]}
-        with patch("atlaspm.ibkr_next_day.collect_cash_equity_snapshot", side_effect=[self.snapshot, updated]):
+        with patch("atlaspm.execution.ibkr_next_day.collect_cash_equity_snapshot", side_effect=[self.snapshot, updated]):
             result = next_day_review(self.transport, self.original, self.snapshot["account_id"], {}, now=self.now)
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["draft"], [])
@@ -118,9 +118,9 @@ class NextDayTests(unittest.TestCase):
         finished = self.now + timedelta(seconds=31)
         confirmed = self.snapshot | {"captured_at": finished.isoformat()}
         quotes = {"XYZ": {"bid": 99.9, "ask": 100.1, "updated_epoch": self.now.timestamp()}}
-        with (patch("atlaspm.ibkr_next_day.collect_cash_equity_snapshot", side_effect=[self.snapshot, confirmed]),
-              patch("atlaspm.ibkr_next_day.live_quotes", return_value=quotes),
-              patch("atlaspm.ibkr_next_day.datetime", wraps=datetime) as clock):
+        with (patch("atlaspm.execution.ibkr_next_day.collect_cash_equity_snapshot", side_effect=[self.snapshot, confirmed]),
+              patch("atlaspm.execution.ibkr_next_day.live_quotes", return_value=quotes),
+              patch("atlaspm.execution.ibkr_next_day.datetime", wraps=datetime) as clock):
             clock.now.side_effect = [self.now, self.now, finished]
             result = next_day_review(self.transport, self.original, self.snapshot["account_id"], {})
         self.assertEqual(result["status"], "blocked")

@@ -524,7 +524,7 @@ class RunStore:
 
     def run_prepared(self, market_audit: Path, account: bytes, policy: Policy = Policy(),
                      *, account_source: str | None = None) -> str:
-        from atlaspm.market_close import approved_inputs
+        from atlaspm.execution.market_close import approved_inputs
 
         day, scope, adjusted, references, audit_digest = approved_inputs(market_audit)
         return self.run(day, scope, adjusted, references, account, policy, market_audit_sha256=audit_digest,

@@ -7,9 +7,9 @@ from math import sqrt
 from pathlib import Path
 from statistics import fmean
 from itertools import groupby
-from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for
+from atlaspm.research.training_dataset import build_panel, iter_purged_folds, sequence_for, validate_panel_metadata
 from atlaspm.engine.contracts import finite
-from atlaspm.research.training_models import MODELS, versions, fit_predict
+from atlaspm.research.training_models import MODELS, versions, fit_predict, validate_parameters
 from atlaspm.research.training_sequence import SEQUENCE_MODELS, fit_sequence
 from atlaspm.research.training_memory import FoldArrays
 from atlaspm.research.training_compact import IndexedRows, feature_workspace
@@ -87,12 +87,18 @@ def _metrics(rows):
 
 def train(payload, *, feature_cache_dir=None, **kwargs):
     """Run a synthetic experiment; optional feature cache is scoped to this call."""
+    validate_panel_metadata(payload,kwargs.get("horizon",5),kwargs.get("sequence_length",1))
+    if "prepared_panel" in kwargs:
+        raise ValueError("EXTERNAL_PREPARED_PANEL_NOT_ALLOWED")
     with feature_workspace(feature_cache_dir) as column:
         return _train(payload,feature_column=column,**kwargs)
 
 
 def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_assets_per_session=100000, **kwargs):
     """Stream validated synthetic partitions into the same fold engine."""
+    validate_panel_metadata(manifest,kwargs.get("horizon",5),kwargs.get("sequence_length",1))
+    if "prepared_panel" in kwargs:
+        raise ValueError("EXTERNAL_PREPARED_PANEL_NOT_ALLOWED")
     from contextlib import ExitStack, closing
     from atlaspm.research.training_parquet import iter_sessions
     from atlaspm.research.training_stream_panel import build_stream_panel, DiskObservations
@@ -103,15 +109,21 @@ def train_parquet(root, manifest, *, feature_cache_dir, batch_rows=4096, max_ass
         length=kwargs.get('sequence_length',1)
         observations=stack.enter_context(closing(DiskObservations(column.path.parent/'observations.sqlite3'))) if length>1 else None
         sessions=iter_sessions(root,manifest,batch_rows=batch_rows,max_assets_per_session=max_assets_per_session)
-        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations,regime_config=kwargs.get('regime_ensemble',{}).get('market',{}) if kwargs.get('regime_ensemble') is not None else None)
+        panel=build_stream_panel(manifest,sessions,kwargs.get('horizon',5),length,column,observations,regime_config=kwargs.get('regime_ensemble',{}).get('market',{}) if kwargs.get('regime_ensemble') is not None else None,entry_lag_sessions=kwargs.get('entry_lag_sessions',0))
         return _train(manifest,feature_column=column,prepared_panel=panel,**kwargs)
 
 
 def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
-          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False):
+          embargo_sessions=1, ridge_alpha=1., models=None, seed=42, sequence_length=1, sequence_epochs=12, device='cpu', ensemble=None, checkpoint_path=None, batch_size=64, mixed_precision=False, array_budget_mib=None, spill_dir=None, prediction_archive_path=None, feature_column=None, prepared_panel=None, model_artifact_path=None, epoch_checkpoint=False, monitoring=None, regime_ensemble=None, incremental_ridge=False, model_parameters=None, next_session=None, training_window_sessions=None, entry_lag_sessions=0):
+    validate_panel_metadata(payload,horizon,sequence_length)
     models = ['ridge','historical_mean'] if models is None else models
     if not isinstance(models,list) or not models or any(m not in MODELS+SEQUENCE_MODELS for m in models) or len(set(models))!=len(models):
         raise ValueError('INVALID_MODEL_SELECTION')
+    if model_parameters is None:
+        model_parameters={}
+    if not isinstance(model_parameters,dict) or set(model_parameters)-set(models):
+        raise ValueError("INVALID_MODEL_PARAMETER_MAPPING")
+    model_parameters={name:validate_parameters(name,p) for name,p in model_parameters.items()}
     if type(seed) is not int or not 0 <= seed < 2**31:
         raise ValueError('INVALID_MODEL_SEED')
     alpha=finite(ridge_alpha,"ridge_alpha",minimum=.000001)
@@ -123,6 +135,8 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         raise ValueError('EPOCH_CHECKPOINT_REQUIRES_SEQUENCE_MODEL')
     if type(incremental_ridge) is not bool or (incremental_ridge and set(models)-{'ridge','historical_mean'}):
         raise ValueError('INCREMENTAL_RIDGE_REQUIRES_LINEAR_BASELINES')
+    if incremental_ridge and training_window_sessions is not None:
+        raise ValueError('ROLLING_WINDOW_REQUIRES_FULL_REFIT')
     artifact_store=None
     if model_artifact_path is not None:
         from atlaspm.research.training_artifacts import ModelArtifacts,ARTIFACT_MODELS,SCHEMA,FLAGS
@@ -130,11 +144,13 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
             raise ValueError('MODEL_ARTIFACT_UNSUPPORTED_ESTIMATOR')
     if regime_ensemble is not None and (not isinstance(regime_ensemble,dict) or set(regime_ensemble)-{'market','weights'} or not all(isinstance(v,dict) for v in regime_ensemble.values())):
         raise ValueError('INVALID_REGIME_ENSEMBLE_CONFIG')
-    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None)
+    if next_session is not None and prepared_panel is not None:
+        raise ValueError('AS_OF_FORECAST_REQUIRES_OBSERVED_JSON_PANEL')
+    panel=prepared_panel if prepared_panel is not None else build_panel(payload,horizon,sequence_length,compact=True,feature_column=feature_column,regime_config=regime_ensemble.get('market',{}) if regime_ensemble is not None else None,next_session=next_session,entry_lag_sessions=entry_lag_sessions)
     if model_artifact_path is not None:
         artifact_store=ModelArtifacts(model_artifact_path)
     folds=iter_purged_folds(panel,minimum_train_sessions=minimum_train_sessions,
-                       test_sessions=test_sessions,embargo_sessions=embargo_sessions)
+                       test_sessions=test_sessions,embargo_sessions=embargo_sessions,training_window_sessions=training_window_sessions)
     try:
         import numpy as np
     except ImportError as exc:
@@ -154,11 +170,19 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
         archive=PredictionArchive(prediction_archive_path)
     model_settings={}
     audit=[]
-    fingerprint=_fingerprint(payload)
+    fingerprint=_fingerprint(payload if next_session is None else {'observed':payload,'next_session':next_session})
     config=dict(horizon=horizon,minimum_train_sessions=minimum_train_sessions,test_sessions=test_sessions,
                 embargo_sessions=embargo_sessions,ridge_alpha=alpha,models=models,seed=seed,
                 sequence_length=sequence_length,sequence_epochs=sequence_epochs,device=device,ensemble=ensemble,
                 batch_size=batch_size,mixed_precision=mixed_precision,array_budget_mib=array_budget_mib)
+    if entry_lag_sessions:
+        config['entry_lag_sessions']=entry_lag_sessions
+    if training_window_sessions is not None:
+        config['training_window_sessions']=training_window_sessions
+    if next_session is not None:
+        config['next_session']=next_session
+    if model_parameters:
+        config['model_parameters']=model_parameters
     if incremental_ridge:
         config['incremental_ridge']=True
     if regime_ensemble is not None:
@@ -274,7 +298,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                                                  epoch_store=epoch_store)
                 else:
                     values,settings=fit_predict(name,z,y,test,seed,
-                                                capture_weights=saved_weights.update if artifact_store is not None else None)
+                                                parameters=model_parameters.get(name),capture_weights=saved_weights.update if artifact_store is not None else None)
                 if artifact_store is not None:
                     if name in SEQUENCE_MODELS:
                         weights=saved_weights
@@ -289,6 +313,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                     artifact_ids[name]=artifact_store.save(dict(schema=SCHEMA,model=name,
                         dataset_sha256=fingerprint,fold_index=fold_index,feature_names=panel['feature_names'],
                         horizon=horizon,sequence_length=length,dependencies=dependency_versions,
+                        **({'entry_lag_sessions':entry_lag_sessions} if entry_lag_sessions else {}),
                         test_start=panel['dates'][fold['test_start_index']],
                         test_end=panel['dates'][fold['test_end_index']],
                         latest_train_label=panel['dates'][fold['latest_training_label_end']],
@@ -375,6 +400,7 @@ def _train(payload, *, horizon=5, minimum_train_sessions=20, test_sessions=5,
                 checkpoint_run_id=store.run_id if store else None,resumed_folds=resumed,
                 model_artifact_storage=str(artifact_store.path) if artifact_store is not None else None,
                 feature_names=panel["feature_names"],horizon=horizon,ridge_alpha=alpha,
+                **({'entry_lag_sessions':entry_lag_sessions} if entry_lag_sessions else {}),
                 sequence_length=sequence_length,incomplete_sequences=panel['incomplete_sequences'],
                 missing_label_paths=panel["missing_label_paths"],folds=audit,
                 metrics=metrics,predictions=predictions if archive is None else None,

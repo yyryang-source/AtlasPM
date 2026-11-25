@@ -183,6 +183,20 @@ class V3DuckDB(V3Contracts):
         self.assertEqual(0, next(c for c in res["factor_coverage"]
                                  if c["factor"]=="mom_63d")["standardized_rows"])
 
+    def test_redundancy_correlation_excludes_label_only_future_dates(self):
+        con=duckdb.connect()
+        try:
+            con.execute("CREATE TABLE v3_norm (trade_date DATE,z_mom_5d DOUBLE,z_mom_21d DOUBLE)")
+            con.executemany("INSERT INTO v3_norm VALUES (?,?,?)",[
+                (day,rank,rank if day=="2026-01-05" else -rank)
+                for day in ("2026-01-05","2026-02-01") for rank in range(1,7)])
+            cfg=dict(start="2026-01-01",end="2026-01-31",holdout_start=None,min_symbols=5)
+            daily=factor_v3._daily_corr(con,"mom_5d","mom_21d",cfg)
+            self.assertEqual([d["date"] for d in daily],["2026-01-05"])
+            self.assertAlmostEqual(daily[0]["rho"],1.)
+        finally:
+            con.close()
+
     def test_user_supplied_industry_mapping_is_required_complete(self):
         self._generate()
         with self.assertRaisesRegex(ValueError, "missing .* eligible"):
