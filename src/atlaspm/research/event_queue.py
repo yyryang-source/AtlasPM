@@ -113,18 +113,22 @@ def drain(*, as_of, holdings=(), limit=20,path=PATH, schedule=None, local_bindin
         control=items.get(CONTROL_KEY,{})
         if control.get("stopped") or control.get("manual_takeover"):
             return {**FLAGS,"status":"PAUSED","completed":0,"pending":sum(t.get("state")=="pending" for t in items.values())}
-        if schedule is not None and control.get("last_tick")==schedule["tick_id"]:
-            return {**FLAGS,"status":"DUPLICATE_TICK","completed":0,"pending":sum(t.get("state")=="pending" for t in items.values())}
         if schedule is not None and control.get("last_as_of") and cutoff<_time(control["last_as_of"]):
             raise ValueError("NONMONOTONIC_SYSTEM_TICK")
+        if schedule is not None and control.get("last_tick")==schedule["tick_id"]:
+            return {**FLAGS,"status":"DUPLICATE_TICK","completed":0,"pending":sum(t.get("state")=="pending" for t in items.values())}
         visible=[(k,v) for k,v in items.items() if k!=CONTROL_KEY and _time(v["event"]["received_at"])<=cutoff]
         latest={}
+        receipt_times=set()
         for key,task in visible:
             event=task["event"]
-            prior=latest.get(event["event_id"])
-            if prior is not None and prior[1]["event"]["received_at"]==event["received_at"] and prior[0]!=key:
+            # Check every visible revision, not just the latest one seen so far.
+            pair=(event["event_id"],_time(event["received_at"]))
+            if pair in receipt_times:
                 raise ValueError("AMBIGUOUS_EVENT_REVISION_RECEIPT")
-            if prior is None or prior[1]["event"]["received_at"]<event["received_at"]:
+            receipt_times.add(pair)
+            prior=latest.get(event["event_id"])
+            if prior is None or _time(prior[1]["event"]["received_at"])<pair[1]:
                 latest[event["event_id"]]=(key,task)
         superseded=0
         for key,task in visible:

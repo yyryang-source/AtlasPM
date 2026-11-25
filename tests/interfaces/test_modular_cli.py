@@ -10,7 +10,7 @@ from atlaspm.commands import broker_cli, quant_cli, selection_cli
 
 
 class ModularCLIContractTests(unittest.TestCase):
-    def test_all_60_commands_are_unique_and_registered(self):
+    def test_all_62_commands_are_unique_and_registered(self):
         groups = (quant_cli.COMMANDS, broker_cli.COMMANDS, selection_cli.COMMANDS)
         self.assertEqual([len(g) for g in groups], [19, 17, 21])
         self.assertEqual(len(set.union(*(set(g) for g in groups))), 57)
@@ -18,8 +18,8 @@ class ModularCLIContractTests(unittest.TestCase):
         parsers = [action for action in parser._actions
                    if isinstance(action, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
-        self.assertEqual(len(parsers[0].choices), 60)
-        self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)) | {'market-db', 'portfolio-engine', 'autonomous-alpha'})
+        self.assertEqual(len(parsers[0].choices), 62)
+        self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)) | {'market-db', 'portfolio-engine', 'autonomous-alpha', 'architecture', 'lifecycle-review'})
 
     def test_command_modules_do_not_shadow_algorithm_packages(self):
         """CLI adapters are distinct from the actual quant/selection implementations."""

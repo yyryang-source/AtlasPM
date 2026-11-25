@@ -2,7 +2,7 @@
 
 AtlasPM 是一个本地运行的量化研究与组合风险工具。它能准备行情和财报数据、做选股和组合回测、研究期权与国债对冲、核对账户风险并生成待审核的调仓草案。
 
-按用途共 **8 类功能**，包括 **58 个 `atlaspm` CLI 一级子命令**，以及调仓审核的浏览器与独立命令入口。辅助数据脚本另列。新增需求、实测缺口和开发进度见 [TODO.md](TODO.md)。
+按用途包括以下核心功能域，包括 **62 个 `atlaspm` CLI 一级子命令**，以及调仓审核的浏览器与独立命令入口。辅助数据脚本另列。新增需求、实测缺口和开发进度见 [TODO.md](TODO.md)。
 
 | 功能域 | 当前主要用途 | 主 CLI 命令数 |
 | --- | --- | ---: |
@@ -155,3 +155,13 @@ RegimeNet 与交易执行约束中的不交易区间属于原生模型研究路�
 | [`fetch_kibot_daily.py`](../scripts/selection/fetch_kibot_daily.py) | 按代码映射下载和缓存 Kibot 日线，生成复权或未复权样本文件。 |
 | [`prepare_spy_put_sample.py`](../scripts/quant/prepare_spy_put_sample.py) | 将 SPY 历史期权压缩包整理成保护性看跌期权回测输入。 |
 | [`fetch_fedinvest_quotes.py`](../scripts/quant/fetch_fedinvest_quotes.py) | 抓取指定国债和日期的 TreasuryDirect 历史估值，保留原始报价文件。 |
+
+## 系统基础架构入口
+
+| 命令 | 能力 |
+| --- | --- |
+| autonomous-alpha | 合成自主 Alpha 研究（不授予训练或交易权限） |
+| architecture | 当前 CLI、工作流、生命周期及模块路径契约审查 |
+| lifecycle-review | 本地声明式生命周期审核、恢复及版本冲突防护 |
+
+上述总数以实际 CLI 注册器为准；旧分类表保留原功能归类，不包括新增架构入口。

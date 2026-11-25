@@ -121,3 +121,11 @@ without the environment opt-in. Live-account order submission is disabled.
 ### External API and research ingress (P0 candidate)
 
 `atlaspm.data.api_gateway` owns bounded external HTTPS JSON transport; `market_fetch` uses it for existing Treasury/Massive downloads. `sec_download` emits the existing companyfacts gzip format; `fred_observations` is an ephemeral date-vintage adapter, not another warehouse. `atlaspm.research.intelligence` owns evidence-only external LLM adapters and routes local numeric snapshot predictions through `training_artifacts`. IBKR retains its independent loopback/session transport and all order safety restrictions. See [UNIFIED_API_AI.md](UNIFIED_API_AI.md).
+
+### Offline foundation review
+
+The canonical architecture inventory is atlaspm.framework.architecture;
+CLI adapters live in atlaspm.commands.framework_cli. Declared lifecycle
+receipts are persisted by atlaspm.framework.lifecycle_journal. No replacement
+of the financial event queue, OMS, training registry or execution engine.
+The static architecture check runs within the existing release verifier.

@@ -34,10 +34,12 @@ def main():
         result=unittest.TextTestRunner(verbosity=1).run(suite)
     passed=result.testsRun-len(result.failures)-len(result.errors)-len(result.skipped)-len(result.expectedFailures)-len(result.unexpectedSuccesses)
     structure=audit(root)
+    from atlaspm.framework.architecture import inspect
+    foundation=inspect()
     ok=(result.wasSuccessful() and passed>=args.minimum_passed and not structure["errors"]
         and (args.allow_skips or not result.skipped)
         and not result.expectedFailures and not result.unexpectedSuccesses
-        and not structure["duplicate_function_candidates"])
+        and not structure["duplicate_function_candidates"] and not foundation["errors"])
     report=dict(status="PASS" if ok else "FAIL",tests_run=result.testsRun,
                 passed=passed,failures=len(result.failures),errors=len(result.errors),
                 skipped=len(result.skipped),
@@ -46,6 +48,7 @@ def main():
                 unexpected_successes=len(result.unexpectedSuccesses),
                 minimum_passed=args.minimum_passed,elapsed_seconds=perf_counter()-start,
                 source_audit_errors=structure["errors"],
+                foundation_status=foundation["status"],foundation_errors=foundation["errors"],
                 duplicate_function_candidates=structure["duplicate_function_candidates"],
                 source_modules=structure["source_modules"],test_files=structure["test_files"],
                 research_only=True,approved_for_model_training=False,live_execution_enabled=False,
