@@ -939,3 +939,23 @@ are emitted in a separate review-only list, preserving the filing-known date
 and leaving effective_date unset. Duplicate primary documents remain blocked.
 The existing cover and text-lead contracts, review and permission gates remain.
 Re-run the same 20-issuer periodic pilot without --fetch to reuse cached files.
+
+### Historical identity candidate market review (offline)
+
+Re-extract the same cached annual-filing page and count exact candidate
+symbol overlap against the local full-NYSE-slot view. For the 2000 pilot:
+
+~~~powershell
+& $py -m atlaspm.data.hf_stock5m_identity_market_review --year 2000 --start-month 2000-03 --end-month 2000-10 --max-issuers 20
+~~~
+
+The report distinguishes before/on/after filing dates and reported change
+dates, marks same-symbol claims across sampled issuers, and identifies missing
+partitions without treating them as negative evidence. It processes at most
+12 months and 500 unique candidate symbols, using one connection at a time
+with a 512MB DuckDB memory setting (not total process RAM). No network,
+original-bar replacement, independent identity verification, certification,
+claim ingestion, backtest or training permission. The review is retrospective
+triage only. Source page and body provenance remain linked; report is saved
+under identity_v56/market_review/latest.json. Repeat with a smaller issuer
+page if the symbol budget is exceeded.
