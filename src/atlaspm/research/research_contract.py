@@ -26,17 +26,22 @@ def _utc(value):
     return timestamp(value,"research_time").astimezone(UTC)
 
 
+def validate_identity(sid,synthetic):
+    sid=_name(sid)
+    if type(synthetic) is not bool or (synthetic and not re.fullmatch(r"SYN:[A-Z0-9._-]{1,32}",sid)):
+        raise ValueError("INVALID_SYNTHETIC_ID")
+    if not synthetic and not re.fullmatch(r"(?:conid:[1-9][0-9]{0,18}|CIK:[0-9]{10}|ISIN:[A-Z]{2}[A-Z0-9]{10}|index:[A-Za-z0-9._-]+|macro:[A-Za-z0-9._-]+)",sid):
+        raise ValueError("TYPED_SECURITY_ID_REQUIRED")
+    return sid
+
+
 def contract(raw, *, as_of, max_age_seconds=86400):
     if not isinstance(raw,dict) or set(raw)!=FIELDS:
         raise ValueError("INVALID_RESEARCH_CONTRACT_FIELDS")
     cutoff=_utc(as_of)
     age=finite(max_age_seconds,"max_age_seconds",minimum=0)
-    sid=_name(raw["security_id"])
     synthetic=raw["synthetic_fixture"]
-    if type(synthetic) is not bool or (synthetic and not re.fullmatch(r"SYN:[A-Z0-9._-]{1,32}",sid)):
-        raise ValueError("INVALID_SYNTHETIC_ID")
-    if not synthetic and not re.fullmatch(r"(?:conid:[1-9][0-9]{0,18}|CIK:[0-9]{10}|ISIN:[A-Z]{2}[A-Z0-9]{10}|index:[A-Za-z0-9._-]+|macro:[A-Za-z0-9._-]+)",sid):
-        raise ValueError("TYPED_SECURITY_ID_REQUIRED")
+    validate_identity(raw["security_id"],synthetic)
     if raw["asset_type"] not in ASSETS or raw["category"] not in CATEGORIES or raw["kind"] not in KINDS:
         raise ValueError("INVALID_RESEARCH_CLASS")
     source,version=_name(raw["source"]),_name(raw["model_version"])

@@ -38,6 +38,8 @@ def status(*, path=event_queue.PATH):
     local_completed={}
     local_decisions={}
     events_without_local_receipts=0
+    joint_dossier_count=0
+    dossier_category_counts={}
     for key,item in items.items():
         if key!=event_queue.CONTROL_KEY:
             state=item["state"]
@@ -47,6 +49,12 @@ def status(*, path=event_queue.PATH):
                 topic=task["topic"]
                 topics[topic]=topics.get(topic,0)+1
             blocked+=len(report.get("blocked_specialist_tasks",[]))
+            dossiers=report.get("joint_specialist_dossiers",[])
+            joint_dossier_count+=len(dossiers)
+            for dossier in dossiers:
+                for category,state in dossier["coverage"].items():
+                    if state=="descriptive_reviewed":
+                        dossier_category_counts[category]=dossier_category_counts.get(category,0)+1
             receipts=report.get("local_specialist_receipts",[])
             if state=="completed" and not receipts:
                 events_without_local_receipts+=1
@@ -67,6 +75,9 @@ def status(*, path=event_queue.PATH):
             "local_specialist_completed_by_route":local_completed,
             "local_specialist_decision_status_counts":local_decisions,
             "completed_events_without_local_receipts":events_without_local_receipts,
+            "joint_specialist_dossier_count":joint_dossier_count,
+            "joint_dossier_descriptive_category_counts":dossier_category_counts,
+            "joint_dossier_scope":"stored_event_reviews_not_current_certified_coverage",
             "professional_research_coverage_verified":False,
             "network_tasks_enabled":False,"formal_training_enabled":False,
             "broker_tasks_enabled":False,"max_concurrency":1}

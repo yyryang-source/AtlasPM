@@ -367,6 +367,62 @@ def dispatch_tasks(tasks, *, external_output_budget=0, allow_external=False, gat
             "automatic_fallback":False,"actual_cost_usd":None}
 
 
+def route_public(*, topic, as_of, evidence, candidates, output_token_budget,
+                 allow_external=False, gateway=DEFAULT_GATEWAY):
+    """Explicit ordered cross-provider fallback for reviewed public excerpts.
+
+    Preflight the complete allowlist before any call. Budget reserves the
+    worst-case requested output tokens (not total tokens or dollars). Each
+    approved provider can be attempted at most once. A failed/ambiguous call
+    might have incurred charges; fallback requires the caller's explicit plan.
+    A valid empty findings list is success, never a reason to solicit another
+    opinion. No local data, account state, orders or promotion.
+    """
+    from atlaspm.research.training_registry import digest
+    stamp,_,_=_prepare(topic,evidence,as_of)
+    if (not isinstance(candidates,list) or not 1<=len(candidates)<=len(MODEL_ENDPOINTS)
+            or type(output_token_budget) is not int or not 128<=output_token_budget<=6144):
+        raise ValueError("PUBLIC_ROUTE_BUDGET")
+    if allow_external is not True or os.environ.get("ATLASPM_ALLOW_EXTERNAL_AI")!="1":
+        raise GatewayError("External AI requires explicit local egress approval")
+    approved=[]
+    seen=set()
+    total=0
+    for c in candidates:
+        if not isinstance(c,dict) or set(c)!={"provider","model","max_tokens"}:
+            raise ValueError("PUBLIC_ROUTE_CANDIDATE")
+        p,m,t=c["provider"],c["model"],c["max_tokens"]
+        if (not isinstance(p,str) or p not in MODEL_ENDPOINTS or p in seen
+                or not isinstance(m,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",m)
+                or type(t) is not int or not 128<=t<=2048):
+            raise ValueError("PUBLIC_ROUTE_CANDIDATE")
+        if not os.environ.get(MODEL_ENDPOINTS[p][1]):
+            raise GatewayError("Selected external provider credential not configured")
+        seen.add(p)
+        total+=t
+        approved.append(dict(c))
+    if total>output_token_budget:
+        raise ValueError("PUBLIC_ROUTE_OUTPUT_BUDGET_EXCEEDED")
+    attempts=[]
+    report=None
+    for c in approved:
+        try:
+            report=research_public(**c,topic=topic,as_of=stamp,evidence=evidence,
+                                   allow_external=True,gateway=gateway)
+        except (ValueError,OSError,TypeError,KeyError):
+            attempts.append({**c,"status":"BLOCKED","charge_unknown":True})
+            continue
+        attempts.append({**c,"status":"COMPLETED","charge_unknown":True})
+        break
+    return {**_FLAGS,"schema":"atlaspm_explicit_public_model_route_v1",
+            "policy_sha256":digest([topic,stamp,approved,output_token_budget]),
+            "status":"COMPLETED" if report is not None else "ALL_APPROVED_ROUTES_BLOCKED",
+            "attempts":attempts,"report":report,"reserved_output_tokens":total,
+            "attempted_output_tokens":sum(c["max_tokens"] for c in attempts),
+            "output_token_budget":output_token_budget,"actual_cost_usd":None,
+            "automatic_unapproved_fallback":False,"trade_authorized":False}
+
+
 def joint_local_review(*, security_id, asset_type, as_of, events, research_rows, weights):
     """One local research request for existing normalized specialist evidence.
 
@@ -523,6 +579,7 @@ def _local_data_review(route, args, cutoff):
     prices={}
     sources={}
     fundamentals={}
+    subject_counts={}
     with closing(batches) as stream:
         for batch in stream:
             count+=len(batch.rows)
@@ -531,6 +588,15 @@ def _local_data_review(route, args, cutoff):
             # Decimal/date values are preserved as strings in evidence hashes.
             receipts.append(digest([batch.dataset,batch.columns,batch.origin,
                 batch.source_version_hint,[[str(v) for v in row] for row in batch.rows]]))
+            if route in {"sec_local","bond_local","factor_local"}:
+                # The unified reader returns requested security keys in the
+                # first field (CIK, CUSIP or symbol). Do not claim an empty
+                # requested subject simply because another had rows.
+                if batch.columns[0] not in {"symbol","cik","cusip"}:
+                    raise ValueError("LOCAL_RESEARCH_SUBJECT_COLUMN")
+                for row in batch.rows:
+                    native=str(row[0])
+                    subject_counts[native]=subject_counts.get(native,0)+1
             if route in {"technical_local","regime_local"}:
                 for sym,when,price,source in batch.rows:
                     if sym in sources and sources[sym]!=source:
@@ -590,6 +656,8 @@ def _local_data_review(route, args, cutoff):
             fundamental_history=fundamentals,top=len(symbols))
         if not report["fundamental_screen"]["eligible_count"]:
             raise ValueError("NO_ELIGIBLE_FUNDAMENTAL_RESEARCH")
+    if route in {"sec_local","bond_local","factor_local"}:
+        report["subject_row_counts"]=subject_counts
     report["signal_block_reason"]="UNCERTIFIED_IDENTITY_DATA_AND_RETURN_CALIBRATION"
     return report
 
@@ -753,7 +821,7 @@ def local_specialist_tasks(tasks, *, as_of):
             "network_calls":0,"trade_authorized":False}
 
 
-def specialist_decision_receipt(task, result, *, security_id, identity, as_of):
+def specialist_decision_receipt(task, result, *, security_id, identity, as_of, _include_contract=False):
     """Route an actually executed specialist report through contract/fusion/decision.
 
     Operator association is explicit, never an independently verified permanent
@@ -767,6 +835,8 @@ def specialist_decision_receipt(task, result, *, security_id, identity, as_of):
     if result["status"]!="LOCAL_REVIEW_COMPLETED":
         return {"status":"BLOCKED_SPECIALIST_INPUT","trade_authorized":False}
     report=result["report"]
+    if result.get("route")!=route or result.get("report_sha256")!=digest(report):
+        raise ValueError("SPECIALIST_REPORT_INTEGRITY")
     if route=="artifact_decision":
         if task["params"]["security_id"]!=security_id:
             raise ValueError("ARTIFACT_DECISION_IDENTITY_MISMATCH")
@@ -819,6 +889,11 @@ def specialist_decision_receipt(task, result, *, security_id, identity, as_of):
         category="regime"
         if security_id.startswith("index:") and native==",".join(sorted(args["symbols"])):
             selected=report["regime"]
+    elif route in {"sec_local","bond_local","factor_local"}:
+        category={"sec_local":"sec","bond_local":"bond","factor_local":"factor"}[route]
+        count=report.get("subject_row_counts",{}).get(native,0)
+        if native in args["symbols"] and type(count) is int and count>0:
+            selected={"subject":native,"rows":count}
     elif route=="factor_diagnostics":
         category="industry" if args["industry_csv"] is not None else "factor"
         if security_id.startswith("index:") and native==args["source"]:
@@ -847,7 +922,68 @@ def specialist_decision_receipt(task, result, *, security_id, identity, as_of):
             "research_id":checked["research_id"],"category":category,
             "output_sha256":output_hash,"decision_sha256":digest(decision),
             "numeric_eligible":False,"identity_independently_verified":False,
-            "action":"NO_TRADE","trade_authorized":False}
+            "action":"NO_TRADE","trade_authorized":False,
+            **({"_contract":checked["contract"]} if _include_contract else {})}
+
+
+def joint_specialist_review(bindings, results, *, as_of):
+    """Combine actual bounded specialist executions by explicit typed identity.
+
+    Each source is descriptive or blocked; artifact receipts are not admitted
+    numeric forecasts. Return only metadata and digests, never raw reports.
+    One event scope, not cross-event historical certification.
+    """
+    from atlaspm.research.research_contract import CATEGORIES
+    from atlaspm.research.training_registry import digest
+    from atlaspm.engine.autonomous_decision import decide
+    validate_local_bindings(bindings)
+    stamp=_timestamp(as_of).isoformat()
+    if results.get("as_of")!=stamp or results.get("network_calls")!=0 or results.get("trade_authorized") is not False:
+        raise ValueError("JOINT_SPECIALIST_BATCH_SCOPE")
+    by_task={r["task_sha256"]:r for r in results["tasks"]}
+    expected={digest([stamp,b["task"]]) for b in bindings}
+    if len(by_task)!=len(results["tasks"]) or set(by_task)!=expected:
+        raise ValueError("JOINT_SPECIALIST_TASK_ALIGNMENT")
+    groups={}
+    receipts=[]
+    for b in bindings:
+        identity=b.get("identity")
+        sid=identity.get("security_id",b["subject"]) if identity else b["subject"]
+        key=digest([stamp,b["task"]])
+        item=by_task[key]
+        receipt={k:v for k,v in item.items() if k in {"task_sha256","route","status","report_sha256"}}
+        try:
+            decision=specialist_decision_receipt(b["task"],item,security_id=sid,
+                identity=identity,as_of=stamp,_include_contract=True)
+        except (ValueError,TypeError,KeyError,ImportError):
+            decision={"status":"BLOCKED_CONTRACT_OR_DECISION_VALIDATION","trade_authorized":False}
+        body=decision.pop("_contract",None)
+        receipt.update(decision_receipt=decision,event_subject=b["subject"],security_id=sid)
+        receipts.append(receipt)
+        if identity is None:
+            continue
+        group=groups.setdefault((sid,identity["asset_type"]),{"rows":{},"tasks":[]})
+        group["tasks"].append({"task_sha256":key,"route":b["task"]["route"],"status":decision["status"]})
+        if body is not None:
+            group["rows"][decision["research_id"]]=body
+    dossiers=[]
+    for (sid,asset),group in sorted(groups.items()):
+        rows=list(group["rows"].values())
+        present={r["category"] for r in rows}
+        # Equal weights are placeholders only; descriptive evidence has no
+        # numeric eligibility. Do not award confidence for count or overlap.
+        combined=decide(rows,as_of=stamp,weights={r["model_version"]:1 for r in rows},
+                        horizon_days=1,cost_fraction=0) if rows else None
+        if combined and any(x["action"]!="NO_TRADE" or x["numeric_count"] for x in combined["candidates"]):
+            raise ValueError("JOINT_SPECIALIST_NUMERIC_AUTHORITY_DENIED")
+        dossiers.append({"security_id":sid,"asset_type":asset,"as_of":stamp,
+            "coverage":{k:"descriptive_reviewed" if k in present else "missing" for k in sorted(CATEGORIES)},
+            "research_ids":sorted(group["rows"]),"tasks":group["tasks"],
+            "decision_sha256":digest(combined) if combined else None,"action":"NO_TRADE",
+            "numeric_count":0,"identity_independently_verified":False,"trade_authorized":False,
+            "status":"DESCRIPTIVE_JOINT_REVIEW" if rows else "NO_ADMISSIBLE_SPECIALIST_OUTPUT"})
+    return {**_FLAGS,"receipts":receipts,"dossiers":dossiers,"network_calls":0,
+            "trade_authorized":False,"scope":"current_event_only"}
 
 
 def validate_local_bindings(bindings):
@@ -855,6 +991,11 @@ def validate_local_bindings(bindings):
     from atlaspm.research.financial_events import KINDS
     allowed={
         "volume_anomaly":{"technical_local","factor_local","artifact_decision","regime_local"},
+        "price_move":{"technical_local","factor_local","artifact_decision","regime_local"},
+        "corporate_action":{"sec_local","fundamental_local"},
+        "default":{"credit_history","bond_local"},
+        "credit_withdrawal":{"credit_history"},
+        "position_risk":{"technical_local","credit_history","treasury_local"},
         "sec_disclosure":{"sec_local","fundamental_local"},
         "earnings":{"fundamental_local"},
         "earnings_forecast":{"institutional"},
@@ -873,6 +1014,9 @@ def validate_local_bindings(bindings):
         raise ValueError("LOCAL_BINDING_CAPACITY")
     keys=set()
     kinds={}
+    assets={}
+    associations={}
+    from atlaspm.research.research_contract import validate_identity
     for b in bindings:
         if (not isinstance(b,dict) or set(b) not in ({"kind","subject","task"},{"kind","subject","task","identity"}) or b["kind"] not in KINDS
             or not isinstance(b["subject"],str) or not 1<=len(b["subject"])<=160
@@ -880,15 +1024,26 @@ def validate_local_bindings(bindings):
             or b["task"]["route"] not in allowed.get(b["kind"],set())
             or not isinstance(b["task"]["params"],dict)):
             raise ValueError("INVALID_LOCAL_RESEARCH_BINDING")
-        if b["task"]["route"]=="artifact_decision" and b["task"]["params"].get("security_id")!=b["subject"]:
-            raise ValueError("ARTIFACT_BINDING_IDENTITY_MISMATCH")
+        target=b["subject"]
         if "identity" in b:
             identity=b["identity"]
-            if (not isinstance(identity,dict) or set(identity)!={"provider_id","asset_type"}
+            if (not isinstance(identity,dict) or set(identity) not in ({"provider_id","asset_type"},{"provider_id","asset_type","security_id"})
                     or identity["asset_type"] not in {"stock","etf","option","bond"}
                     or not isinstance(identity["provider_id"],str)
                     or not 1<=len(identity["provider_id"])<=256):
                 raise ValueError("INVALID_SPECIALIST_IDENTITY_ASSOCIATION")
+            if "security_id" in identity:
+                target=validate_identity(identity["security_id"],b["subject"].startswith("SYN:"))
+                # Existing typed event identities cannot be redirected.
+                if b["subject"].startswith(("SYN:","conid:","CIK:","ISIN:","index:","macro:")) and target!=b["subject"]:
+                    raise ValueError("SPECIALIST_TYPED_SUBJECT_MISMATCH")
+            if (target in assets and assets[target]!=identity["asset_type"] or
+                    b["subject"] in associations and associations[b["subject"]]!=target):
+                raise ValueError("CONFLICTING_SPECIALIST_IDENTITY_ASSOCIATION")
+            assets[target]=identity["asset_type"]
+            associations[b["subject"]]=target
+        if b["task"]["route"]=="artifact_decision" and b["task"]["params"].get("security_id")!=target:
+            raise ValueError("ARTIFACT_BINDING_IDENTITY_MISMATCH")
         key=(b["kind"],b["subject"],b["task"]["route"])
         if key in keys:
             raise ValueError("DUPLICATE_LOCAL_RESEARCH_BINDING")
@@ -1127,8 +1282,21 @@ def main():
     parser.add_argument("--provider", choices=tuple(MODEL_ENDPOINTS))
     parser.add_argument("--model")
     parser.add_argument("--input", type=Path)
+    parser.add_argument("--route-plan",type=Path,help="Explicit public excerpt routing plan (possible multiple billable calls)")
     parser.add_argument("--allow-external", action="store_true")
     args = parser.parse_args()
+    if args.route_plan:
+        if args.list or args.provider or args.model or args.input or not args.allow_external:
+            parser.error("Route plan requires --allow-external and no single-provider flags")
+        with private_path(args.route_plan,exists=True).open("rb") as handle:
+            raw=handle.read(65537)
+        if len(raw)>65536:
+            raise ValueError("PUBLIC_ROUTE_PLAN_BYTE_BUDGET")
+        plan=_strict_json(raw)
+        if set(plan)!={"topic","as_of","evidence","candidates","output_token_budget"}:
+            raise ValueError("PUBLIC_ROUTE_PLAN_SCHEMA")
+        print(json.dumps(route_public(**plan,allow_external=True),indent=2,ensure_ascii=False,allow_nan=False))
+        return
     if args.list:
         print(json.dumps(model_inventory(), indent=2))
         return

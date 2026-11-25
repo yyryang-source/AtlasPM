@@ -180,3 +180,44 @@ baseline fits count toward the resource budget. Default behavior is unchanged.
 The hedge scenario module has a read-only CLI using local_data inputs:
 `python -m atlaspm.strategies.options.hedge_scenarios --contracts ... --quotes ... --settlements ... --plan ...`.
 The plan is the explicit JSON keyword arguments of compare_expiry_hedges.
+
+## Event-scoped joint specialist dossier
+
+The existing financial event queue now aggregates executed local specialist
+reports by explicit typed security association and asset type. An optional
+identity.security_id in a local binding maps a provider event subject such
+as ticker:AAA to an operator-declared CIK/conid/ISIN or other supported typed
+identity; existing typed subjects cannot be redirected, synthetic and real
+scopes cannot mix, and conflicting associations are rejected. The existing
+provider_id remains the exact native subject for each specialist. SEC, bond
+and factor local readers now record per-subject row counts, so unrelated
+rows cannot create coverage for a missing subject. A completed report's
+hash must match before the contract adapter accepts it. Existing contract
+and decision engines are reused; no qualitative report becomes alpha.
+The persisted dossier contains only task/research/decision digests, explicit
+15-category descriptive coverage, and NO_TRADE. It is a current-event
+review, not independently verified identity, cross-event current coverage,
+or a production forecast. Orchestrator status counts stored dossiers, not
+fresh certified research. The existing four local calls per tick cap remains.
+
+## Current research coverage and explicitly approved model routing
+
+New queue entries record actual storage and research completion timestamps.
+The read-only current_research module projects retained current event dossiers
+by typed identity. It excludes unknown legacy times, later-visible work,
+superseded or unfinished revisions, expired events/old research cutoffs,
+unconfirmed rights, unmatched receipts and conflicting asset associations.
+No replay can backdate research completion. It exposes descriptive coverage,
+not independent evidence, live provider freshness or a certified historical
+snapshot. Generic institutional receipts lack delivery-specific rights proof
+and are excluded from this projection until that evidence is available.
+Run `python -m atlaspm.research.current_research --security-id CIK:...`.
+
+The existing intelligence CLI supports `--route-plan ... --allow-external`
+with an explicit JSON plan (topic, as_of, evidence, candidates,
+output_token_budget). Each candidate specifies provider, model, max_tokens.
+All candidates are preflighted, at most one attempt per distinct approved
+provider, stop on first valid response including empty findings. Failed
+calls may have incurred charges. The output budget is worst-case requested
+output tokens, not a total cost bound; no automatic unapproved provider
+fallback, no queue-triggered egress, no numeric trading authority.
