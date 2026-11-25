@@ -81,7 +81,10 @@ def _day_summary(days, cutoff):
             "after": sum(d > cutoff for d in days)}
 
 
-def run(year, start_month, end_month, *, max_issuers=20, after_cik=None):
+def run(year, start_month, end_month, *, max_issuers=20, after_cik=None,
+        reference_as_of=None, reference_file=None):
+    if reference_file is not None and reference_as_of is None:
+        raise ValueError("Reference file requires an explicit --reference-as-of cutoff")
     months = hf.months(start_month, end_month, 0)
     if (not months or months[0] != start_month or months[-1] != end_month
             or len(months) > 12 or any(m[:4] != str(year) for m in months)):
@@ -154,6 +157,11 @@ def run(year, start_month, end_month, *, max_issuers=20, after_cik=None):
                     "information is not prior-known. Full calendar slots do not "
                     "establish OHLCV quality, listing, or security continuity."),
     }
+    if reference_as_of is not None:
+        from atlaspm.data import hf_stock5m_identity_reference_review as reference
+        result["reference_review"] = reference.review(
+            candidates, days, as_of=reference_as_of, reference_file=reference_file,
+            scan_complete=complete)
     path = BASE / "latest.json"
     result["report_path"] = str(private_path(path))
     ev._json(path, result)
@@ -167,9 +175,12 @@ def main():
     p.add_argument("--end-month", required=True)
     p.add_argument("--max-issuers", type=int, default=20)
     p.add_argument("--after-cik")
+    p.add_argument("--reference-as-of", help="Exclusive evidence cutoff; also builds review queue without reference file")
+    p.add_argument("--reference-file", help="Reviewed external interval JSONL under local_data")
     a = p.parse_args()
     print(json.dumps(run(a.year, a.start_month, a.end_month,
-                         max_issuers=a.max_issuers, after_cik=a.after_cik),
+                         max_issuers=a.max_issuers, after_cik=a.after_cik,
+                         reference_as_of=a.reference_as_of, reference_file=a.reference_file),
                      indent=2, allow_nan=False))
 
 
