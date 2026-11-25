@@ -408,7 +408,7 @@ class ContinuousTests(unittest.TestCase):
                    "collateral_haircut":.1,"max_debt_to_stressed_collateral":1.,
                    "annual_rate_additive":.02}
         financed=optimize_multiasset(ledger,context,scenario_market,
-                    dict(limits,financing_budget=financing))
+                    dict(limits,max_factor_stress_loss_fraction=.2,financing_budget=financing))
         self.assertEqual(financed["status"],"BLOCKED_PENDING_INDEPENDENT_PREFLIGHT",financed)
         review=financed["financing_budget_review"]
         self.assertAlmostEqual(review["stressed_existing_collateral_credit"],90000*.94*.9)
@@ -422,12 +422,12 @@ class ContinuousTests(unittest.TestCase):
         self.assertTrue(review["independent_local_accounting_matched"])
         self.assertFalse(review["broker_collateral_verified"])
         denied=optimize_multiasset(ledger,context,scenario_market,
-                    dict(limits,financing_budget=dict(financing,max_debt_to_stressed_collateral=.01)))
+                    dict(limits,max_factor_stress_loss_fraction=.2,financing_budget=dict(financing,max_debt_to_stressed_collateral=.01)))
         self.assertEqual(denied["status"],"BLOCKED_CONTINUOUS_SOLVE")
         self.assertEqual(denied["legs"],[])
         with self.assertRaisesRegex(ValueError,"FINANCING_BUDGET_RANGE"):
             optimize_multiasset(ledger,context,scenario_market,
-                    dict(limits,financing_budget=dict(financing,collateral_haircut=1.1)))
+                    dict(limits,max_factor_stress_loss_fraction=.2,financing_budget=dict(financing,collateral_haircut=1.1)))
         del scenario_market["inputs"][symbols[1]]["convexity"]
         with self.assertRaises(ValueError):
             optimize_multiasset(ledger,context,scenario_market,
