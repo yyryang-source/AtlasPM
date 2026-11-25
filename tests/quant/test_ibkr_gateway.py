@@ -227,6 +227,41 @@ class PaperSyncTests(unittest.TestCase):
             self.assertFalse(status["snapshot_current"])
             self.assertFalse(Path("local_data/ibkr_paper_sync.lock").exists())
 
+    def test_http_failure_redacts_endpoint_and_stops(self):
+        g = self.gateway
+        cert = Path("local.pem")
+        cert.write_text("fixture", encoding="utf-8")
+        g.configure_paper_sync(account=self.account, ca_file=cert)
+        failure = g.GatewayHTTPError(401, endpoint=f"/portfolio/{self.account}/ledger")
+        with patch.object(g, "LocalGatewayTransport", return_value=self.transport):
+            with patch.object(self.transport, "get", side_effect=failure):
+                with self.assertRaisesRegex(ValueError, r"HTTP_401 at /portfolio/\{account\}/ledger"):
+                    g.sync_paper_account()
+        status = json.loads(g.PAPER_SYNC_STATUS.read_text(encoding="utf-8"))
+        self.assertEqual(status["failed_endpoint"], "/portfolio/{account}/ledger")
+        self.assertNotIn(self.account, json.dumps(status))
+        self.assertFalse(status["snapshot_current"])
+        self.assertFalse(g.PAPER_SNAPSHOT.exists())
+        self.assertEqual(g.GatewayHTTPError(401, endpoint="/secret/path").endpoint, "unknown")
+        self.assertTrue(g._PAPER_SSO_ATTEMPT.exists())
+
+    def test_sso_cooldown_persists_across_invocations(self):
+        g = self.gateway
+        from datetime import datetime, timezone, timedelta
+        from unittest.mock import Mock
+        g._write_sync_json(g._PAPER_SSO_ATTEMPT, {
+            "attempted_at_utc": (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()})
+        with patch.object(g.time, "sleep") as sleeper:
+            g._paper_sso_cooldown(Mock())
+        delay = sleeper.call_args.args[0]
+        self.assertGreater(delay, 50)
+        self.assertLessEqual(delay, 55)
+        g._write_sync_json(g._PAPER_SSO_ATTEMPT, {
+            "attempted_at_utc": (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat()})
+        with patch.object(g.time, "sleep") as sleeper:
+            g._paper_sso_cooldown(Mock())
+        sleeper.assert_not_called()
+
     def test_heartbeat_fixed_route_and_competing_session_rejected(self):
         client = LocalGatewayTransport()
         with patch.object(client, "_send_json", return_value={"iserver":{"authStatus":{

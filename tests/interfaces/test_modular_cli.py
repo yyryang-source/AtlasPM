@@ -10,15 +10,15 @@ from atlaspm.commands import broker_cli, quant_cli, selection_cli
 
 
 class ModularCLIContractTests(unittest.TestCase):
-    def test_all_59_commands_are_unique_and_registered(self):
+    def test_all_60_commands_are_unique_and_registered(self):
         groups = (quant_cli.COMMANDS, broker_cli.COMMANDS, selection_cli.COMMANDS)
-        self.assertEqual([len(g) for g in groups], [19, 16, 21])
-        self.assertEqual(len(set.union(*(set(g) for g in groups))), 56)
+        self.assertEqual([len(g) for g in groups], [19, 17, 21])
+        self.assertEqual(len(set.union(*(set(g) for g in groups))), 57)
         parser = build_parser()
         parsers = [action for action in parser._actions
                    if isinstance(action, argparse._SubParsersAction)]
         self.assertEqual(len(parsers), 1)
-        self.assertEqual(len(parsers[0].choices), 59)
+        self.assertEqual(len(parsers[0].choices), 60)
         self.assertEqual(set(parsers[0].choices), set.union(*(set(g) for g in groups)) | {'market-db', 'portfolio-engine', 'autonomous-alpha'})
 
     def test_command_modules_do_not_shadow_algorithm_packages(self):
@@ -55,6 +55,9 @@ class ModularCLIContractTests(unittest.TestCase):
         gateway = parser.parse_args(["ibkr-readonly", "--account", "DU123456"])
         self.assertFalse(gateway.allow_local_gateway)
         self.assertIsNone(gateway.fixture)
+        sync = parser.parse_args(["ibkr-paper-sync"])
+        self.assertFalse(sync.allow_local_gateway)
+        self.assertFalse(sync.configure)
 
 
 if __name__ == "__main__":

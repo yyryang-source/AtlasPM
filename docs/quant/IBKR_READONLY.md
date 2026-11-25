@@ -100,3 +100,12 @@ remain disabled.
 Official session reference:
 https://www.interactivebrokers.com/docs/web-api/v1/endpoints/session/validate-sso
 https://www.interactivebrokers.com/docs/web-api/v1/endpoints/session/ping-the-server
+
+
+Continuous sync prints redacted progress to stderr (stdout remains the final
+JSON report). The worker persists a private SSO attempt marker and waits at
+least 65 seconds between its own attempts, including separate invocations.
+This cannot account for other clients calling the same SSO endpoint; use one
+worker and respect IBKR's one-request-per-minute limit. HTTP failures record a
+sanitized endpoint label and stop without reauthentication or retry. Daily
+manual Gateway authentication remains required.

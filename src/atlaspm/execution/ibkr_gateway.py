@@ -15,6 +15,7 @@ import os
 import re
 from contextlib import contextmanager
 import ssl
+import sys
 import time
 from datetime import datetime, timezone
 from math import isfinite
@@ -43,9 +44,20 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class GatewayHTTPError(ValueError):
-    def __init__(self, status: int):
+    def __init__(self, status: int, *, endpoint: str = "unknown"):
         self.status = status
+        self.endpoint = _safe_endpoint_label(endpoint)
         super().__init__(f"Gateway HTTP {status}; verify its browser session and account access")
+
+
+def _safe_endpoint_label(endpoint):
+    if endpoint in {"/iserver/auth/status", "/sso/validate", "/portfolio/accounts", "/tickle"}:
+        return endpoint
+    if re.fullmatch(r"/portfolio/[A-Za-z0-9_-]{1,64}/(?:ledger|summary)", endpoint):
+        return "/portfolio/{account}/" + endpoint.rsplit("/", 1)[1]
+    if re.fullmatch(r"/portfolio2/[A-Za-z0-9_-]{1,64}/positions", endpoint):
+        return "/portfolio2/{account}/positions"
+    return "unknown"
 
 
 def validate_gateway_url(url: str) -> str:
@@ -192,7 +204,7 @@ class LocalGatewayTransport:
                 with self.opener.open(req, timeout=self.timeout_seconds) as resp:
                     data = resp.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            raise GatewayHTTPError(exc.code) from None
+            raise GatewayHTTPError(exc.code, endpoint=endpoint) from None
         except (URLError, TimeoutError, ssl.SSLError) as exc:
             raise ValueError(
                 "Cannot read local IBKR Gateway using verified TLS. "
@@ -390,6 +402,7 @@ def require_private_output(path: Path, *, project_root: Path | None = None) -> P
 PAPER_PROFILE = Path("local_data/ibkr_paper_config.json")
 PAPER_SNAPSHOT = Path("local_data/ibkr_paper_raw.json")
 PAPER_SYNC_STATUS = Path("local_data/ibkr_paper_sync_status.json")
+_PAPER_SSO_ATTEMPT = Path("local_data/ibkr_paper_sso_attempt.json")
 
 
 def _sync_path(path):
@@ -451,6 +464,30 @@ def configure_paper_sync(*, account, ca_file, url=DEFAULT_GATEWAY_URL):
             "broker_order_submission_enabled": False, "live_execution_enabled": False}
 
 
+def _paper_sso_cooldown(progress):
+    """Conservative cross-process pacing for this worker's SSO calls."""
+    path = _sync_path(_PAPER_SSO_ATTEMPT)
+    if not path.exists():
+        return
+    with path.open("rb") as handle:
+        raw = handle.read(4097)
+    if len(raw) > 4096:
+        raise ValueError("PAPER_SSO_PACING_STATE_INVALID")
+    stamp = _json_no_nan(raw)
+    if not isinstance(stamp, dict) or not isinstance(stamp.get("attempted_at_utc"), str):
+        raise ValueError("PAPER_SSO_PACING_STATE_INVALID")
+    previous = datetime.fromisoformat(stamp["attempted_at_utc"])
+    if previous.tzinfo is None:
+        raise ValueError("PAPER_SSO_PACING_STATE_INVALID")
+    elapsed = (datetime.now(timezone.utc) - previous).total_seconds()
+    if elapsed < -5:
+        raise ValueError("PAPER_SSO_CLOCK_REVIEW_REQUIRED")
+    delay = max(0.0, 65.0 - elapsed)
+    if delay:
+        progress(f"SSO cooldown: {delay:.1f}s")
+        time.sleep(delay)
+
+
 def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
     """Bounded foreground worker; stop on any auth, identity or data failure."""
     if type(cycles) is not int or not 1 <= cycles <= 480:
@@ -462,6 +499,8 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
     with _paper_sync_lock():
         count = 0
         report = {}
+        def progress(message):
+            print(f"[IBKR Paper] {message}", file=sys.stderr, flush=True)
         def status(state, **fields):
             value = {"state": state, "updated_at_utc": datetime.now(timezone.utc).isoformat(),
                      "completed_cycles": count, "snapshot_current": False,
@@ -479,6 +518,14 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
             transport = LocalGatewayTransport(profile["url"], ca_file=profile["ca_file"])
             for index in range(cycles):
                 status("REFRESHING")
+                _paper_sso_cooldown(progress)
+                if cycles > 1:
+                    progress(f"Cycle {index + 1}/{cycles}: validating session and account")
+                # Write before network access; if a call failed, still pace the
+                # next invocation. The lock serializes this local worker.
+                _write_sync_json(_PAPER_SSO_ATTEMPT, {
+                    "attempted_at_utc": datetime.now(timezone.utc).isoformat(),
+                })
                 report = collect_ibkr_readonly_account(
                     transport, account_id=profile["account"], paper_only=True)
                 if include_margin:
@@ -495,7 +542,10 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
                        position_count=report["position_count"], paper_identity_verified=True,
                        margin_monitor_state=report.get("margin_monitor", {}).get("monitor_state"),
                        maximum_snapshot_age_seconds=interval + 60)
+                if cycles > 1:
+                    progress(f"Cycle {count}/{cycles}: snapshot and heartbeat OK")
                 if index + 1 < cycles:
+                    progress(f"Next cycle in {interval}s")
                     time.sleep(interval)
         except KeyboardInterrupt:
             status("STOPPED_BY_OPERATOR")
@@ -507,8 +557,11 @@ def sync_paper_account(*, cycles=1, interval=65, include_margin=False):
             reason = "HTTP_" + str(exc.status) if isinstance(exc, GatewayHTTPError) else type(exc).__name__
             if isinstance(exc, ValueError) and re.fullmatch(r"PAPER_[A-Z_]+", str(exc)):
                 reason = str(exc)
-            status("BLOCKED_OPERATOR_REVIEW_REQUIRED", reason=reason)
-            raise ValueError("Paper sync stopped: " + reason + "; see local status and verify login/configuration") from None
+            endpoint = exc.endpoint if isinstance(exc, GatewayHTTPError) else None
+            status("BLOCKED_OPERATOR_REVIEW_REQUIRED", reason=reason, failed_endpoint=endpoint)
+            detail = f" at {endpoint}" if endpoint else ""
+            raise ValueError("Paper sync stopped: " + reason + detail
+                             + "; see local status and verify login/configuration") from None
         status("SYNC_COMPLETED", captured_at_utc=report["captured_at_utc"])
         return {**redacted_console_summary(report, PAPER_SNAPSHOT),
                 "status": "PAPER_SYNC_COMPLETED", "completed_cycles": count,
