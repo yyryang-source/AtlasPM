@@ -16,6 +16,12 @@ URL = "http://127.0.0.1:11434/api/generate"
 ACTIONS = {"LONG", "SHORT", "BUY_CALL", "BUY_PUT"}
 
 
+def validate_model(model):
+    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", model):
+        raise ValueError("Invalid local model")
+    return model
+
+
 def context(rows, *, as_of, universe):
     cutoff = _time(as_of)
     if cutoff > datetime.now(UTC) or not isinstance(universe, list) or not 1 <= len(universe) <= 100:
@@ -26,10 +32,10 @@ def context(rows, *, as_of, universe):
         raise ValueError("Invalid context batch")
     unique = {}
     for row in rows:
-        if set(row) != {"provider", "received_at", "expires_at", "symbols", "text", "evidence_id"}:
+        if not isinstance(row, dict) or set(row) != {"provider", "received_at", "expires_at", "symbols", "text", "evidence_id"}:
             raise ValueError("Invalid opportunity evidence schema")
         provider = row["provider"]
-        if provider not in ROLES:
+        if not isinstance(provider, str) or provider not in ROLES:
             raise ValueError("Unknown source")
         require_enabled(provider)
         if provider in RESTRICTED and provider not in RIGHTS_ENV:
@@ -55,7 +61,7 @@ def context(rows, *, as_of, universe):
     # Round-robin providers so high-frequency flow does not monopolize context.
     from collections import defaultdict, deque
     groups = defaultdict(deque)
-    for row in sorted(unique.values(), key=lambda x: (x["received_at"], x["evidence_id"]), reverse=True):
+    for row in sorted(unique.values(), key=lambda x: (_time(x["received_at"]), x["evidence_id"]), reverse=True):
         groups[row["provider"]].append(row)
     selected, size = [], 0
     while groups and len(selected) < 24:
@@ -72,18 +78,21 @@ def context(rows, *, as_of, universe):
 
 
 def validate_output(output, snapshot):
-    if set(output) != {"opportunities"} or not isinstance(output["opportunities"], list) or len(output["opportunities"]) > 20:
+    if not isinstance(output, dict) or set(output) != {"opportunities"} or not isinstance(output["opportunities"], list) or len(output["opportunities"]) > 20:
         raise ValueError("Invalid opportunity output")
     rows = {r["evidence_id"]: r for r in snapshot["evidence"]}
     seen = set()
     result = []
     for item in output["opportunities"]:
-        if set(item) != {"symbol", "action", "evidence_ids", "reason", "valid_seconds"}:
+        if not isinstance(item, dict) or set(item) != {"symbol", "action", "evidence_ids", "reason", "valid_seconds"}:
             raise ValueError("Unexpected opportunity fields")
         symbol, action, ids = item["symbol"], item["action"], item["evidence_ids"]
-        if symbol not in snapshot["universe"] or action not in ACTIONS or symbol in seen:
+        if (not isinstance(symbol, str) or not isinstance(action, str)
+                or symbol not in snapshot["universe"] or action not in ACTIONS or symbol in seen):
             raise ValueError("Invalid or conflicting opportunity")
-        if not isinstance(ids, list) or not 1 <= len(ids) <= 8 or len(set(ids)) != len(ids) or any(i not in rows for i in ids):
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 8
+                or any(not isinstance(i, str) for i in ids)
+                or len(set(ids)) != len(ids) or any(i not in rows for i in ids)):
             raise ValueError("Unknown opportunity evidence")
         if any(rows[i]["symbols"] and symbol not in rows[i]["symbols"] for i in ids):
             raise ValueError("Unrelated symbol evidence")
@@ -95,6 +104,8 @@ def validate_output(output, snapshot):
         if type(ttl) is not int or not 1 <= ttl <= 3600:
             raise ValueError("Invalid opportunity lifetime")
         end = min(_time(snapshot["as_of"])+timedelta(seconds=ttl), *(_time(rows[i]["expires_at"]) for i in ids))
+        if end <= _time(snapshot["as_of"]):
+            raise ValueError("Expired opportunity evidence")
         seen.add(symbol)
         result.append({**item, "expires_at": end.isoformat(),
                        "option_contract_verified": False if action.startswith("BUY_") else None,
@@ -103,8 +114,7 @@ def validate_output(output, snapshot):
 
 
 def decide(rows, *, universe, model, as_of, opener=None):
-    if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", model):
-        raise ValueError("Invalid local model")
+    validate_model(model)
     snap = context(rows, as_of=as_of, universe=universe)
     result = {**FLAGS, "model": model, "as_of": snap["as_of"],
               "context_sha256": _digest(snap), "omitted": snap["omitted"],
@@ -127,7 +137,8 @@ def decide(rows, *, universe, model, as_of, opener=None):
     if len(raw) > 1048576:
         raise GatewayError("Opportunity response too large")
     envelope = _strict_json(raw)
-    if envelope.get("done") is not True or envelope.get("model") != model:
+    if (envelope.get("done") is not True or envelope.get("model") != model
+            or not isinstance(envelope.get("response"), str)):
         raise GatewayError("Incomplete or mismatched local model")
     candidates = validate_output(_strict_json(envelope["response"]), snap)
     now = datetime.now(UTC)
