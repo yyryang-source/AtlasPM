@@ -6,6 +6,8 @@ import time
 
 from atlaspm.research.alpha_sources import options_once, news_once, institutional_once, treasury_once, fred_once, credit_once
 from atlaspm.research import event_queue
+from atlaspm.research.alpha_fundamentals import once as fundamentals_once
+from atlaspm.research.alpha_universe import load_universe
 
 
 def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep):
@@ -39,6 +41,8 @@ def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep):
 def main():
     parser=ArgumentParser(description=__doc__)
     parser.add_argument("--options",action="store_true")
+    parser.add_argument("--fundamental-universe",help="Reviewed local security master JSON")
+    parser.add_argument("--fundamental-batch",type=int,default=5)
     parser.add_argument("--treasury",action="store_true")
     parser.add_argument("--fred",action="append",default=[])
     parser.add_argument("--credit",action="append",default=[],help="Reviewed scope:identifier_type:identifier:SYMBOL")
@@ -47,6 +51,26 @@ def main():
     parser.add_argument("--cycles",type=int,default=100)
     args=parser.parse_args()
     tasks={}
+    if args.fundamental_universe:
+        if not 1<=args.fundamental_batch<=20:
+            parser.error("Fundamental batch must be 1..20")
+        from collections import deque
+        rows=load_universe(args.fundamental_universe)["rows"]
+        pending=deque((s,r["cik"]) for s,r in sorted(rows.items())
+                      if r["active"] and r["asset_type"]=="stock" and r["cik"] and int(r["cik"]))
+        if not pending:
+            parser.error("No reviewed active company CIK mappings")
+        def read_fundamentals():
+            added=0
+            for _ in range(min(args.fundamental_batch,len(pending))):
+                symbol,cik=pending[0]
+                pending.rotate(-1)
+                control=event_queue._read_state(event_queue.PATH).get(event_queue.CONTROL_KEY,{})
+                if control.get("stopped") or control.get("manual_takeover"):
+                    break
+                added+=fundamentals_once(symbol=symbol,cik=cik)
+            return added
+        tasks["sec_fundamentals"]=(60,read_fundamentals)
     if args.treasury:
         tasks["treasury"]=(300,treasury_once)
     for series in args.fred:
