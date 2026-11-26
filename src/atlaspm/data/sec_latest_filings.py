@@ -10,7 +10,7 @@ from atlaspm.research.financial_events import normalize, _digest
 URL = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type="
        "&company=&dateb=&owner=include&start=0&count=100&output=atom")
 NS = {"a": "http://www.w3.org/2005/Atom"}
-INDEX = re.compile(r"/Archives/edgar/data/([0-9]{1,10})/([0-9]{18})/([0-9]{10}-[0-9]{2}-[0-9]{6})-index\\.html?")
+INDEX = re.compile(r"/Archives/edgar/data/([0-9]{1,10})/([0-9]{18})/([0-9]{10}-[0-9]{2}-[0-9]{6})-index\.html?")
 
 
 def recent_filings(*, gateway=DEFAULT_GATEWAY):
