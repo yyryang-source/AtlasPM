@@ -11,6 +11,7 @@ from atlaspm.research.strategy_closed_loop import run
 from atlaspm.research.training_registry import FLAGS
 from atlaspm.execution.synthetic_oms_receipts import execute
 from atlaspm.execution.oms_controls import verify_audit_chain
+from atlaspm.framework.trained_cycle import run_trained_fixture
 
 
 def smoke(example):
@@ -43,6 +44,8 @@ def smoke(example):
         db=Path(tmp)/"receipts.sqlite3"
         first=execute(db,"SYN:acceptance",fixture)
         second=execute(db,"SYN:acceptance",fixture)
+        trained_fixture=json.loads(Path(example).read_text(encoding="utf-8"))
+        trained=run_trained_fixture(trained_fixture,registry_path=Path(tmp)/"trained.sqlite3")
     paper=first["report"]
     checks={
         "model_and_strategy_selected":outcome["holdout_evaluated"] is True and holdout["trade_count"]>0,
@@ -54,13 +57,20 @@ def smoke(example):
         "partial_fill_reconciled":bool(paper.get("reconciliation_checks")) and all(paper["reconciliation_checks"].values()),
         "duplicate_event_ignored":paper.get("paper_oms",{}).get("duplicate_events_ignored")==1,
         "receipt_reused":first["reused"] is False and second["reused"] is True and first["report_sha256"]==second["report_sha256"],
-        "all_permissions_blocked":all(outcome.get(k) is v for k,v in FLAGS.items())
+        "trained_model_to_matured_feedback":trained["decision"]=="SYNTHETIC_TRAINED_EVENT_TO_FEEDBACK_COMPLETE",
+        "trained_model_actual_inference":trained["trained_model_used"] is True and len(trained["models"])==2,
+        "trained_cycle_attribution":trained.get("cycle",{}).get("attribution",{}).get("reconciled") is True,
+        "trained_cycle_feedback":bool(trained.get("learning",{}).get("prediction_errors")),
+        "all_permissions_blocked":all(trained.get(k) is v for k,v in FLAGS.items()) and all(outcome.get(k) is v for k,v in FLAGS.items())
             and paper["live_execution_enabled"] is False and paper["broker_order_submission_enabled"] is False,
     }
     return {"status":"SYNTHETIC_SMOKE_PASS" if all(checks.values()) else "SYNTHETIC_SMOKE_FAIL",
             "checks":checks,"selected_model":outcome["selection"]["selected_model"],
             "selected_strategy":outcome["selected_strategy"],"holdout_trade_count":holdout["trade_count"],
             "holdout_statistics":holdout["statistics"],"oms_decision":paper["decision"],
+            "trained_cycle_decision":trained["decision"],
+            "trained_cycle_observation_interval_days":trained["fixture_observation_interval_days"],
+            "trained_cycle_retraining_review_required":trained.get("learning",{}).get("retraining_review_required"),
             "production_ready":False,"real_data_training_ready":False,
             "blockers":["REAL_DATA_CERTIFICATION_REQUIRED","BROKER_MARGIN_VERIFICATION_REQUIRED",
                         "LIVE_ORDER_RECONCILIATION_AND_APPROVAL_REQUIRED"],**FLAGS}

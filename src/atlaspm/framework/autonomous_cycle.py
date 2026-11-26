@@ -67,12 +67,38 @@ def run_fixture(payload):
                           cost_fraction=.03,liquidity=liquidity)
     if entry["decision"]!="SYNTHETIC_ENTRY_REVIEW_COMPLETE":
         return {**FLAGS,"decision":"ENTRY_BLOCKED","entry":entry}
+    return complete_synthetic_exit(payload, entry, events=events,
+        marks={h.symbol:h.price*.95 for h in account.holdings},
+        exit_at=now+timedelta(days=3), exit_reason="FIXTURE_STOP_5_PERCENT")
+
+
+def complete_synthetic_exit(payload, entry, *, events, marks, exit_at,
+                            exit_reason, trained_model_used=False):
+    """Reuse the existing independent sell-only preflight, OMS and attribution.
+
+    The caller supplies an already completed synthetic entry and explicit later
+    marks; no broker or external service is used. This internal fixture helper
+    requires the upstream entry to have passed its existing gates.
+    """
+    if (payload.get("mode")!="synthetic" or payload.get("synthetic_fixture") is not True
+        or any(k in payload and payload[k] is not v for k,v in FLAGS.items())
+        or entry.get("decision")!="SYNTHETIC_ENTRY_REVIEW_COMPLETE"
+        or entry.get("live_execution_enabled") is not False
+        or entry.get("broker_order_submission_enabled") is not False
+        or type(trained_model_used) is not bool):
+        raise ValueError("SYNTHETIC_COMPLETED_ENTRY_REQUIRED")
+    account=Account.from_payload(payload["account"])
+    if account.kind!="cash" or not account.account_id.startswith("SYN-"):
+        raise ValueError("FIXTURE_ACCOUNT_REQUIRED")
+    now=timestamp(payload["as_of"],"as_of")
+    exit_at=timestamp(exit_at.isoformat(),"exit_at")
+    if exit_at<=now or set(marks)!={h.symbol for h in account.holdings}:
+        raise ValueError("INVALID_EXIT_TIME_OR_MARK_COVERAGE")
+    marks={s:finite(value,"exit_mark",minimum=.000001) for s,value in marks.items()}
     oms=entry["portfolio"]["paper_oms"]
     snapshot=oms["account_replay"]
     if any(o["status"]!="FILLED" for o in oms["orders"]) or snapshot["unsettled_receivable"] or snapshot["unsettled_payable"]:
         return {**FLAGS,"decision":"ENTRY_NOT_FULLY_FILLED_OR_SETTLED","entry":entry}
-    # Fixed next-session synthetic mark shock triggers an independent exit.
-    marks={h.symbol:h.price*.95 for h in account.holdings}
     sectors={h.symbol:h.sector for h in account.holdings}
     try:
         positions=_exit_positions(snapshot,marks,sectors)
@@ -82,7 +108,6 @@ def run_fixture(payload):
         return {**FLAGS,"decision":"EXIT_BLOCKED","reason":str(exc),"entry":entry}
     if not positions:
         return {**FLAGS,"decision":"NO_POSITION_TO_MONITOR","entry":entry}
-    exit_at=now+timedelta(days=3)
     symbols=[p["symbol"] for p in positions]
     constraints=deepcopy(payload["constraints"])
     paper=deepcopy(payload["paper"])
@@ -115,10 +140,10 @@ def run_fixture(payload):
         if abs(pnl-(mark_pnl-entry_cost-exit_cost))>.01:
             raise ValueError("ATTRIBUTION_RECONCILIATION_FAILED")
         return {**FLAGS,"decision":"SYNTHETIC_EVENT_TO_FLAT_COMPLETE","events":events,
-                "entry":entry,"monitor":{"reason":"FIXTURE_STOP_5_PERCENT","marks":marks},
+                "entry":entry,"monitor":{"reason":exit_reason,"marks":marks},
                 "exit_risk":approval,"exit_oms":closed,"attribution":{"mark_pnl":mark_pnl,
                 "entry_cost":entry_cost,"exit_cost":exit_cost,"net_pnl":pnl,"reconciled":True},
-                "trained_model_used":False,"broker_side_effects":False}
+                "trained_model_used":trained_model_used,"broker_side_effects":False}
     except (ValueError,TypeError,KeyError,OverflowError) as exc:
         return {**FLAGS,"decision":"EXIT_BLOCKED","reason":str(exc),"entry":entry}
 
