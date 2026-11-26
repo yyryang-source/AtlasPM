@@ -72,6 +72,53 @@ def extract(data, *, cik, as_of):
     return result
 
 
+def ratios(facts):
+    """Same-period descriptive ratios; never combine incompatible reporting periods."""
+    output = {}
+    def fact(tag, bucket):
+        return facts.get(tag, {}).get(bucket)
+    def match(a, b, *, instant=False):
+        return (a is not None and b is not None and a["end"] == b["end"]
+                and (instant or a["start"] == b["start"])
+                and a["accession"] is not None and a["accession"] == b["accession"]
+                and a["unit"] == b["unit"] == "USD")
+    def divide(a, b):
+        if b <= 0:
+            return None
+        value = a / b
+        return value if isfinite(value) else None
+    for bucket in ("quarter", "annual"):
+        net = fact("NetIncomeLoss", bucket)
+        operating = fact("OperatingIncomeLoss", bucket)
+        revenues = [fact(tag,bucket) for tag in (
+            "RevenueFromContractWithCustomerExcludingAssessedTax","Revenues","SalesRevenueNet")]
+        revenues = [r for r in revenues if r is not None]
+        revenue = revenues[0] if revenues and all(r["value"] == revenues[0]["value"]
+                    and match(r,revenues[0]) for r in revenues) else None
+        cfo = fact("NetCashProvidedByUsedInOperatingActivities",bucket)
+        capex = fact("PaymentsToAcquirePropertyPlantAndEquipment",bucket)
+        assets = fact("Assets","instant")
+        equity = fact("StockholdersEquity","instant")
+        liabilities = fact("Liabilities","instant")
+        metrics = {}
+        if match(net,revenue):
+            metrics["net_margin"] = divide(net["value"],revenue["value"])
+        if match(operating,revenue):
+            metrics["operating_margin"] = divide(operating["value"],revenue["value"])
+        if match(cfo,capex) and capex["value"] >= 0:
+            metrics["free_cash_flow"] = cfo["value"] - capex["value"]
+        if match(cfo,net):
+            metrics["operating_cash_flow_to_net_income"] = divide(cfo["value"],net["value"])
+        if bucket == "annual" and match(net,assets,instant=True):
+            metrics["net_income_to_ending_assets"] = divide(net["value"],assets["value"])
+        if bucket == "annual" and match(net,equity,instant=True):
+            metrics["net_income_to_ending_equity"] = divide(net["value"],equity["value"])
+        if match(liabilities,assets,instant=True):
+            metrics["liabilities_to_assets"] = divide(liabilities["value"],assets["value"])
+        output[bucket] = {k:v for k,v in metrics.items() if v is not None and isfinite(v)}
+    return output
+
+
 def once(*, symbol, cik, gateway=DEFAULT_GATEWAY, writer=ingest):
     import re
     if not isinstance(cik,str) or not re.fullmatch(r"[0-9]{10}",cik) or int(cik)==0:
@@ -81,7 +128,8 @@ def once(*, symbol, cik, gateway=DEFAULT_GATEWAY, writer=ingest):
     if not facts:
         return 0
     evidence={"kind":"reported_accounting_facts","cik":cik,"facts":facts,
-              "publication_time_verified":False,"valuation_computed":False}
+              "publication_time_verified":False,"valuation_computed":False,
+              "same_period_ratios":ratios(facts)}
     return writer(provider="sec",text=json.dumps(evidence,sort_keys=True,allow_nan=False),
                   symbols=[symbol],received_at=response.fetched_at,ttl=2592000,
                   source_revision=_digest([symbol,evidence]))
