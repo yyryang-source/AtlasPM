@@ -73,3 +73,31 @@ checks base dependencies and installed package origin, runs the architecture
 contract and exercises recovery/current-research CLI help on Windows/Linux.
 Build/base dependencies may be downloaded; this is not a pinned air-gapped
 bundle. The integrated full-dependency gate uses 1300 passing tests.
+
+## Incremental historical partition and research registry recovery
+
+The existing sqlite_recovery backup accepts an explicit --registry path under
+local_data. Only recognized research_runs/model_artifacts/alpha journal tables
+are accepted; the sealed copy checks content hashes, research-only flags and
+existing lifecycle chains with bounded records, without executing model weights.
+The internal snapshot filename remains market.sqlite3; scope in the manifest
+identifies a research registry. This is not model compatibility or promotion
+approval. Recovery stays isolated.
+
+The lake_recovery module uses explicit months and scopes (raw, rth, all,
+factors_hf, factors_sqlite), required canonical partitions and available quality
+sidecars. Factor daily/features include JSON metadata. Stop all writers and
+verify storage rights first, then for example:
+
+    python -m atlaspm.data.lake_recovery backup jan-2020 --month 2020-01 --scope raw --scope rth --retention-reviewed --quiescent
+    python -m atlaspm.data.lake_recovery verify jan-2020 --retention-reviewed
+    python -m atlaspm.data.lake_recovery restore-isolated jan-2020 rehearsal-1 --retention-reviewed
+
+SHA-256 objects are reused only after verification; each manifest binds exact
+paths and byte sizes. Limit each batch to 400 months, 256 GiB and 30 minutes.
+The whole lake can require multiple batches. This is an operator-quiesced
+byte copy, not a transactional cross-partition snapshot, and requires separate
+Parquet quality/lineage and rights review. No automatic deletion or active
+restoration. Interruption can leave unreferenced objects or incomplete copies;
+verify manifest and restore receipt. SEC evidence, account state and offsite
+backups are outside this scope.
