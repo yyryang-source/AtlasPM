@@ -10,19 +10,26 @@ from atlaspm.research.alpha_fundamentals import once as fundamentals_once
 from atlaspm.research.alpha_universe import load_universe
 
 
-def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep):
+def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep,
+             queue_path=event_queue.PATH):
     if type(cycles) is not int or not 1 <= cycles <= 86400 or not tasks:
         raise ValueError("Invalid scheduler bounds")
-    if any(type(interval) is not int or not 5 <= interval <= 86400 for interval, _ in tasks.values()):
+    if any(type(interval) is not int or not 5 <= interval <= 86400 or not callable(call)
+           for interval, call in tasks.values()):
         raise ValueError("Invalid source interval")
+    def paused():
+        control = event_queue._read_state(queue_path).get(event_queue.CONTROL_KEY,{})
+        return control.get("stopped") or control.get("manual_takeover")
     due = dict.fromkeys(tasks, 0.)
     failures = dict.fromkeys(tasks, 0)
-    for _ in range(cycles):
-        control = event_queue._read_state(event_queue.PATH).get(event_queue.CONTROL_KEY,{})
-        if control.get("stopped") or control.get("manual_takeover"):
+    for index in range(cycles):
+        if paused():
             yield {"status":"PAUSED"}
             return
         for name,(interval,call) in tasks.items():
+            if paused():
+                yield {"status":"PAUSED"}
+                return
             if clock() < due[name]:
                 continue
             try:
@@ -35,7 +42,15 @@ def schedule(tasks, *, cycles, clock=time.monotonic, sleep=time.sleep):
                 failures[name] = 0
                 due[name] = clock()+interval
                 yield {"source":name,"status":"OK","added":added}
-        sleep(max(0.,min(due.values())-clock()))
+        # No trailing sleep after the requested work. While waiting, observe
+        # operator stop/takeover at least once per second, including backoff.
+        if index + 1 < cycles:
+            deadline = min(due.values())
+            while clock() < deadline:
+                if paused():
+                    yield {"status":"PAUSED"}
+                    return
+                sleep(min(1., max(0., deadline-clock())))
 
 
 def main():
