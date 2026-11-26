@@ -45,11 +45,12 @@ def context(rows, *, as_of, universe):
             raise ValueError("Invalid evidence chronology")
         if not isinstance(row["text"], str) or not 1 <= len(row["text"]) <= 24000:
             raise ValueError("Invalid evidence text")
-        if not isinstance(row["symbols"], list) or any(s not in universe for s in row["symbols"]):
+        if (not isinstance(row["symbols"], list) or len(row["symbols"]) > 100
+                or any(not isinstance(s,str) or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,15}",s) for s in row["symbols"])):
             raise ValueError("Unreviewed symbol association")
         if row["evidence_id"] != _digest({k:v for k,v in row.items() if k != "evidence_id"}):
             raise ValueError("Evidence digest mismatch")
-        if expires > cutoff:
+        if expires > cutoff and (not row["symbols"] or set(row["symbols"]).intersection(universe)):
             unique[row["evidence_id"]] = row
     # Round-robin providers so high-frequency flow does not monopolize context.
     from collections import defaultdict, deque
