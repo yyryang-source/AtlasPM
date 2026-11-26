@@ -24,6 +24,7 @@ def connect(path):
         db.execute("CREATE INDEX IF NOT EXISTS evidence_expiry ON evidence(expires)")
         db.execute("CREATE TABLE IF NOT EXISTS source_seen (id TEXT PRIMARY KEY, evidence_id TEXT NOT NULL)")
         db.execute("CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY, input_hash TEXT NOT NULL, body TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS batch_latest (scope TEXT PRIMARY KEY, input_hash TEXT NOT NULL, body TEXT NOT NULL)")
         db.commit()
         return db
     except BaseException:
@@ -75,18 +76,23 @@ def run_once(*, universe, model, path=PATH, queue_path=event_queue.PATH, inferen
     if paused():
         return {"status":"PAUSED","opportunities":[]}
     now = datetime.now(UTC).isoformat()
+    scope = _digest([model, sorted(universe)])
     with closing(connect(path)) as db:
         rows = []
-        raw = db.execute("SELECT body FROM evidence WHERE expires>? AND received<=? ORDER BY received DESC,id LIMIT 1001",(now,now)).fetchall()
+        raw = db.execute("""SELECT e.body FROM evidence e WHERE expires>? AND received<=?
+            AND (json_array_length(json_extract(e.body,'$.symbols'))=0 OR EXISTS (
+                SELECT 1 FROM json_each(e.body,'$.symbols') s
+                JOIN json_each(?) u ON s.value=u.value))
+            ORDER BY received DESC,id LIMIT 1001""",(now,now,json.dumps(universe))).fetchall()
         if len(raw)>1000:
             return {"status":"CONTEXT_CAPACITY_BLOCKED","opportunities":[]}
         for (body,) in raw:
             row=json.loads(body)
-            if not row["symbols"] or set(row["symbols"]).issubset(universe):
+            if not row["symbols"] or set(row["symbols"]).intersection(universe):
                 rows.append(row)
         snapshot=context(rows,as_of=now,universe=universe)
         fingerprint=_digest([model,universe,snapshot["evidence"],snapshot["omitted"]])
-        previous=db.execute("SELECT input_hash,body FROM decisions ORDER BY id DESC LIMIT 1").fetchone()
+        previous=db.execute("SELECT input_hash,body FROM batch_latest WHERE scope=?",(scope,)).fetchone()
         if previous and previous[0]==fingerprint:
             result=json.loads(previous[1])
             active=[x for x in result["opportunities"] if _time(x["expires_at"])>_time(now)]
@@ -95,7 +101,9 @@ def run_once(*, universe, model, path=PATH, queue_path=event_queue.PATH, inferen
         if paused():
             return {"status":"PAUSED","opportunities":[]}
         with db:
-            db.execute("INSERT INTO decisions(input_hash,body) VALUES(?,?)",(fingerprint,json.dumps(result,ensure_ascii=False)))
+            encoded=json.dumps(result,ensure_ascii=False)
+            db.execute("INSERT INTO decisions(input_hash,body) VALUES(?,?)",(fingerprint,encoded))
+            db.execute("INSERT INTO batch_latest VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET input_hash=excluded.input_hash,body=excluded.body",(scope,fingerprint,encoded))
         return {"status":result["status"],"opportunities":result["opportunities"]}
 
 
