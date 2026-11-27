@@ -391,7 +391,7 @@ def replay(payload):
                 # Retain held names in the optimization universe; no silent discard.
                 selected = [c for c in candidates if c in chosen or c.symbol in holdings]
                 result = rolling_target(selected, history, holdings, cash,
-                                        sum(v for _,v in pending), optimizer)
+                                        sum(v for _,v in pending), optimizer, as_of=closing.isoformat())
                 if result is not None:
                     allocations.append(dict(signal_date=str(day), **result))
                     targets = (str(day), closing, result["weights"])

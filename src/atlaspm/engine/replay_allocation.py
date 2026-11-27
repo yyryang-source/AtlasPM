@@ -4,7 +4,7 @@ from atlaspm.engine.contracts import Account, Holding
 from atlaspm.data.historical import rolling_return_estimates
 
 
-def rolling_target(candidates, history, holdings, cash, unsettled, config):
+def rolling_target(candidates, history, holdings, cash, unsettled, config, *, as_of=None):
     method = config.get("method", "equal_weight")
     if method not in METHODS:
         raise ValueError("UNSUPPORTED_REPLAY_OPTIMIZER")
@@ -34,9 +34,12 @@ def rolling_target(candidates, history, holdings, cash, unsettled, config):
     constraints = dict(config)
     if constraints.get("max_gross_exposure",1) > 1:
         raise ValueError("REPLAY_CASH_ONLY")
-    result = optimize_target(candidates,account,dict(symbols=symbols,covariance=cov,
-                             expected_returns=mu,scenario_returns=returns),constraints)
+    market = dict(symbols=symbols,covariance=cov,expected_returns=mu,scenario_returns=returns)
+    if method == "black_litterman":
+        market["black_litterman"] = config.get("black_litterman")
+    result = optimize_target(candidates,account,market,constraints,as_of=as_of)
     return dict(weights=result["weights"], method=method,
                 estimation_first_date=window[0][0], estimation_last_date=window[-1][0],
                 return_observations=len(returns), modeled_variance=result["modeled_variance"],
-                risk_estimation=risk)
+                risk_estimation=risk,
+                **({"black_litterman":result["black_litterman"]} if "black_litterman" in result else {}))

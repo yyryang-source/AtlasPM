@@ -13,13 +13,14 @@ SCHEMA="atlaspm_offline_foundation_v1"
 
 def inspect(parser=None):
     from atlaspm.cli import build_parser
-    from atlaspm.commands import broker_cli,quant_cli,selection_cli,framework_cli
+    from atlaspm.commands import broker_cli,quant_cli,selection_cli,framework_cli,runtime_cli
     from atlaspm import __file__ as package_file
     root=Path(package_file).resolve().parent
     parser=build_parser() if parser is None else parser
     sub=[a for a in parser._actions if isinstance(a,argparse._SubParsersAction)]
     groups={"quant":set(quant_cli.COMMANDS),"broker":set(broker_cli.COMMANDS),
             "selection":set(selection_cli.COMMANDS),"framework":set(framework_cli.COMMANDS),
+            "runtime":set(runtime_cli.COMMANDS),
             "other":{"market-db","portfolio-engine","autonomous-alpha"}}
     expected=set().union(*groups.values())
     names=set(sub[0].choices) if len(sub)==1 else set()

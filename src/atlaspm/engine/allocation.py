@@ -1,4 +1,4 @@
-"""Seven research optimizers behind one hard-constraint interface.
+"""Research optimizers behind one hard-constraint interface.
 
 Reuse AtlasPM's existing covariance validator, inverse-volatility baseline,
 and mean-variance estimator. SciPy supplies constrained optimization only.
@@ -8,21 +8,121 @@ from __future__ import annotations
 
 from collections import defaultdict
 from math import sqrt
+import re
 from typing import Any, Mapping, Sequence
 
 from atlaspm.engine.mean_variance import _validate_covariance, optimize_mean_variance
 from atlaspm.engine.optimizer import inverse_volatility_weights
-from atlaspm.engine.contracts import Account, Candidate, finite
+from atlaspm.engine.contracts import Account, Candidate, finite, timestamp
 
 METHODS = frozenset({
     "equal_weight", "risk_parity", "minimum_variance", "mean_variance",
-    "cvar", "maximum_diversification", "risk_budgeting",
+    "cvar", "maximum_diversification", "risk_budgeting", "black_litterman",
 })
+
+
+def black_litterman_posterior(symbols, covariance, specification, *, as_of):
+    """Blend dated excess-return views with the equilibrium prior.
+
+    All returns/covariances are annual, views use explicit independent
+    uncertainty variances. Solve the view-space system without matrix inverses.
+    Evidence digests bind inputs, but are not an assertion of source rights or
+    of predictive validity. The caller's independent risk gate remains required.
+    Formula reference: https://pyportfolioopt.readthedocs.io/en/latest/BlackLitterman.html
+    """
+    import numpy as np
+    from atlaspm.research.training_registry import digest
+    if (not isinstance(symbols, list) or not 1 <= len(symbols) <= 100
+            or any(not isinstance(s, str) or not s for s in symbols)
+            or len(set(symbols)) != len(symbols)):
+        raise ValueError("BL_SYMBOL_SCOPE")
+    spec = specification
+    if not isinstance(spec, dict) or set(spec) != {
+            "market_weights", "risk_aversion", "tau", "risk_free_rate",
+            "available_at", "evidence_sha256", "views"}:
+        raise ValueError("BL_SPECIFICATION_REQUIRED")
+    cutoff = timestamp(as_of, "BL.as_of")
+    available = timestamp(spec["available_at"], "BL.available_at")
+    if available > cutoff:
+        raise ValueError("BL_FUTURE_PRIOR")
+    if not isinstance(spec["evidence_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", spec["evidence_sha256"]):
+        raise ValueError("BL_PRIOR_EVIDENCE_REQUIRED")
+    weights = spec["market_weights"]
+    if not isinstance(weights, dict) or set(weights) != set(symbols):
+        raise ValueError("BL_MARKET_WEIGHT_COVERAGE")
+    w = np.array([finite(weights[s], "BL.weight", minimum=0) for s in symbols])
+    if abs(float(w.sum())-1) > 1e-8:
+        raise ValueError("BL_MARKET_WEIGHTS_MUST_SUM_TO_ONE")
+    delta = finite(spec["risk_aversion"], "BL.risk_aversion", minimum=1e-6)
+    tau = finite(spec["tau"], "BL.tau", minimum=1e-9)
+    risk_free = finite(spec["risk_free_rate"], "BL.risk_free_rate")
+    if delta > 1000 or tau > 1 or not -.1 <= risk_free <= 1:
+        raise ValueError("BL_PARAMETER_RANGE")
+    cov = np.asarray(_validate_covariance(covariance, len(symbols)), dtype=float)
+    prior = delta * cov @ w
+    uncertainty = tau * cov
+    views = spec["views"]
+    if not isinstance(views, list) or len(views) > 100:
+        raise ValueError("BL_VIEW_CAPACITY")
+    pick, expected, errors, ids = [], [], [], set()
+    for view in views:
+        if not isinstance(view, dict) or set(view) != {
+                "id", "weights", "expected_excess_return", "uncertainty_variance",
+                "available_at", "expires_at", "evidence_sha256"}:
+            raise ValueError("BL_VIEW_SCHEMA")
+        name = view["id"]
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", name) or name in ids:
+            raise ValueError("BL_VIEW_ID")
+        ids.add(name)
+        if not timestamp(view["available_at"], "BL.view.available_at") <= cutoff < timestamp(view["expires_at"], "BL.view.expires_at"):
+            raise ValueError("BL_VIEW_FUTURE_OR_EXPIRED")
+        if not isinstance(view["evidence_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", view["evidence_sha256"]):
+            raise ValueError("BL_VIEW_EVIDENCE_REQUIRED")
+        mapping = view["weights"]
+        if not isinstance(mapping, dict) or not mapping or set(mapping) - set(symbols):
+            raise ValueError("BL_VIEW_SYMBOL_SCOPE")
+        row = [finite(mapping.get(s, 0), "BL.view.weight") for s in symbols]
+        positive, negative = sum(max(x, 0) for x in row), -sum(min(x, 0) for x in row)
+        # Absolute basket weights sum to one. Relative views compare two
+        # unit-notional baskets, avoiding ambiguous or levered view units.
+        if abs(positive-1) > 1e-8 or min(abs(negative), abs(negative-1)) > 1e-8:
+            raise ValueError("BL_VIEW_NOTIONAL")
+        q = finite(view["expected_excess_return"], "BL.view.return")
+        omega = finite(view["uncertainty_variance"], "BL.view.variance", minimum=1e-12)
+        if abs(q) > 10 or omega > 100:
+            raise ValueError("BL_VIEW_RANGE")
+        pick.append(row)
+        expected.append(q)
+        errors.append(omega)
+    posterior = prior.copy()
+    mean_covariance = uncertainty.copy()
+    if views:
+        p = np.asarray(pick, dtype=float)
+        cross = uncertainty @ p.T
+        system = p @ cross + np.diag(errors)
+        if not np.isfinite(system).all() or np.linalg.cond(system) > 1e12:
+            raise ValueError("BL_ILL_CONDITIONED_VIEWS")
+        try:
+            posterior += cross @ np.linalg.solve(system, np.asarray(expected)-p @ prior)
+            mean_covariance -= cross @ np.linalg.solve(system, cross.T)
+        except np.linalg.LinAlgError:
+            raise ValueError("BL_VIEW_SOLVE_FAILED") from None
+    predictive = cov + (mean_covariance+mean_covariance.T)/2
+    _validate_covariance(predictive.tolist(), len(symbols))
+    if not np.isfinite(posterior).all():
+        raise ValueError("BL_NONFINITE_POSTERIOR")
+    return {"prior_excess_returns": dict(zip(symbols, map(float, prior))),
+            "posterior_excess_returns": dict(zip(symbols, map(float, posterior))),
+            "expected_returns": dict(zip(symbols, map(float, posterior+risk_free))),
+            "covariance": predictive.tolist(), "view_ids": [v["id"] for v in views],
+            "as_of": cutoff.isoformat(), "input_sha256": digest([symbols, covariance, spec]),
+            "return_horizon": "annual", "independent_view_errors_assumed": True,
+            "source_authenticity_verified": False, "research_only": True}
 
 
 def optimize_target(candidates: Sequence[Candidate], account: Account,
                     market: Mapping[str, Any], constraints: Mapping[str, Any], *,
-                    paper: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                    paper: Mapping[str, Any] | None = None, as_of=None) -> dict[str, Any]:
     try:
         import numpy as np
         from scipy.optimize import linprog, minimize
@@ -38,6 +138,11 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     cov = np.asarray(_validate_covariance(market.get("covariance"), n), dtype=float)
     # The old covariance validator checks positive semidefiniteness.
     returns_raw = market.get("expected_returns", {})
+    bl = None
+    if method == "black_litterman":
+        bl = black_litterman_posterior(symbols, cov.tolist(), market.get("black_litterman"), as_of=as_of)
+        returns_raw = bl["expected_returns"]
+        cov = np.asarray(bl["covariance"], dtype=float)
     if not isinstance(returns_raw, dict) or set(returns_raw) != set(symbols):
         raise ValueError("EXPECTED_RETURN_COVERAGE_MISMATCH")
     mu = np.array([finite(returns_raw[s], f"mu.{s}") for s in symbols], dtype=float)
@@ -52,7 +157,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     flexible = constraints.get("allow_cash_slack", False)
     if type(flexible) is not bool:
         raise ValueError("INVALID_CASH_SLACK_POLICY")
-    if flexible and (method!="mean_variance" or account.kind!="cash"
+    if flexible and (method not in {"mean_variance", "black_litterman"} or account.kind!="cash"
                      or not account.account_id.startswith("SYN-")):
         raise ValueError("CASH_SLACK_REQUIRES_SYNTHETIC_CASH_MEAN_VARIANCE")
     lower_raw=market.get("expected_return_lower_bounds")
@@ -106,7 +211,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
     if method == "risk_parity":
         seed = inverse_volatility_weights(dict(zip(symbols, map(float, sigma))), max_weight=max(cap / target_total, 1/n))
         budget = np.array([seed[s] for s in symbols], dtype=float)
-    elif method == "mean_variance" and not flexible:
+    elif method in {"mean_variance", "black_litterman"} and not flexible:
         # Keep prior tested AtlasPM mean-variance implementation as initializer.
         seed = optimize_mean_variance(dict(zip(symbols, map(float, mu))),
                                      cov.tolist(), max_weight=max(cap / target_total, 1/n),
@@ -227,7 +332,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
             objective = lambda x: float(np.sum((x - target_total / n)**2))
         elif method == "minimum_variance":
             objective = variance
-        elif method == "mean_variance":
+        elif method in {"mean_variance", "black_litterman"}:
             gamma = finite(constraints.get("risk_aversion", 4.0), "risk_aversion", minimum=0.00001)
             # Annualize a one-way notional turnover cost on the same scale as mu.
             bps = finite(constraints.get("turnover_cost_bps", 0.), "turnover_cost_bps", minimum=0)
@@ -263,6 +368,7 @@ def optimize_target(candidates: Sequence[Candidate], account: Account,
         "method": method, "symbols": symbols,
         "weights": {s: float(w) for s, w in zip(symbols, weights)},
         "target_cash_fraction": 1-actual_total if flexible else 1-target_total, "iterations": iterations,
+        **({"black_litterman": bl} if bl is not None else {}),
         **({"cash_slack_enabled":True,"risky_exposure_limit":target_budget,
             "modeled_risky_exposure":actual_total,
             "modeled_expected_annual_return":float(mu@weights),

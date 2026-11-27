@@ -26,6 +26,15 @@ def rolling_fixture(method):
     p.update(sessions=rows,top_k=2,cash_reserve=.2,rebalance_sessions=5,
              optimizer=dict(method=method,lookback_sessions=20,max_name_weight=.7,
                             risk_budgets={"AAA":1,"BBB":1}))
+    if method == "black_litterman":
+        p["optimizer"]["black_litterman"] = {
+            "market_weights":{"AAA":.5,"BBB":.5}, "risk_aversion":4.,
+            "tau":.05, "risk_free_rate":.01,
+            "available_at":"2020-01-01T00:00:00Z", "evidence_sha256":"a"*64,
+            "views":[{"id":"fixture-relative", "weights":{"AAA":1,"BBB":-1},
+                      "expected_excess_return":.03, "uncertainty_variance":.01,
+                      "available_at":"2020-01-01T00:00:00Z",
+                      "expires_at":"2021-01-01T00:00:00Z", "evidence_sha256":"b"*64}]}
     return p
 
 
