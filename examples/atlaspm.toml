@@ -1,0 +1,38 @@
+# Credentials belong in a local .env, never in this TOML file.
+version = 1
+
+[runtime]
+cycles = 10
+interval_seconds = 5
+max_memory_mib = 1024
+max_database_mib = 1024
+max_log_mib = 4
+log_backups = 3
+
+[sources]
+sec = false
+fed = false
+documents = false
+queue = true
+
+[research]
+treasury = false
+options = false
+fred_series = []
+news_providers = []
+credit_requests = []
+institutional_requests = []
+fundamental_universe = ""
+fundamental_batch = 5
+
+[local_ai]
+enabled = false
+model = ""
+universe = ""
+batch_size = 20
+
+[paths]
+checkpoint = "local_data/runs/system.continuous.json"
+
+[providers]
+# Add explicit provider overrides, e.g. unusual_whales = false.
