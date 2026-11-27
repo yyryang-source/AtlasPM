@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from atlaspm.commands import broker_cli, quant_cli, selection_cli, portfolio_engine_cli, framework_cli
+from atlaspm.commands import broker_cli, quant_cli, selection_cli, portfolio_engine_cli, framework_cli, runtime_cli
 from atlaspm.data import market_db
 # Backward-compatible public injection point used by offline data CLI tests.
 from atlaspm.data.historical import download_yahoo_adjusted_prices
@@ -27,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     alpha = sub.add_parser("autonomous-alpha", help="Synthetic autonomous alpha research")
     alpha.add_argument("--file", required=True)
     framework_cli.register_parsers(sub)
+    runtime_cli.register_parsers(sub)
     return parser
 
 
@@ -41,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
             report = simulate(**request) if "portfolio" in request else research(**request)
         elif args.command in framework_cli.COMMANDS:
             report = framework_cli.run(args)
+        elif args.command in runtime_cli.COMMANDS:
+            report = runtime_cli.run(args)
         elif args.command == "portfolio-engine":
             report = portfolio_engine_cli.run(args)
         elif args.command == "market-db":
@@ -60,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             return 130
         if args.command == "architecture" and report["errors"]:
             return 2
+        if args.command in runtime_cli.COMMANDS:
+            return report.get("exit_code", 0)
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"AtlasPM error: {exc}", file=sys.stderr)

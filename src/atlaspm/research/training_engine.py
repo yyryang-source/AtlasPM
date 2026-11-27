@@ -41,8 +41,9 @@ def _ranks(values):
         j=i+1
         while j<len(order) and values[order[j]]==values[order[i]]:
             j+=1
-        for k in order[i:j]:
-            ranks[k]=(i+j-1)/2
+        rank = (i + j - 1) / 2
+        for position in range(i, j):
+            ranks[order[position]] = rank
         i=j
     return ranks
 

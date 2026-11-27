@@ -48,11 +48,24 @@ def annualized_sample_covariance(rows, means):
     if n < 2 or size < 1:
         raise ValueError("Sample covariance requires two observations and one asset")
     covariance = [[0.0] * size for _ in range(size)]
+    # Cache just one centered column at a time, rather than allocating an
+    # additional full return matrix. Keep the original scalar path for
+    # other numeric types, custom sequences, and malformed input.
+    cache_columns = (
+        4 <= size and n <= 10000
+        and type(rows) is list and type(means) is list
+        and all(type(mean) is float for mean in means)
+        and all(type(row) is list and len(row) == size
+                and all(type(value) is float for value in row) for row in rows)
+    )
     for i in range(size):
+        centered = [row[i] - means[i] for row in rows] if cache_columns else None
         for j in range(i, size):
-            value = TRADING_DAYS_PER_YEAR * sum(
-                (row[i] - means[i]) * (row[j] - means[j]) for row in rows
-            ) / (n - 1)
+            if centered is None:
+                products = ((row[i] - means[i]) * (row[j] - means[j]) for row in rows)
+            else:
+                products = (left * (row[j] - means[j]) for left, row in zip(centered, rows))
+            value = TRADING_DAYS_PER_YEAR * sum(products) / (n - 1)
             covariance[i][j] = covariance[j][i] = value
     return covariance
 
