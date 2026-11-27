@@ -20,7 +20,11 @@ treasury = false
 options = false
 fred_series = []
 news_providers = []
+# Each credit item is scope:identifier_type:identifier:reviewed_ticker,
+# e.g. issue:CUSIP9:<licensed CUSIP>:<reviewed ticker>.
 credit_requests = []
+# Each report item is a stable typed subject=reviewed_ticker,
+# e.g. CIK:<ten-digit issuer CIK>=<reviewed ticker>.
 institutional_requests = []
 fundamental_universe = ""
 fundamental_batch = 5

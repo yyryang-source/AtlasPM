@@ -88,8 +88,8 @@ class RuntimeSystemTests(unittest.TestCase):
         c = self.settings()
         c["sources"].update(sec=True, fed=True, documents=True, queue=False)
         c["research"].update(treasury=True, options=True, fred_series=["GDP"],
-            news_providers=["bloomberg"], credit_requests=["issuer:cusip:123456789:AAA"],
-            institutional_requests=["US:AAA=AAA"])
+            news_providers=["bloomberg"], credit_requests=["issue:CUSIP9:123456789:AAA"],
+            institutional_requests=["CIK:0000000001=AAA"])
         with patch("atlaspm.research.disclosure_monitor.poll_once", return_value={"status": "DISCOVERED"}) as poll, \
              patch("atlaspm.research.disclosure_jobs.work_once", return_value={"status": "IDLE"}) as jobs, \
              patch("atlaspm.research.alpha_sources.treasury_once", return_value=1) as treasury, \
@@ -106,8 +106,8 @@ class RuntimeSystemTests(unittest.TestCase):
         options.assert_called_once_with()
         fred.assert_called_once_with("GDP")
         self.assertEqual(news.call_args.args[:2][0], "bloomberg")
-        credit.assert_called_once_with(scope="issuer", identifier_type="cusip", identifier="123456789", symbol="AAA")
-        self.assertEqual(institutional.call_args.kwargs["subject"], "US:AAA")
+        credit.assert_called_once_with(scope="issue", identifier_type="CUSIP9", identifier="123456789", symbol="AAA")
+        self.assertEqual(institutional.call_args.kwargs["subject"], "CIK:0000000001")
         self.assertEqual(len(result["services"]), 9)
 
     def test_parent_provider_optout_closes_all_feed_routes_and_restores(self):

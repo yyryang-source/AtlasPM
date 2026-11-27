@@ -47,7 +47,11 @@ treasury = false
 options = false
 fred_series = []
 news_providers = []
+# Each credit item is scope:identifier_type:identifier:reviewed_ticker,
+# e.g. issue:CUSIP9:<licensed CUSIP>:<reviewed ticker>.
 credit_requests = []
+# Each report item is a stable typed subject=reviewed_ticker,
+# e.g. CIK:<ten-digit issuer CIK>=<reviewed ticker>.
 institutional_requests = []
 fundamental_universe = ""
 fundamental_batch = 5
@@ -116,10 +120,17 @@ def validate(value):
         fields = item.split(":")
         if len(fields) != 4 or any(not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", v) for v in fields):
             raise ValueError("CONFIG_CREDIT_REQUEST")
+        from atlaspm.research.credit_intelligence import _ID_TYPES
+        scope, kind, identifier, symbol = fields
+        pattern = _ID_TYPES.get(scope, {}).get(kind)
+        if pattern is None or not re.fullmatch(pattern, identifier) or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,15}", symbol):
+            raise ValueError("CONFIG_CREDIT_IDENTITY")
     for item in research["institutional_requests"]:
         subject, sep, symbol = item.partition("=")
         if not sep or not re.fullmatch(r"[A-Za-z0-9:._-]{1,128}", subject) or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,15}", symbol):
             raise ValueError("CONFIG_INSTITUTIONAL_REQUEST")
+        from atlaspm.research.institutional_research import _subject
+        _subject(subject)
     if not isinstance(research["fundamental_universe"], str):
         raise ValueError("CONFIG_FUNDAMENTAL_UNIVERSE")
     if research["fundamental_universe"]:
